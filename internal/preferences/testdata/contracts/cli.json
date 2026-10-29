@@ -1,0 +1,188 @@
+{
+  "schema_version": 1,
+  "provenance": "Ruby CLI.run; isolated temporary roots, no model services, no personal state",
+  "normalization": "No output normalization; fixtures avoid nondeterministic IDs/timestamps",
+  "cases": [
+    {
+      "args": [
+        "capture",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "search",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "build",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "audit",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "retire",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "maintain",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "migrate",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "install-hook",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "install-cron",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "status",
+        "--unsupported-contract-flag"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"OptionParser::InvalidOption\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "missing-command"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"LearnPreferences::CLIUsageError\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "capture",
+        "--feedback",
+        "rename this local variable to payload",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"no_work\",\"action\":\"ignored\",\"id\":null}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "args": [
+        "search",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"success\",\"rules\":[]}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "args": [
+        "build",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"no_generation\",\"action\":null,\"generation_id\":null,\"rule_id\":null,\"counts\":{}}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "args": [
+        "audit",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"failed\",\"counts\":{},\"errors\":[\"no_current_generation\"],\"duplicates\":[]}\n",
+      "stderr": "",
+      "exit": 5
+    },
+    {
+      "args": [
+        "status",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"no_generation\",\"pending_count\":0,\"last_success_local_date\":null,\"next_due\":\"due\",\"hook_installed\":false,\"cron_installed\":true,\"hook_trust\":\"unknown\",\"hook_health\":null}\n",
+      "stderr": "",
+      "exit": 0
+    },
+    {
+      "args": [
+        "maintain",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"LearnPreferences::CLIUsageError\"}\n",
+      "stderr": "",
+      "exit": 2
+    },
+    {
+      "args": [
+        "retire",
+        "--json"
+      ],
+      "stdin": "",
+      "stdout": "{\"status\":\"usage\",\"error_class\":\"LearnPreferences::CLIUsageError\"}\n",
+      "stderr": "",
+      "exit": 2
+    }
+  ]
+}

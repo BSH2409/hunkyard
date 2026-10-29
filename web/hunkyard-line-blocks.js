@@ -1,0 +1,550 @@
+// hunkyard-line-blocks.js — Line block building for markdown and code files.
+// Dependencies: window.hunkyard.commentCardHelpers.escapeHtml, window.hunkyard.codeHighlight,
+// window.hunkyard.renderers (optional)
+(function () {
+  'use strict';
+
+  // Dependencies from previously-loaded modules
+  var escapeHtml = (typeof window !== 'undefined' && window.hunkyard && window.hunkyard.commentCardHelpers)
+    ? window.hunkyard.commentCardHelpers.escapeHtml
+    : function(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); };
+  // Shiki via Pierre's shared highlighter; fence grammars are preloaded by the
+  // caller (codeHighlight.prime), otherwise fences render as plain text.
+  function codeHighlight() {
+    return (typeof window !== 'undefined' && window.hunkyard && window.hunkyard.codeHighlight) || null;
+  }
+
+  // Pluggable renderers (hunkyard-renderers.js); absent → fences render as code.
+  function renderers() {
+    return (typeof window !== 'undefined' && window.hunkyard && window.hunkyard.renderers) || null;
+  }
+
+  // GitHub's heading anchor rule (github-slugger): lowercase, drop every
+  // character except letters, marks, numbers, `_`, `-` and spaces, then turn
+  // each space into `-`. Runs of spaces or hyphens are kept, not collapsed.
+  function slugifyHeading(text) {
+    return text
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{M}\p{N}\p{Pc} -]/gu, '')
+      .replace(/ /g, '-');
+  }
+
+  // Turn valid document frontmatter into a YAML fence without shifting maps.
+  // Callers retain the original content for source line display.
+  function rewriteFrontmatterAsYamlFence(content) {
+    var lines = content.split('\n');
+    if (!/^\uFEFF?---[ \t]*\r?$/.test(lines[0])) return content;
+
+    for (var i = 1; i < lines.length; i++) {
+      if (/^(?:---|\.\.\.)[ \t]*\r?$/.test(lines[i])) {
+        lines[0] = '```yaml' + (lines[0].endsWith('\r') ? '\r' : '');
+        lines[i] = '```' + (lines[i].endsWith('\r') ? '\r' : '');
+        return lines.join('\n');
+      }
+    }
+
+    return content;
+  }
+
+  // ===== buildLineBlocks helpers =====
+
+  // Find the matching close token for an open token at openIdx.
+  function findCloseToken(tokens, openIdx) {
+    var openType = tokens[openIdx].type;
+    var closeType = openType.replace('_open', '_close');
+    var depth = 1;
+    for (var j = openIdx + 1; j < tokens.length; j++) {
+      if (tokens[j].type === openType) depth++;
+      if (tokens[j].type === closeType) { depth--; if (depth === 0) return j; }
+    }
+    return openIdx;
+  }
+
+  // Emit gap-line blocks for uncovered source lines up to (but not including) `upTo`.
+  function addGapLineBlocks(blocks, sourceLines, coveredUpTo, upTo) {
+    while (coveredUpTo < upTo) {
+      var lineText = sourceLines[coveredUpTo];
+      blocks.push({
+        startLine: coveredUpTo + 1,
+        endLine: coveredUpTo + 1,
+        html: lineText === '' ? '' : escapeHtml(lineText),
+        isEmpty: lineText.trim() === ''
+      });
+      coveredUpTo++;
+    }
+    return coveredUpTo;
+  }
+
+  // Handle a fence (code block) token — split into per-line blocks.
+  function handleFenceToken(token, blocks, sourceLines, coveredUpTo, blockStart, blockEnd) {
+    var lang = token.info.trim().split(/\s+/)[0] || '';
+
+    // Fences a pluggable renderer claims (mermaid, ...) are one block, not
+    // split per line. The source lines sit between the fence markers.
+    var rr = renderers();
+    var renderer = rr && rr.forFence(lang);
+    if (renderer) {
+      var contentLines = rr.lineCount(token.content);
+      blocks.push({
+        startLine: blockStart + 1, endLine: blockEnd,
+        html: rr.targetHTML(renderer.name, 'fence', token.content, {
+          lang: lang,
+          startLine: contentLines ? blockStart + 2 : 0,
+          endLine: blockStart + 1 + contentLines,
+        }),
+        isEmpty: false, cssClass: 'render-block'
+      });
+      return addGapLineBlocks(blocks, sourceLines, blockEnd, blockEnd);
+    }
+
+    var ch = codeHighlight();
+    var codeLines = (lang && ch && ch.lines(token.content, lang)) ||
+      token.content.replace(/\n$/, '').split('\n').map(escapeHtml);
+    if (token.content === '') codeLines = [];
+
+    // Opening fence line
+    blocks.push({
+      startLine: blockStart + 1, endLine: blockStart + 1,
+      html: '<span class="fence-marker">' + escapeHtml(sourceLines[blockStart]) + '</span>',
+      isEmpty: false, cssClass: 'code-line code-first'
+    });
+    coveredUpTo = blockStart + 1;
+
+    // Code content lines
+    for (var ci = 0; ci < codeLines.length; ci++) {
+      var ln = blockStart + 2 + ci;
+      if (ln > blockEnd) break;
+      var isLast = (ci === codeLines.length - 1 && blockEnd <= ln);
+      blocks.push({
+        startLine: ln, endLine: ln,
+        html: '<code class="hunkyard-code">' + (codeLines[ci] || '&nbsp;') + '</code>',
+        isEmpty: false, cssClass: 'code-line' + (isLast ? ' code-last' : '')
+      });
+      coveredUpTo = ln;
+    }
+
+    // Closing fence line
+    if (blockEnd > coveredUpTo) {
+      blocks.push({
+        startLine: blockEnd, endLine: blockEnd,
+        html: '<span class="fence-marker">' + escapeHtml(sourceLines[blockEnd - 1]) + '</span>',
+        isEmpty: false, cssClass: 'code-line code-last'
+      });
+      coveredUpTo = blockEnd;
+    }
+
+    coveredUpTo = addGapLineBlocks(blocks, sourceLines, coveredUpTo, blockEnd);
+    return coveredUpTo;
+  }
+
+  // Handle a list token (bullet or ordered) — split into per-item blocks.
+  function handleListToken(tokens, i, _token, md, blocks, sourceLines, coveredUpTo, blockEnd) {
+    var listCloseIdx = findCloseToken(tokens, i);
+
+    splitListInto(tokens, i, listCloseIdx, md, blocks, sourceLines, coveredUpTo, function(html) {
+      return html;
+    });
+
+    if (blocks.length > 0) {
+      coveredUpTo = Math.max(coveredUpTo, blocks[blocks.length - 1].endLine);
+    }
+
+    coveredUpTo = addGapLineBlocks(blocks, sourceLines, coveredUpTo, blockEnd);
+    return { nextIndex: listCloseIdx + 1, coveredUpTo: coveredUpTo };
+  }
+
+  // Recursively split a list into blocks.
+  function splitListInto(tokens, listOpenIdx, listCloseIdx, md, blocks, sourceLines, coveredUpTo, wrap) {
+    var listOpen = tokens[listOpenIdx];
+    var listTag = listOpen.type === 'bullet_list_open' ? 'ul' : 'ol';
+    var j = listOpenIdx + 1;
+
+    while (j < listCloseIdx) {
+      if (tokens[j].type !== 'list_item_open') { j++; continue; }
+      var itemOpenIdx = j;
+      var itemCloseIdx = findCloseToken(tokens, j);
+      var itemMap = tokens[itemOpenIdx].map;
+
+      if (!itemMap) { j = itemCloseIdx + 1; continue; }
+
+      addGapLineBlocks(blocks, sourceLines, coveredUpTo, itemMap[0]);
+      coveredUpTo = itemMap[0];
+
+      var nestedRanges = findDirectNestedLists(tokens, itemOpenIdx, itemCloseIdx);
+
+      var itemStartAttr = (listTag === 'ol' && tokens[itemOpenIdx].info)
+        ? ' start="' + tokens[itemOpenIdx].info + '"'
+        : '';
+
+      var firstNested = nestedRanges.length > 0 ? nestedRanges[0] : null;
+      var leadEndTokenIdx = firstNested ? firstNested.openIdx : itemCloseIdx;
+
+      var leadStartLine = itemMap[0] + 1;
+      var leadEndLine;
+      if (firstNested) {
+        var nestedFirstMap = tokens[firstNested.openIdx].map;
+        leadEndLine = nestedFirstMap ? nestedFirstMap[0] : itemMap[1];
+      } else {
+        leadEndLine = itemMap[1];
+        while (leadEndLine > leadStartLine && sourceLines[leadEndLine - 1].trim() === '') {
+          leadEndLine--;
+        }
+      }
+
+      var leadInnerTokens = tokens.slice(itemOpenIdx + 1, leadEndTokenIdx);
+      var leadInnerHtml = md.renderer.render(leadInnerTokens, md.options, {});
+      var leadLiClass = tokens[itemOpenIdx].attrGet && tokens[itemOpenIdx].attrGet('class');
+      var leadLiAttr = leadLiClass ? ' class="' + escapeAttr(leadLiClass) + '"' : '';
+      var leadInnerWrapped = '<' + listTag + itemStartAttr + '>' +
+        '<li' + leadLiAttr + '>' + leadInnerHtml + '</li>' +
+        '</' + listTag + '>';
+
+      if (leadEndLine > leadStartLine - 1) {
+        blocks.push({
+          startLine: leadStartLine,
+          endLine: leadEndLine,
+          html: wrap(leadInnerWrapped),
+          isEmpty: false
+        });
+        coveredUpTo = leadEndLine;
+      }
+
+      for (var n = 0; n < nestedRanges.length; n++) {
+        var nested = nestedRanges[n];
+        var childWrap = (function(outerWrap, outerListTag) {
+          return function(innerHtml) {
+            return outerWrap(
+              '<' + outerListTag + ' class="hunkyard-list-wrapper">' +
+              '<li class="hunkyard-list-wrapper">' + innerHtml + '</li>' +
+              '</' + outerListTag + '>'
+            );
+          };
+        })(wrap, listTag);
+        coveredUpTo = splitListInto(tokens, nested.openIdx, nested.closeIdx, md, blocks, sourceLines, coveredUpTo, childWrap);
+      }
+
+      if (nestedRanges.length > 0) {
+        var lastNested = nestedRanges[nestedRanges.length - 1];
+        var trailStartTokenIdx = lastNested.closeIdx + 1;
+        if (trailStartTokenIdx < itemCloseIdx) {
+          var trailStartLine = coveredUpTo;
+          var trailEndLine = itemMap[1];
+          while (trailEndLine > trailStartLine && sourceLines[trailEndLine - 1].trim() === '') {
+            trailEndLine--;
+          }
+          if (trailEndLine > trailStartLine) {
+            var trailInnerTokens = tokens.slice(trailStartTokenIdx, itemCloseIdx);
+            var trailInnerHtml = md.renderer.render(trailInnerTokens, md.options, {});
+            var trailWrapped = '<' + listTag + '>' +
+              '<li>' + trailInnerHtml + '</li>' +
+              '</' + listTag + '>';
+            blocks.push({
+              startLine: trailStartLine + 1,
+              endLine: trailEndLine,
+              html: wrap(trailWrapped),
+              isEmpty: false
+            });
+            coveredUpTo = trailEndLine;
+          }
+        }
+      }
+
+      j = itemCloseIdx + 1;
+    }
+
+    return coveredUpTo;
+  }
+
+  // Find direct-child nested lists within an item.
+  function findDirectNestedLists(tokens, itemOpenIdx, itemCloseIdx) {
+    var result = [];
+    var depth = 0;
+    for (var k = itemOpenIdx + 1; k < itemCloseIdx; k++) {
+      var t = tokens[k];
+      if (t.nesting === 1) {
+        if (depth === 0 && (t.type === 'bullet_list_open' || t.type === 'ordered_list_open')) {
+          var closeIdx = findCloseToken(tokens, k);
+          result.push({ openIdx: k, closeIdx: closeIdx });
+          k = closeIdx;
+          continue;
+        }
+        depth++;
+      } else if (t.nesting === -1) {
+        if (depth > 0) depth--;
+      }
+    }
+    return result;
+  }
+
+  function escapeAttr(s) {
+    return String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;');
+  }
+
+  function inlineVisibleLength(token) {
+    if (!token.children || token.children.length === 0) {
+      return Array.from(token.content || '').length;
+    }
+
+    return token.children.reduce(function(length, child) {
+      if (child.nesting !== 0) return length;
+      var content = child.content || '';
+      if (child.type === 'html_inline') content = content.replace(/<[^>]*>/g, '');
+      return length + Array.from(content).length;
+    }, 0);
+  }
+
+  // Rendered diffs still place each source row in an independent line block.
+  // Give those fallback tables one shared colgroup so their columns align.
+  function buildTableColgroup(tokens, startIdx, endIdx) {
+    var preferredWidths = [];
+    var alignments = [];
+    var columnIndex = 0;
+
+    for (var j = startIdx + 1; j < endIdx; j++) {
+      var token = tokens[j];
+      if (token.type === 'tr_open') {
+        columnIndex = 0;
+      } else if (token.type === 'th_open' || token.type === 'td_open') {
+        var contentLength = 0;
+        for (var k = j + 1; k < endIdx &&
+             tokens[k].type !== 'th_close' && tokens[k].type !== 'td_close'; k++) {
+          if (tokens[k].type === 'inline') contentLength += inlineVisibleLength(tokens[k]);
+        }
+        preferredWidths[columnIndex] = Math.max(preferredWidths[columnIndex] || 0, contentLength);
+        if (token.type === 'th_open') alignments[columnIndex] = token.attrGet('style') || '';
+        columnIndex++;
+      }
+    }
+
+    if (!preferredWidths.length) return '';
+    var weights = preferredWidths.map(function(length) { return Math.max(4, Math.min(48, length)); });
+    var totalWeight = weights.reduce(function(total, weight) { return total + weight; }, 0);
+
+    return '<colgroup>' + weights.map(function(weight, index) {
+      var alignment = alignments[index] || '';
+      if (alignment && alignment.slice(-1) !== ';') alignment += ';';
+      return '<col style="' + escapeAttr(alignment) + 'width:' +
+        (weight / totalWeight * 100).toFixed(2) + '%">';
+    }).join('') + '</colgroup>';
+  }
+
+  // Keep source rows as independently commentable blocks, but mark them as one
+  // table so the DOM renderer can place every row in the same native table.
+  function handleTableToken(tokens, i, md, blocks, sourceLines, coveredUpTo, blockEnd) {
+    var tableCloseIdx = findCloseToken(tokens, i);
+    var tableMap = tokens[i].map;
+    var tableId = 'table-' + (tableMap ? tableMap[0] : i);
+    var fallbackColgroup = buildTableColgroup(tokens, i, tableCloseIdx);
+
+    var j = i + 1;
+    var inThead = false;
+    var rowIndex = 0;
+    var bodyRowIndex = 0;
+
+    while (j < tableCloseIdx) {
+      if (tokens[j].type === 'thead_open') { inThead = true; j++; continue; }
+      if (tokens[j].type === 'thead_close') { inThead = false; j++; continue; }
+      if (tokens[j].type === 'tbody_open' || tokens[j].type === 'tbody_close') { j++; continue; }
+
+      if (tokens[j].type === 'tr_open') {
+        var trCloseIdx = findCloseToken(tokens, j);
+        var trMap = tokens[j].map;
+
+        if (trMap) {
+          for (var ln = coveredUpTo; ln < trMap[0]; ln++) {
+            var lineText = sourceLines[ln].trim();
+            if (/^\|[\s\-:|]+\|$/.test(lineText) || /^[-:|][\s\-:|]*$/.test(lineText)) {
+              blocks.push({ startLine: ln + 1, endLine: ln + 1, html: '', isEmpty: false, cssClass: 'table-separator', tableId: tableId, tableSection: 'tbody' });
+            } else {
+              blocks.push({ startLine: ln + 1, endLine: ln + 1, html: lineText === '' ? '' : escapeHtml(lineText), isEmpty: lineText === '' });
+            }
+          }
+
+          var trTokens = tokens.slice(j, trCloseIdx + 1);
+          var section = inThead ? 'thead' : 'tbody';
+          var nativeRowHtml = md.renderer.render(trTokens, md.options, {});
+          var rowHtml = '<table class="split-table" data-table-id="' + escapeAttr(tableId) + '">' +
+            fallbackColgroup + '<' + section + '>' +
+            nativeRowHtml + '</' + section + '></table>';
+
+          var cls = 'table-row';
+          if (rowIndex === 0) cls += ' table-first';
+          if (!inThead && bodyRowIndex % 2 === 1) cls += ' table-even';
+          blocks.push({
+            startLine: trMap[0] + 1, endLine: trMap[1],
+            html: rowHtml, nativeRowHtml: nativeRowHtml,
+            isEmpty: false, cssClass: cls,
+            tableId: tableId, tableSection: section
+          });
+          coveredUpTo = trMap[1];
+          rowIndex++;
+          if (!inThead) bodyRowIndex++;
+        }
+        j = trCloseIdx + 1;
+      } else {
+        j++;
+      }
+    }
+
+    // Mark the last table row
+    if (blocks.length > 0 && blocks[blocks.length - 1].cssClass &&
+        blocks[blocks.length - 1].cssClass.indexOf('table-row') !== -1) {
+      blocks[blocks.length - 1].cssClass += ' table-last';
+    }
+
+    coveredUpTo = addGapLineBlocks(blocks, sourceLines, coveredUpTo, blockEnd);
+    return { nextIndex: tableCloseIdx + 1, coveredUpTo: coveredUpTo };
+  }
+
+  // Lines between a blockquote's children. A bare `>` line inside an alert
+  // renders as an empty alert piece so the alert's border stays unbroken.
+  function addQuoteGapBlocks(openToken, wrapTokens, md, blocks, sourceLines, coveredUpTo, upTo) {
+    var alert = openToken.meta && openToken.meta.alert;
+    for (; coveredUpTo < upTo; coveredUpTo++) {
+      if (alert && /^\s*>\s*$/.test(sourceLines[coveredUpTo])) {
+        blocks.push({
+          startLine: coveredUpTo + 1, endLine: coveredUpTo + 1,
+          html: md.renderer.render(wrapTokens, md.options, { gfmAlertContinued: true }),
+          isEmpty: false
+        });
+      } else {
+        addGapLineBlocks(blocks, sourceLines, coveredUpTo, coveredUpTo + 1);
+      }
+    }
+  }
+
+  // Handle a blockquote token — split into child blocks. Each child is wrapped
+  // by rendering the blockquote's own open/close tokens, so a GFM alert
+  // (hunkyard-gfm.js) keeps its markup; only the first child shows its title.
+  function handleBlockquoteToken(tokens, i, md, blocks, sourceLines, coveredUpTo, blockStart, blockEnd) {
+    var bqCloseIdx = findCloseToken(tokens, i);
+    var wrapTokens = [tokens[i], tokens[bqCloseIdx]];
+    var j = i + 1;
+    var hasChildren = false;
+
+    while (j < bqCloseIdx) {
+      if (tokens[j].nesting === -1 || !tokens[j].map) { j++; continue; }
+      var childMap = tokens[j].map;
+      var childCloseIdx = j;
+      if (tokens[j].nesting === 1) childCloseIdx = findCloseToken(tokens, j);
+      addQuoteGapBlocks(tokens[i], wrapTokens, md, blocks, sourceLines, coveredUpTo, childMap[0]);
+      var childTokens = tokens.slice(j, childCloseIdx + 1);
+      var childHtml = md.renderer.render(
+        [wrapTokens[0]].concat(childTokens, [wrapTokens[1]]), md.options, { gfmAlertContinued: hasChildren });
+      blocks.push({
+        startLine: childMap[0] + 1, endLine: childMap[1],
+        html: childHtml, isEmpty: false
+      });
+      coveredUpTo = childMap[1];
+      hasChildren = true;
+      j = childCloseIdx + 1;
+    }
+
+    if (!hasChildren) {
+      var bqTokens = tokens.slice(i, bqCloseIdx + 1);
+      blocks.push({
+        startLine: blockStart + 1, endLine: blockEnd,
+        html: md.renderer.render(bqTokens, md.options, {}),
+        isEmpty: false
+      });
+      coveredUpTo = blockEnd;
+    }
+
+    coveredUpTo = addGapLineBlocks(blocks, sourceLines, coveredUpTo, blockEnd);
+    return { nextIndex: bqCloseIdx + 1, coveredUpTo: coveredUpTo };
+  }
+
+  // ===== buildLineBlocks =====
+  // Parses markdown tokens into a flat array of commentable line blocks.
+  function buildLineBlocks(tokens, md, content) {
+    var sourceLines = content.split('\n');
+    var totalLines = sourceLines.length;
+    var blocks = [];
+    var coveredUpTo = 0;
+
+    var i = 0;
+    while (i < tokens.length) {
+      var token = tokens[i];
+      if (token.hidden || !token.map) { i++; continue; }
+
+      var blockStart = token.map[0];
+      var blockEnd = token.map[1];
+
+      coveredUpTo = addGapLineBlocks(blocks, sourceLines, coveredUpTo, blockStart);
+
+      // Code blocks (fence): split into per-line blocks
+      if (token.type === 'fence') {
+        coveredUpTo = handleFenceToken(token, blocks, sourceLines, coveredUpTo, blockStart, blockEnd);
+        i++;
+        continue;
+      }
+
+      // Lists: split into per-item blocks
+      if (token.type === 'bullet_list_open' || token.type === 'ordered_list_open') {
+        var listResult = handleListToken(tokens, i, token, md, blocks, sourceLines, coveredUpTo, blockEnd);
+        i = listResult.nextIndex;
+        coveredUpTo = listResult.coveredUpTo;
+        continue;
+      }
+
+      // Tables: split into per-row blocks
+      if (token.type === 'table_open') {
+        var tableResult = handleTableToken(tokens, i, md, blocks, sourceLines, coveredUpTo, blockEnd);
+        i = tableResult.nextIndex;
+        coveredUpTo = tableResult.coveredUpTo;
+        continue;
+      }
+
+      // Blockquotes: split into child blocks
+      if (token.type === 'blockquote_open') {
+        var bqResult = handleBlockquoteToken(tokens, i, md, blocks, sourceLines, coveredUpTo, blockStart, blockEnd);
+        i = bqResult.nextIndex;
+        coveredUpTo = bqResult.coveredUpTo;
+        continue;
+      }
+
+      // Default: render as single block
+      var closeIdx = i;
+      if (token.nesting === 1) closeIdx = findCloseToken(tokens, i);
+
+      var blockTokens = tokens.slice(i, closeIdx + 1);
+      var html;
+      try {
+        html = md.renderer.render(blockTokens, md.options, {});
+      } catch (e) {
+        html = escapeHtml(blockTokens.map(function(t) { return t.content || ''; }).join(''));
+      }
+
+      blocks.push({
+        startLine: blockStart + 1, endLine: blockEnd,
+        html: html, isEmpty: false
+      });
+
+      i = closeIdx + 1;
+      coveredUpTo = blockEnd;
+    }
+
+    addGapLineBlocks(blocks, sourceLines, coveredUpTo, totalLines);
+    return blocks;
+  }
+
+  var api = {
+    rewriteFrontmatterAsYamlFence: rewriteFrontmatterAsYamlFence,
+    buildLineBlocks: buildLineBlocks,
+    findCloseToken: findCloseToken,
+    addGapLineBlocks: addGapLineBlocks,
+    handleFenceToken: handleFenceToken,
+    handleListToken: handleListToken,
+    handleTableToken: handleTableToken,
+    handleBlockquoteToken: handleBlockquoteToken,
+    slugifyHeading: slugifyHeading
+  };
+  if (typeof window !== 'undefined') {
+    window.hunkyard = window.hunkyard || {};
+    window.hunkyard.lineBlocks = api;
+  }
+  if (typeof module === 'object' && module.exports) {
+    module.exports = api;
+  }
+})();

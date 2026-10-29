@@ -1,0 +1,2011 @@
+package daemon
+
+import (
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
+	"sync"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/BSH2409/hunkyard/internal/testutil"
+)
+
+func TestSessionKey_Deterministic(t *testing.T) {
+	k1 := SessionKey("/tmp/repo", "main", []string{"plan.md"})
+	k2 := SessionKey("/tmp/repo", "main", []string{"plan.md"})
+	if k1 != k2 {
+		t.Errorf("same inputs produced different keys: %s vs %s", k1, k2)
+	}
+}
+
+func TestSessionKey_DifferentArgs(t *testing.T) {
+	k1 := SessionKey("/tmp/repo", "main", nil)
+	k2 := SessionKey("/tmp/repo", "main", []string{"plan.md"})
+	if k1 == k2 {
+		t.Errorf("different args produced same key: %s", k1)
+	}
+}
+
+func TestSessionKey_SortedArgs(t *testing.T) {
+	k1 := SessionKey("/tmp/repo", "main", []string{"a.md", "b.md"})
+	k2 := SessionKey("/tmp/repo", "main", []string{"b.md", "a.md"})
+	if k1 != k2 {
+		t.Errorf("arg order should not matter: %s vs %s", k1, k2)
+	}
+}
+
+func TestSessionKey_DifferentCWD(t *testing.T) {
+	k1 := SessionKey("/tmp/repo1", "main", nil)
+	k2 := SessionKey("/tmp/repo2", "main", nil)
+	if k1 == k2 {
+		t.Errorf("different CWDs produced same key: %s", k1)
+	}
+}
+
+func TestSessionKey_NilVsEmpty(t *testing.T) {
+	k1 := SessionKey("/tmp/repo", "main", nil)
+	k2 := SessionKey("/tmp/repo", "main", []string{})
+	if k1 != k2 {
+		t.Errorf("nil and empty args should produce same key: %s vs %s", k1, k2)
+	}
+}
+
+func TestSessionKey_FileMode_BranchIndependent(t *testing.T) {
+	k1 := SessionKey("/tmp/repo", "main", []string{"plan.md"})
+	k2 := SessionKey("/tmp/repo", "feature-x", []string{"plan.md"})
+	if k1 != k2 {
+		t.Errorf("file-mode key should be branch-independent: %s vs %s", k1, k2)
+	}
+}
+
+func TestSessionKey_GitMode_BranchDependent(t *testing.T) {
+	k1 := SessionKey("/tmp/repo", "main", nil)
+	k2 := SessionKey("/tmp/repo", "feature-x", nil)
+	if k1 == k2 {
+		t.Errorf("git-mode key should differ by branch: %s", k1)
+	}
+}
+
+func TestSessionKey_Length(t *testing.T) {
+	k := SessionKey("/tmp/repo", "main", nil)
+	if len(k) != 12 {
+		t.Errorf("expected key length 12, got %d: %s", len(k), k)
+	}
+}
+
+func TestValidSessionKey(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"839f3b4cd5d6", true},
+		{"ABCDEF123456", false},
+		{"839f3b4cd5d", false},
+		{"839f3b4cd5d6x", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := ValidSessionKey(tc.key); got != tc.want {
+			t.Errorf("ValidSessionKey(%q) = %v, want %v", tc.key, got, tc.want)
+		}
+	}
+}
+
+func TestInvalidSessionIDError(t *testing.T) {
+	err := InvalidSessionIDError("not-valid")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	got := err.Error()
+	for _, want := range []string{`invalid session ID "not-valid"`, "expected 12-character hex"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("error = %q, want substring %q", got, want)
+		}
+	}
+}
+
+func TestSessionEntry_DisplayHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want string
+	}{
+		{"", "localhost"},
+		{"127.0.0.1", "localhost"},
+		{"0.0.0.0", "localhost"},
+		{"::", "localhost"},
+		{"192.168.1.10", "192.168.1.10"},
+	}
+	for _, tt := range tests {
+		e := SessionEntry{Host: tt.host, Port: 3000}
+		if got := e.DisplayHost(); got != tt.want {
+			t.Errorf("displayHost(%q) = %q, want %q", tt.host, got, tt.want)
+		}
+	}
+}
+
+func TestSessionEntry_BaseURL(t *testing.T) {
+	tests := []struct {
+		host      string
+		port      int
+		publicURL string
+		want      string
+	}{
+		{"", 3000, "", "http://localhost:3000"},
+		{"127.0.0.1", 4567, "", "http://localhost:4567"},
+		{"0.0.0.0", 8080, "", "http://localhost:8080"},
+		{"::", 8080, "", "http://localhost:8080"},
+		{"192.168.1.10", 3000, "", "http://192.168.1.10:3000"},
+		{"127.0.0.1", 4567, "https://mymac.ts.net", "https://mymac.ts.net"},
+		{"127.0.0.1", 4567, "https://mymac.ts.net/design", "https://mymac.ts.net/design"},
+	}
+	for _, tt := range tests {
+		e := SessionEntry{Host: tt.host, Port: tt.port, PublicURL: tt.publicURL}
+		if got := e.BaseURL(); got != tt.want {
+			t.Errorf("baseURL(host=%q, port=%d, publicURL=%q) = %q, want %q", tt.host, tt.port, tt.publicURL, got, tt.want)
+		}
+	}
+}
+
+func TestAdvertisedURL(t *testing.T) {
+	tests := []struct {
+		publicURL  string
+		listenHost string
+		port       int
+		path       string
+		want       string
+	}{
+		{"", "127.0.0.1", 3000, "", "http://localhost:3000"},
+		{"", "127.0.0.1", 3000, "/live", "http://localhost:3000/live"},
+		{"https://mymac.ts.net", "127.0.0.1", 3000, "", "https://mymac.ts.net"},
+		{"https://mymac.ts.net/design", "127.0.0.1", 3000, "/live", "https://mymac.ts.net/design/live"},
+		{"https://mymac.ts.net", "127.0.0.1", 3000, "live", "https://mymac.ts.net/live"},
+		{"", "127.0.0.1", 3000, "live", "http://localhost:3000/live"},
+	}
+	for _, tt := range tests {
+		if got := AdvertisedURL(tt.publicURL, tt.listenHost, tt.port, tt.path); got != tt.want {
+			t.Errorf("AdvertisedURL(%q, %q, %d, %q) = %q, want %q", tt.publicURL, tt.listenHost, tt.port, tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestSessionEntry_ConnURL(t *testing.T) {
+	tests := []struct {
+		host string
+		port int
+		want string
+	}{
+		{"", 3000, "http://127.0.0.1:3000"},
+		{"127.0.0.1", 4567, "http://127.0.0.1:4567"},
+		{"0.0.0.0", 8080, "http://127.0.0.1:8080"},
+		{"::", 8080, "http://[::1]:8080"},
+		{"::1", 8080, "http://[::1]:8080"},
+		{"192.168.1.10", 3000, "http://192.168.1.10:3000"},
+	}
+	for _, tt := range tests {
+		e := SessionEntry{Host: tt.host, Port: tt.port}
+		if got := e.ConnURL(); got != tt.want {
+			t.Errorf("connURL(host=%q, port=%d) = %q, want %q", tt.host, tt.port, got, tt.want)
+		}
+	}
+}
+
+func TestSessionFileRoundTrip(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	key := "test123abc00"
+	want := SessionEntry{
+		PID:       12345,
+		Port:      3456,
+		CWD:       "/tmp/repo",
+		Args:      []string{"plan.md"},
+		StartedAt: "2026-03-20T12:00:00Z",
+	}
+	if err := WriteSessionFile(key, want); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+
+	got, err := ReadSessionFile(key)
+	if err != nil {
+		t.Fatalf("ReadSessionFile: %v", err)
+	}
+	if got.PID != want.PID || got.Port != want.Port || got.CWD != want.CWD {
+		t.Errorf("got %+v, want %+v", got, want)
+	}
+	if len(got.Args) != 1 || got.Args[0] != "plan.md" {
+		t.Errorf("args mismatch: got %v, want [plan.md]", got.Args)
+	}
+
+	// Verify file exists in correct location
+	sessDir := filepath.Join(home, ".hunkyard", "sessions")
+	if _, err := os.Stat(filepath.Join(sessDir, key+".json")); err != nil {
+		t.Errorf("session file not found: %v", err)
+	}
+
+	// Remove and verify
+	RemoveSessionFile(key)
+	if _, err := os.Stat(filepath.Join(sessDir, key+".json")); !os.IsNotExist(err) {
+		t.Error("session file not removed")
+	}
+}
+
+func TestSessionFileRoundTrip_NoArgs(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	key := "noargs123456"
+	want := SessionEntry{
+		PID:       99999,
+		Port:      5678,
+		CWD:       "/tmp/repo",
+		StartedAt: "2026-03-20T12:00:00Z",
+	}
+	if err := WriteSessionFile(key, want); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+
+	got, err := ReadSessionFile(key)
+	if err != nil {
+		t.Fatalf("ReadSessionFile: %v", err)
+	}
+	if got.Args != nil {
+		t.Errorf("expected nil args for no-arg session, got %v", got.Args)
+	}
+}
+
+func TestReadSessionFileMissing(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	_, err := ReadSessionFile("nonexistent")
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestWriteSessionFile_Atomic(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	key := "atomictest1234"
+	entry := SessionEntry{
+		PID:       42,
+		Port:      8080,
+		CWD:       "/tmp/repo",
+		StartedAt: "2026-03-20T12:00:00Z",
+	}
+
+	// Write session file
+	if err := WriteSessionFile(key, entry); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+
+	// Verify the file contains valid JSON
+	path, _ := sessionFilePath(key)
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("reading session file: %v", err)
+	}
+	var got SessionEntry
+	if err := json.Unmarshal(data, &got); err != nil {
+		t.Fatalf("session file contains invalid JSON: %v", err)
+	}
+	if got.PID != entry.PID || got.Port != entry.Port || got.CWD != entry.CWD {
+		t.Errorf("got %+v, want %+v", got, entry)
+	}
+
+	// Verify no temp files are left behind
+	sessDir := filepath.Join(home, ".hunkyard", "sessions")
+	entries, _ := os.ReadDir(sessDir)
+	for _, de := range entries {
+		if strings.HasSuffix(de.Name(), ".tmp") {
+			t.Errorf("temp file left behind: %s", de.Name())
+		}
+	}
+
+	// Overwrite and verify the new content is correct
+	entry2 := SessionEntry{
+		PID:       99,
+		Port:      9090,
+		CWD:       "/tmp/repo2",
+		StartedAt: "2026-03-21T12:00:00Z",
+	}
+	if err := WriteSessionFile(key, entry2); err != nil {
+		t.Fatalf("WriteSessionFile overwrite: %v", err)
+	}
+	got2, err := ReadSessionFile(key)
+	if err != nil {
+		t.Fatalf("ReadSessionFile after overwrite: %v", err)
+	}
+	if got2.PID != entry2.PID || got2.Port != entry2.Port || got2.CWD != entry2.CWD {
+		t.Errorf("after overwrite: got %+v, want %+v", got2, entry2)
+	}
+}
+
+func TestAcquireSessionLock_FlockBased(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	key := "locktest123456"
+
+	// Acquire lock
+	lock, err := acquireSessionLock(key)
+	if err != nil {
+		t.Fatalf("acquireSessionLock: %v", err)
+	}
+
+	// Verify lock file exists
+	sessDir := filepath.Join(home, ".hunkyard", "sessions")
+	lockPath := filepath.Join(sessDir, key+".lock")
+	if _, err := os.Stat(lockPath); err != nil {
+		t.Errorf("lock file not found: %v", err)
+	}
+
+	// Release lock
+	releaseSessionLock(lock)
+
+	// Verify lock file is cleaned up
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("lock file not removed after release")
+	}
+}
+
+func TestAcquireSessionLock_ReopensAFileDeletedWhileWaiting(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot delete a lock file that another process has open")
+	}
+	testutil.SetHome(t, t.TempDir())
+	key := "locktest123456"
+	first, err := acquireSessionLock(key)
+	if err != nil {
+		t.Fatalf("acquireSessionLock: %v", err)
+	}
+
+	got := make(chan *os.File, 1)
+	go func() {
+		f, err := acquireSessionLock(key)
+		if err != nil {
+			t.Errorf("waiting acquireSessionLock: %v", err)
+		}
+		got <- f
+	}()
+	time.Sleep(150 * time.Millisecond) // let the waiter open the file that is about to go
+	releaseSessionLock(first)
+
+	select {
+	case f := <-got:
+		if f == nil {
+			return
+		}
+		defer releaseSessionLock(f)
+		if !isFileAt(f, f.Name()) {
+			t.Error("the waiter holds the deleted lock file instead of the one at the path")
+		}
+	case <-time.After(10 * time.Second):
+		t.Fatal("the waiter never got the lock")
+	}
+}
+
+func TestCleanOrphanedSessions_KeepsAHeldSessionLock(t *testing.T) {
+	testutil.SetHome(t, t.TempDir())
+	key := "deadsession123"
+	if err := WriteSessionFile(key, SessionEntry{PID: 999999, Port: 1}); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+	lock, err := acquireSessionLock(key)
+	if err != nil {
+		t.Fatalf("acquireSessionLock: %v", err)
+	}
+	t.Cleanup(func() { releaseSessionLock(lock) })
+
+	cleanOrphanedSessions()
+
+	if !isFileAt(lock, lock.Name()) {
+		t.Error("the dead session's cleanup deleted a session lock that a starting client holds")
+	}
+}
+
+func TestRemoveSessionFile_KeepsAHeldSessionLock(t *testing.T) {
+	testutil.SetHome(t, t.TempDir())
+	key := "startsession123"
+	lock, err := acquireSessionLock(key)
+	if err != nil {
+		t.Fatalf("acquireSessionLock: %v", err)
+	}
+	t.Cleanup(func() { releaseSessionLock(lock) })
+
+	// StartDaemonInDir calls RemoveSessionFile while holding this lock.
+	RemoveSessionFile(key)
+	if !isFileAt(lock, lock.Name()) {
+		t.Fatal("startup removed its own held session lock")
+	}
+}
+
+func TestRemoveOpenedLockIfFree_KeepsReplacement(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows cannot delete a lock file that another process has open")
+	}
+	testutil.SetHome(t, t.TempDir())
+	key := "replacedlock123"
+	first, err := acquireSessionLock(key)
+	if err != nil {
+		t.Fatalf("acquireSessionLock: %v", err)
+	}
+	oldFile, err := os.OpenFile(first.Name(), os.O_WRONLY, 0)
+	if err != nil {
+		releaseSessionLock(first)
+		t.Fatalf("open old lock: %v", err)
+	}
+	releaseSessionLock(first)
+	replacement, err := acquireSessionLock(key)
+	if err != nil {
+		oldFile.Close()
+		t.Fatalf("acquire replacement lock: %v", err)
+	}
+	t.Cleanup(func() { releaseSessionLock(replacement) })
+
+	removeOpenedLockIfFree(oldFile, replacement.Name())
+	if !isFileAt(replacement, replacement.Name()) {
+		t.Fatal("orphan cleanup removed a replacement session lock")
+	}
+}
+
+func TestIsFileAt_ClosedLock(t *testing.T) {
+	testutil.SetHome(t, t.TempDir())
+	lock, err := acquireSessionLock("closedlock123")
+	if err != nil {
+		t.Fatalf("acquireSessionLock: %v", err)
+	}
+	releaseSessionLock(lock)
+	if isFileAt(lock, lock.Name()) {
+		t.Fatal("closed lock file cannot still protect its path")
+	}
+}
+
+func TestIsDaemonAlive_NoPID(t *testing.T) {
+	if isDaemonAlive(SessionEntry{PID: 0, Port: 9999}) {
+		t.Error("PID 0 should not be alive")
+	}
+}
+
+func TestFindAliveSession_Stale(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	// Write a session file with a PID that doesn't exist
+	key := "staletest1234"
+	WriteSessionFile(key, SessionEntry{PID: 999999999, Port: 12345, CWD: "/tmp"})
+
+	_, alive := FindAliveSession(key)
+	if alive {
+		t.Error("stale session should not be alive")
+	}
+
+	// Verify stale file was cleaned up
+	path, _ := sessionFilePath(key)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("stale session file should have been cleaned up")
+	}
+}
+
+func TestListSessionsForCWD_FiltersAndCleans(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	cwd := "/tmp/myrepo"
+
+	// Write sessions: one for our cwd, one for different cwd
+	WriteSessionFile("session1", SessionEntry{PID: 999999999, Port: 1111, CWD: cwd})
+	WriteSessionFile("session2", SessionEntry{PID: 999999998, Port: 2222, CWD: "/other/repo"})
+	WriteSessionFile("session3", SessionEntry{PID: 999999997, Port: 3333, CWD: cwd})
+
+	// All PIDs are dead, so all matching sessions should be cleaned up
+	entries, keys := listSessionsForCWD(cwd)
+	if len(entries) != 0 {
+		t.Errorf("expected 0 alive sessions, got %d", len(entries))
+	}
+	if len(keys) != 0 {
+		t.Errorf("expected 0 keys, got %d", len(keys))
+	}
+
+	// Verify stale sessions for our cwd were cleaned up
+	sessDir := filepath.Join(home, ".hunkyard", "sessions")
+	if _, err := os.Stat(filepath.Join(sessDir, "session1.json")); !os.IsNotExist(err) {
+		t.Error("stale session1 should have been cleaned up")
+	}
+	if _, err := os.Stat(filepath.Join(sessDir, "session3.json")); !os.IsNotExist(err) {
+		t.Error("stale session3 should have been cleaned up")
+	}
+	// Different cwd session should not be touched
+	if _, err := os.Stat(filepath.Join(sessDir, "session2.json")); err != nil {
+		t.Error("session2 (different cwd) should not have been cleaned up")
+	}
+}
+
+func TestDaemonHasBrowser(t *testing.T) {
+	tests := []struct {
+		name    string
+		handler http.HandlerFunc
+		want    bool
+	}{
+		{
+			name: "returns true when browser_clients is true",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"status": "ok", "browser_clients": true})
+			},
+			want: true,
+		},
+		{
+			name: "returns false when browser_clients is false",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"status": "ok", "browser_clients": false})
+			},
+			want: false,
+		},
+		{
+			name: "returns true when browser_clients is null (older daemon)",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				// Encode a struct where BrowserClients is a nil pointer -> JSON null
+				type resp struct {
+					Status         string `json:"status"`
+					BrowserClients *bool  `json:"browser_clients"`
+				}
+				json.NewEncoder(w).Encode(resp{Status: "ok", BrowserClients: nil})
+			},
+			want: true,
+		},
+		{
+			name: "returns true when browser_clients field is missing",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+			},
+			want: true,
+		},
+		{
+			name: "returns true on invalid JSON",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				fmt.Fprint(w, "not json")
+			},
+			want: true,
+		},
+		{
+			name: "returns true on HTTP error",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "fail", http.StatusInternalServerError)
+			},
+			want: true,
+		},
+		{
+			name: "returns true when health status is not ok",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"status": "starting", "browser_clients": false})
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			srv := httptest.NewServer(tt.handler)
+			defer srv.Close()
+
+			// Parse port from test server URL
+			port, _ := strconv.Atoi(srv.URL[len("http://127.0.0.1:"):])
+
+			entry := SessionEntry{PID: os.Getpid(), Port: port}
+			got := DaemonHasBrowser(entry)
+			if got != tt.want {
+				t.Errorf("DaemonHasBrowser() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDaemonHasBrowser_Unreachable(t *testing.T) {
+	// Port that nothing listens on
+	entry := SessionEntry{PID: os.Getpid(), Port: 1}
+	got := DaemonHasBrowser(entry)
+	if !got {
+		t.Error("DaemonHasBrowser should return true when daemon is unreachable (safe default)")
+	}
+}
+
+func TestIsDaemonAlive_ValidatesResponseBody(t *testing.T) {
+	// Test that isDaemonAlive rejects a non-hunkyard process responding on the port
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// A non-hunkyard server returning 200 but without {"status":"ok"}
+		fmt.Fprint(w, `{"service":"not-hunkyard"}`)
+	}))
+	defer srv.Close()
+
+	port, _ := strconv.Atoi(srv.URL[len("http://127.0.0.1:"):])
+	entry := SessionEntry{PID: os.Getpid(), Port: port}
+	if isDaemonAlive(entry) {
+		t.Error("isDaemonAlive should return false when response body lacks status:ok")
+	}
+}
+
+func TestIsDaemonAlive_AcceptsHunkyardResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"status": "ok", "browser_clients": true})
+	}))
+	defer srv.Close()
+
+	port, _ := strconv.Atoi(srv.URL[len("http://127.0.0.1:"):])
+	entry := SessionEntry{PID: os.Getpid(), Port: port}
+	if !isDaemonAlive(entry) {
+		t.Error("isDaemonAlive should return true for valid hunkyard health response")
+	}
+}
+
+func TestRequestShutdown(t *testing.T) {
+	pid := strconv.Itoa(os.Getpid())
+	stopping := func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]any{"status": "stopping"})
+	}
+	tests := []struct {
+		name      string
+		handler   http.HandlerFunc
+		wantQuery string
+		want      ShutdownResult
+	}{
+		{name: "daemon accepts", handler: stopping, wantQuery: "pid=" + pid, want: ShutdownAccepted},
+		{
+			name: "another daemon on the port",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				http.Error(w, "pid does not match this daemon", http.StatusConflict)
+			},
+			want: ShutdownWrongDaemon,
+		},
+		{name: "older daemon without the endpoint", handler: http.NotFound, want: ShutdownUnavailable},
+		{
+			name: "non-hunkyard responder",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]any{"status": "ok"})
+			},
+			want: ShutdownUnavailable,
+		},
+		{
+			name: "connection dropped",
+			handler: func(w http.ResponseWriter, r *http.Request) {
+				if conn, _, err := w.(http.Hijacker).Hijack(); err == nil {
+					conn.Close()
+				}
+			},
+			want: ShutdownUnavailable,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var mu sync.Mutex
+			var gotMethod, gotPath, gotQuery string
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				mu.Lock()
+				gotMethod, gotPath, gotQuery = r.Method, r.URL.Path, r.URL.RawQuery
+				mu.Unlock()
+				tt.handler(w, r)
+			}))
+			defer srv.Close()
+			port, _ := strconv.Atoi(srv.URL[len("http://127.0.0.1:"):])
+			entry := SessionEntry{PID: os.Getpid(), Port: port}
+			if got := RequestShutdown(entry); got != tt.want {
+				t.Errorf("RequestShutdown = %v, want %v", got, tt.want)
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			if gotMethod != http.MethodPost || gotPath != "/api/shutdown" {
+				t.Errorf("request = %s %s, want POST /api/shutdown", gotMethod, gotPath)
+			}
+			if tt.wantQuery != "" && gotQuery != tt.wantQuery {
+				t.Errorf("query = %q, want %q", gotQuery, tt.wantQuery)
+			}
+		})
+	}
+}
+
+func TestFindSessionForCWDBranch_MatchesByBranch(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	cwd := "/tmp/myrepo"
+
+	// Create a mock HTTP server that responds to /api/health
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts.Close()
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+	// Write a session with file args (simulates "hunkyard README.md")
+	WriteSessionFile("abc123def456", SessionEntry{
+		PID:        os.Getpid(),
+		Port:       port,
+		CWD:        cwd,
+		Args:       []string{"README.md"},
+		Branch:     "main",
+		ReviewPath: "/tmp/reviews/abc123def456.json",
+	})
+
+	// findSessionForCWDBranch should find it by cwd + branch
+	entry, key, matchCount := findSessionForCWDBranch(cwd, "main")
+	if matchCount != 1 {
+		t.Fatalf("expected matchCount 1, got %d", matchCount)
+	}
+	if key != "abc123def456" {
+		t.Errorf("expected key abc123def456, got %s", key)
+	}
+	if entry.Port != port {
+		t.Errorf("expected port %d, got %d", port, entry.Port)
+	}
+}
+
+func TestFindSessionForCWDBranch_NoBranchMatch(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	cwd := "/tmp/myrepo"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts.Close()
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+	WriteSessionFile("abc123def456", SessionEntry{
+		PID:    os.Getpid(),
+		Port:   port,
+		CWD:    cwd,
+		Branch: "feature/other",
+	})
+
+	_, _, matchCount := findSessionForCWDBranch(cwd, "main")
+	if matchCount != 0 {
+		t.Errorf("expected matchCount 0, got %d", matchCount)
+	}
+}
+
+func TestFindSessionForCWDBranch_MultipleMatches(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	cwd := "/tmp/myrepo"
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts.Close()
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+	// Two sessions on same branch (different file args)
+	WriteSessionFile("session1aaaa", SessionEntry{
+		PID:    os.Getpid(),
+		Port:   port,
+		CWD:    cwd,
+		Args:   []string{"README.md"},
+		Branch: "main",
+	})
+	WriteSessionFile("session2bbbb", SessionEntry{
+		PID:    os.Getpid(),
+		Port:   port,
+		CWD:    cwd,
+		Branch: "main",
+	})
+
+	// Should return matchCount > 1 when ambiguous
+	_, _, matchCount := findSessionForCWDBranch(cwd, "main")
+	if matchCount != 2 {
+		t.Errorf("expected matchCount 2 for ambiguous case, got %d", matchCount)
+	}
+}
+
+func TestListSessionsForRepoRoot_MatchesSubdirectories(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	repoRoot := "/tmp/myrepo"
+
+	// Create mock HTTP servers for alive sessions
+	ts1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts1.Close()
+	port1, _ := strconv.Atoi(ts1.URL[strings.LastIndex(ts1.URL, ":")+1:])
+
+	ts2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts2.Close()
+	port2, _ := strconv.Atoi(ts2.URL[strings.LastIndex(ts2.URL, ":")+1:])
+
+	ts3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts3.Close()
+	port3, _ := strconv.Atoi(ts3.URL[strings.LastIndex(ts3.URL, ":")+1:])
+
+	pid := os.Getpid()
+
+	// Session started from repo/api subdirectory
+	WriteSessionFile("sub1", SessionEntry{PID: pid, Port: port1, CWD: repoRoot + "/api", Branch: "feat", ReviewPath: "/reviews/sub1.json"})
+	// Session started from repo root
+	WriteSessionFile("sub2", SessionEntry{PID: pid, Port: port2, CWD: repoRoot, Branch: "main", ReviewPath: "/reviews/sub2.json"})
+	// Session from a completely different repo
+	WriteSessionFile("other", SessionEntry{PID: pid, Port: port3, CWD: "/tmp/other-repo", Branch: "main", ReviewPath: "/reviews/other.json"})
+
+	entries, keys := ListSessionsForRepoRoot(repoRoot)
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 sessions for repo root, got %d", len(entries))
+	}
+
+	// Verify both repo sessions found, other excluded
+	foundKeys := map[string]bool{}
+	for _, k := range keys {
+		foundKeys[k] = true
+	}
+	if !foundKeys["sub1"] || !foundKeys["sub2"] {
+		t.Errorf("expected keys sub1 and sub2, got %v", keys)
+	}
+	if foundKeys["other"] {
+		t.Error("should not include session from different repo")
+	}
+}
+
+func TestListSessionsForRepoRoot_NoPartialMatch(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts.Close()
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+	// /tmp/myrepo-extended should NOT match /tmp/myrepo
+	WriteSessionFile("extended", SessionEntry{PID: os.Getpid(), Port: port, CWD: "/tmp/myrepo-extended", Branch: "main"})
+
+	entries, _ := ListSessionsForRepoRoot("/tmp/myrepo")
+	if len(entries) != 0 {
+		t.Errorf("expected 0 sessions (no partial match), got %d", len(entries))
+	}
+}
+
+func TestListAllSessions_FiltersAndCleans(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	ts1 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts1.Close()
+	port1, _ := strconv.Atoi(ts1.URL[strings.LastIndex(ts1.URL, ":")+1:])
+
+	ts2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts2.Close()
+	port2, _ := strconv.Atoi(ts2.URL[strings.LastIndex(ts2.URL, ":")+1:])
+
+	pid := os.Getpid()
+	WriteSessionFile("repo1", SessionEntry{PID: pid, Port: port1, CWD: "/tmp/repo1", Branch: "main"})
+	WriteSessionFile("repo2", SessionEntry{PID: pid, Port: port2, CWD: "/tmp/repo2/sub", Branch: "feat"})
+	WriteSessionFile("dead", SessionEntry{PID: 999999999, Port: 3333, CWD: "/tmp/dead", Branch: "main"})
+
+	sessDir := filepath.Join(home, ".hunkyard", "sessions")
+	if err := os.WriteFile(filepath.Join(sessDir, "notes.txt"), []byte("not a session"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, "bad.json"), []byte("{"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, keys := ListAllSessions()
+	if len(entries) != 2 {
+		t.Fatalf("expected 2 alive sessions, got %d", len(entries))
+	}
+
+	foundKeys := map[string]bool{}
+	for _, key := range keys {
+		foundKeys[key] = true
+	}
+	if !foundKeys["repo1"] || !foundKeys["repo2"] {
+		t.Fatalf("expected repo1 and repo2 keys, got %v", keys)
+	}
+	if foundKeys["dead"] || foundKeys["bad"] {
+		t.Fatalf("dead or malformed session should not be returned, got %v", keys)
+	}
+	if _, err := os.Stat(filepath.Join(sessDir, "dead.json")); !os.IsNotExist(err) {
+		t.Fatalf("dead session file should be cleaned up, stat err = %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(sessDir, "notes.txt")); err != nil {
+		t.Fatalf("non-json file should be left alone: %v", err)
+	}
+}
+
+func TestListAllSessions_NoHomeReturnsEmpty(t *testing.T) {
+	t.Setenv("HOME", "")
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", "")
+		t.Setenv("HOMEDRIVE", "")
+		t.Setenv("HOMEPATH", "")
+	}
+
+	entries, keys := ListAllSessions()
+	if len(entries) != 0 || len(keys) != 0 {
+		t.Fatalf("ListAllSessions without home = %d entries, %d keys; want empty", len(entries), len(keys))
+	}
+}
+
+func TestAtomicWriteFile_Success(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "test.txt")
+	data := []byte("hello world")
+
+	if err := atomicWriteFile(target, data, 0644); err != nil {
+		t.Fatalf("atomicWriteFile: %v", err)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("reading target: %v", err)
+	}
+	if string(got) != "hello world" {
+		t.Errorf("content = %q, want %q", string(got), "hello world")
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0644 {
+		t.Errorf("permissions = %o, want 0644", info.Mode().Perm())
+	}
+}
+
+func TestAtomicWriteFile_CreatesDirectories(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "sub", "dir", "test.txt")
+
+	if err := atomicWriteFile(target, []byte("nested"), 0600); err != nil {
+		t.Fatalf("atomicWriteFile: %v", err)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if string(got) != "nested" {
+		t.Errorf("content = %q, want %q", string(got), "nested")
+	}
+}
+
+func TestAtomicWriteFile_OverwriteExisting(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "overwrite.txt")
+
+	// Write initial content
+	if err := atomicWriteFile(target, []byte("first"), 0644); err != nil {
+		t.Fatalf("first write: %v", err)
+	}
+
+	// Overwrite
+	if err := atomicWriteFile(target, []byte("second"), 0644); err != nil {
+		t.Fatalf("overwrite: %v", err)
+	}
+
+	got, err := os.ReadFile(target)
+	if err != nil {
+		t.Fatalf("reading: %v", err)
+	}
+	if string(got) != "second" {
+		t.Errorf("content = %q, want %q", string(got), "second")
+	}
+}
+
+func TestAtomicWriteFile_NoTempFilesLeftBehind(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "clean.txt")
+
+	if err := atomicWriteFile(target, []byte("clean"), 0644); err != nil {
+		t.Fatalf("atomicWriteFile: %v", err)
+	}
+
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("readdir: %v", err)
+	}
+	for _, de := range entries {
+		if strings.HasSuffix(de.Name(), ".tmp") {
+			t.Errorf("temp file left behind: %s", de.Name())
+		}
+	}
+}
+
+func TestAtomicWriteFile_RestrictivePermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix file mode bits aren't meaningful on Windows")
+	}
+	dir := t.TempDir()
+	target := filepath.Join(dir, "secret.txt")
+
+	if err := atomicWriteFile(target, []byte("secret"), 0600); err != nil {
+		t.Fatalf("atomicWriteFile: %v", err)
+	}
+
+	info, err := os.Stat(target)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	if info.Mode().Perm() != 0600 {
+		t.Errorf("permissions = %o, want 0600", info.Mode().Perm())
+	}
+}
+
+func TestReadPortFromPipe_ValidPort(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+
+	portCh, errCh := readPortFromPipe(r)
+
+	// Write a valid port
+	fmt.Fprintln(w, "8080")
+	w.Close()
+
+	select {
+	case port := <-portCh:
+		if port != 8080 {
+			t.Errorf("port = %d, want 8080", port)
+		}
+	case err := <-errCh:
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReadPortFromPipe_ErrorPrefix(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+
+	portCh, errCh := readPortFromPipe(r)
+
+	fmt.Fprintln(w, "error:port already in use")
+	w.Close()
+
+	select {
+	case <-portCh:
+		t.Fatal("expected error, not port")
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected non-nil error")
+		}
+		if !strings.Contains(err.Error(), "port already in use") {
+			t.Errorf("error = %q, want to contain 'port already in use'", err.Error())
+		}
+	}
+}
+
+func TestReadPortFromPipe_InvalidPort(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+
+	portCh, errCh := readPortFromPipe(r)
+
+	fmt.Fprintln(w, "notanumber")
+	w.Close()
+
+	select {
+	case <-portCh:
+		t.Fatal("expected error for invalid port")
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected non-nil error")
+		}
+	}
+}
+
+func TestReadPortFromPipe_ClosedWithoutWriting(t *testing.T) {
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("pipe: %v", err)
+	}
+
+	portCh, errCh := readPortFromPipe(r)
+	w.Close() // Close without writing anything
+
+	select {
+	case <-portCh:
+		t.Fatal("expected error when pipe closed without writing")
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("expected non-nil error")
+		}
+	}
+}
+
+func TestSignalReadiness(t *testing.T) {
+	t.Run("writes port to pipe", func(t *testing.T) {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatalf("pipe: %v", err)
+		}
+
+		SignalReadiness(w, 3456)
+
+		var got int
+		fmt.Fscanf(r, "%d", &got)
+		r.Close()
+
+		if got != 3456 {
+			t.Errorf("read port = %d, want 3456", got)
+		}
+	})
+
+	t.Run("noop when pipe is nil", func(t *testing.T) {
+		// Should not panic
+		SignalReadiness(nil, 3456)
+	})
+}
+
+func TestReadDaemonLog(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	t.Run("reads trimmed log content", func(t *testing.T) {
+		key := "logtest123456"
+		logPath, err := sessionLogPath(key)
+		if err != nil {
+			t.Fatalf("sessionLogPath: %v", err)
+		}
+		os.MkdirAll(filepath.Dir(logPath), 0700)
+		os.WriteFile(logPath, []byte("  error: something bad happened  \n"), 0644)
+
+		msg := ReadDaemonLog(key)
+		if msg != "error: something bad happened" {
+			t.Errorf("ReadDaemonLog = %q, want trimmed content", msg)
+		}
+	})
+
+	t.Run("returns empty for missing log", func(t *testing.T) {
+		msg := ReadDaemonLog("nonexistent123")
+		if msg != "" {
+			t.Errorf("ReadDaemonLog = %q, want empty", msg)
+		}
+	})
+}
+
+func TestCleanOrphanedSessions_ExpiresOldDaemonFailures(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	key := "expirederror"
+	generation := "2026-07-17T12:00:00.123456789Z"
+	if err := WriteDaemonFailure(key, generation, fmt.Errorf("initialization failed")); err != nil {
+		t.Fatal(err)
+	}
+	path, err := daemonFailurePath(key, generation)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expired := time.Now().Add(-daemonFailureRetention - time.Second)
+	if err := os.Chtimes(path, expired, expired); err != nil {
+		t.Fatal(err)
+	}
+
+	cleanOrphanedSessions()
+	if got := ReadDaemonFailure(key, generation); got != "" {
+		t.Errorf("ReadDaemonFailure = %q, want expired failure removed", got)
+	}
+}
+
+func TestDaemonFailure_GenerationScoped(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	key := "generation12"
+	firstGeneration := "2026-07-17T12:00:00.123456789Z"
+	secondGeneration := "2026-07-17T12:00:00.987654321Z"
+	if err := WriteDaemonFailure(key, firstGeneration, fmt.Errorf("first failure")); err != nil {
+		t.Fatal(err)
+	}
+	if got := ReadDaemonFailure(key, secondGeneration); got != "" {
+		t.Errorf("ReadDaemonFailure for another generation = %q, want empty", got)
+	}
+}
+
+func TestPrepareDaemonCmd_KeepsNewLogAvailable(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	key := "newdaemonlog"
+	sessDir := filepath.Join(home, ".hunkyard", "sessions")
+	if err := os.MkdirAll(sessDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, key+".json"), []byte("{}"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(sessDir, key+".log"), []byte("old error"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	_, readEnd, writeEnd, logFile, err := prepareDaemonCmd(key, nil, "")
+	if err != nil {
+		t.Fatalf("prepareDaemonCmd: %v", err)
+	}
+	readEnd.Close()
+	writeEnd.Close()
+	logFile.Close()
+
+	logPath := filepath.Join(sessDir, key+".log")
+	if _, err := os.Stat(logPath); err != nil {
+		t.Fatalf("new daemon log should remain accessible: %v", err)
+	}
+	if got := ReadDaemonLog(key); got != "" {
+		t.Errorf("ReadDaemonLog = %q, want cleared new log", got)
+	}
+}
+
+func TestSetupDaemonCmd_WorkingDirectory(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	if err := os.MkdirAll(filepath.Join(home, ".hunkyard", "sessions"), 0700); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("explicit directory", func(t *testing.T) {
+		want := t.TempDir()
+		cmd, readEnd, writeEnd, logFile, err := setupDaemonCmd("explicitdirxx", nil, want)
+		if err != nil {
+			t.Fatalf("setupDaemonCmd: %v", err)
+		}
+		defer closeAll(readEnd, writeEnd, logFile)
+		if cmd.Dir != want {
+			t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, want)
+		}
+	})
+
+	t.Run("empty directory inherits ours", func(t *testing.T) {
+		cmd, readEnd, writeEnd, logFile, err := setupDaemonCmd("inheriteddirx", nil, "")
+		if err != nil {
+			t.Fatalf("setupDaemonCmd: %v", err)
+		}
+		defer closeAll(readEnd, writeEnd, logFile)
+		wd, err := os.Getwd()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cmd.Dir != wd {
+			t.Errorf("cmd.Dir = %q, want the current directory %q", cmd.Dir, wd)
+		}
+	})
+}
+
+func closeAll(files ...*os.File) {
+	for _, f := range files {
+		f.Close()
+	}
+}
+
+func TestOpenReadyPipe_NoEnvVar(t *testing.T) {
+	t.Setenv("_HUNKYARD_READY_STDOUT", "")
+	os.Unsetenv("_HUNKYARD_READY_STDOUT")
+
+	pipe := OpenReadyPipe()
+	if pipe != nil {
+		pipe.Close()
+		t.Error("expected nil when _HUNKYARD_READY_STDOUT is not set")
+	}
+}
+
+func TestOpenReadyPipe_WrongValue(t *testing.T) {
+	t.Setenv("_HUNKYARD_READY_STDOUT", "99")
+
+	pipe := OpenReadyPipe()
+	if pipe != nil {
+		pipe.Close()
+		t.Error("expected nil when _HUNKYARD_READY_STDOUT is not 3")
+	}
+}
+
+func TestSessionLogPath(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	path, err := sessionLogPath("abc123def456")
+	if err != nil {
+		t.Fatalf("sessionLogPath: %v", err)
+	}
+	want := filepath.Join(home, ".hunkyard", "sessions", "abc123def456.log")
+	if path != want {
+		t.Errorf("path = %q, want %q", path, want)
+	}
+}
+
+func TestReviewFilePath(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	path, err := ReviewFilePath("mykey123456")
+	if err != nil {
+		t.Fatalf("ReviewFilePath: %v", err)
+	}
+	want := filepath.Join(home, ".hunkyard", "reviews", "mykey123456")
+	if path != want {
+		t.Errorf("path = %q, want %q", path, want)
+	}
+}
+
+func TestIsDaemonAlive_NegativePID(t *testing.T) {
+	if isDaemonAlive(SessionEntry{PID: -1, Port: 9999}) {
+		t.Error("negative PID should not be alive")
+	}
+}
+
+func TestIsDaemonAlive_NoPort(t *testing.T) {
+	if isDaemonAlive(SessionEntry{PID: os.Getpid(), Port: 0}) {
+		t.Error("port 0 should not be alive")
+	}
+}
+
+func TestRemoveSessionFile_CleansUpAssociatedFiles(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	key := "cleanup12345a"
+	sessDir := filepath.Join(home, ".hunkyard", "sessions")
+	os.MkdirAll(sessDir, 0700)
+
+	// Create session file and associated files
+	os.WriteFile(filepath.Join(sessDir, key+".json"), []byte("{}"), 0644)
+	os.WriteFile(filepath.Join(sessDir, key+".log"), []byte("log"), 0644)
+	os.WriteFile(filepath.Join(sessDir, key+".lock"), []byte(""), 0644)
+
+	RemoveSessionFile(key)
+
+	for _, ext := range []string{".json", ".log", ".lock"} {
+		path := filepath.Join(sessDir, key+ext)
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("expected %s to be removed", path)
+		}
+	}
+}
+
+func TestCleanOrphanedSessions(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	sessDir := filepath.Join(home, ".hunkyard", "sessions")
+
+	// Create a session file with a dead PID (PID that cannot exist).
+	deadEntry := SessionEntry{PID: 999999999, Port: 12345, CWD: "/tmp/repo"}
+	if err := WriteSessionFile("deadpid12345", deadEntry); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+
+	// Create a session file with a live PID (our own process).
+	// isDaemonAlive also checks HTTP, so this will fail the HTTP probe and
+	// be treated as dead. Use an httptest server to keep it alive.
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts.Close()
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+	liveEntry := SessionEntry{PID: os.Getpid(), Port: port, CWD: "/tmp/repo"}
+	if err := WriteSessionFile("livepid12345", liveEntry); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+
+	cleanOrphanedSessions()
+
+	// Dead PID session should be removed.
+	if _, err := os.Stat(filepath.Join(sessDir, "deadpid12345.json")); !os.IsNotExist(err) {
+		t.Error("expected dead PID session file to be removed")
+	}
+
+	// Live PID session should still exist.
+	if _, err := os.Stat(filepath.Join(sessDir, "livepid12345.json")); err != nil {
+		t.Error("expected live PID session file to still exist")
+	}
+}
+
+func TestLiveSessionKey_MatchesSpec(t *testing.T) {
+	cwd := "/Users/alice/myapp"
+	origin := "http://localhost:3000"
+	got := LiveSessionKey(cwd, origin)
+	if len(got) != 12 {
+		t.Errorf("key length = %d, want 12", len(got))
+	}
+	h := sha256.New()
+	h.Write([]byte(cwd))
+	h.Write([]byte("\x00live\x00"))
+	h.Write([]byte(origin))
+	want := hex.EncodeToString(h.Sum(nil))[:12]
+	if got != want {
+		t.Errorf("key = %q, want %q", got, want)
+	}
+}
+
+func TestLiveSessionKey_NoCollisionWithCodeKey(t *testing.T) {
+	cwd := "/Users/alice/myapp"
+	dk := LiveSessionKey(cwd, "http://localhost:3000")
+	ck := SessionKey(cwd, "main", nil)
+	if dk == ck {
+		t.Errorf("live key collides with code key: %s", dk)
+	}
+}
+
+func TestLiveSessionKey_DifferentOriginsProduceDifferentKeys(t *testing.T) {
+	cwd := "/Users/alice/myapp"
+	k1 := LiveSessionKey(cwd, "http://localhost:3000")
+	k2 := LiveSessionKey(cwd, "http://localhost:4000")
+	if k1 == k2 {
+		t.Errorf("different origins produced same key: %s", k1)
+	}
+}
+
+func TestLiveSessionKey_Deterministic(t *testing.T) {
+	k1 := LiveSessionKey("/app", "http://localhost:3000")
+	k2 := LiveSessionKey("/app", "http://localhost:3000")
+	if k1 != k2 {
+		t.Errorf("non-deterministic: %s vs %s", k1, k2)
+	}
+}
+
+func TestTerminationProvesGone(t *testing.T) {
+	tests := []struct {
+		name string
+		err  error
+		want bool
+	}{
+		{"nil", nil, false},
+		{"ESRCH", syscall.ESRCH, true},
+		{"ErrProcessDone", os.ErrProcessDone, true},
+		{"wrapped ESRCH", fmt.Errorf("signal: %w", syscall.ESRCH), true},
+		{"EPERM", syscall.EPERM, false},
+		{"EINVAL", syscall.EINVAL, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := terminationProvesGone(tt.err); got != tt.want {
+				t.Errorf("terminationProvesGone(%v) = %v, want %v", tt.err, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStopDaemon_KeepsSessionFileOnPermissionDenied(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts.Close()
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+	key := "permtest123456"
+	entry := SessionEntry{
+		PID:    os.Getpid(),
+		Port:   port,
+		CWD:    "/tmp/repo",
+		Branch: "main",
+	}
+	if err := WriteSessionFile(key, entry); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+
+	origTerminate := terminateProc
+	terminateProc = func(proc *os.Process) error {
+		return syscall.EPERM
+	}
+	t.Cleanup(func() { terminateProc = origTerminate })
+
+	err := StopDaemon(key)
+	if err == nil {
+		t.Fatal("expected error when termination is denied")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, key) {
+		t.Errorf("error = %q, want it to mention key %q", msg, key)
+	}
+	if !strings.Contains(msg, strconv.Itoa(os.Getpid())) {
+		t.Errorf("error = %q, want it to mention pid %d", msg, os.Getpid())
+	}
+
+	path, _ := sessionFilePath(key)
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		t.Error("session file should be kept when termination is denied")
+	}
+}
+
+func TestStopDaemon_RemovesSessionFileWhenProcessGone(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts.Close()
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+	key := "gonetest123456"
+	entry := SessionEntry{
+		PID:    os.Getpid(),
+		Port:   port,
+		CWD:    "/tmp/repo",
+		Branch: "main",
+	}
+	if err := WriteSessionFile(key, entry); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+
+	origTerminate := terminateProc
+	terminateProc = func(proc *os.Process) error {
+		return syscall.ESRCH
+	}
+	t.Cleanup(func() { terminateProc = origTerminate })
+
+	origExists := procExists
+	procExists = func(proc *os.Process) bool {
+		return false
+	}
+	t.Cleanup(func() { procExists = origExists })
+
+	if err := StopDaemon(key); err != nil {
+		t.Fatalf("StopDaemon: %v", err)
+	}
+
+	path, _ := sessionFilePath(key)
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Error("session file should be removed when process is already gone")
+	}
+}
+
+// startFakeDaemonSession writes a session file for a fake daemon served by
+// handler and returns its key.
+func startFakeDaemonSession(t *testing.T, handler http.HandlerFunc) string {
+	t.Helper()
+	testutil.SetHome(t, t.TempDir())
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+	key := "fakedaemon123"
+	entry := SessionEntry{PID: os.Getpid(), Port: port, CWD: "/tmp/repo", Branch: "main"}
+	if err := WriteSessionFile(key, entry); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+	return key
+}
+
+// shortenStopWait makes StopDaemon's exit waits short for the test.
+func shortenStopWait(t *testing.T) {
+	t.Helper()
+	orig := stopWait
+	stopWait = 50 * time.Millisecond
+	t.Cleanup(func() { stopWait = orig })
+}
+
+// fakeDaemonProc records what StopDaemon and WaitForExit did to the daemon
+// process. A hanging one ignores termination and is gone only once killed.
+type fakeDaemonProc struct {
+	hangs           bool
+	signalled       bool // terminated or killed
+	killed          bool
+	polled          bool // waited for it to exit
+	polledAfterKill bool
+}
+
+// stubStopSignals replaces the process hooks StopDaemon and WaitForExit use
+// with a fakeDaemonProc.
+func stubStopSignals(t *testing.T, hangs bool) *fakeDaemonProc {
+	t.Helper()
+	p := &fakeDaemonProc{hangs: hangs}
+	origTerminate, origKill, origExists := terminateProc, killProc, procExists
+	terminateProc = func(*os.Process) error { p.signalled = true; return nil }
+	killProc = func(*os.Process) error { p.signalled, p.killed = true, true; return nil }
+	procExists = func(*os.Process) bool {
+		p.polled = true
+		if p.killed {
+			p.polledAfterKill = true
+			return false
+		}
+		return p.hangs
+	}
+	t.Cleanup(func() { terminateProc, killProc, procExists = origTerminate, origKill, origExists })
+	shortenStopWait(t)
+	return p
+}
+
+func TestStopDaemon_ShutdownRequest(t *testing.T) {
+	const (
+		accept = iota
+		refuseAfterAnotherClient
+		wrongDaemon
+	)
+	tests := []struct {
+		name          string
+		reply         int
+		hangs         bool
+		wantSignalled bool
+		wantWaited    bool
+	}{
+		{name: "daemon accepts and exits", reply: accept, wantWaited: true},
+		{name: "daemon accepts but hangs, killed after the wait like a signalled one", reply: accept, hangs: true, wantSignalled: true, wantWaited: true},
+		{name: "daemon already shutting down for another client, waited for but left to it", reply: refuseAfterAnotherClient, hangs: true, wantWaited: true},
+		{name: "stale entry, another daemon on the port", reply: wrongDaemon, hangs: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var key string
+			key = startFakeDaemonSession(t, func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/api/shutdown" {
+					json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+					return
+				}
+				switch tt.reply {
+				case accept:
+					json.NewEncoder(w).Encode(map[string]string{"status": "stopping"})
+				case refuseAfterAnotherClient:
+					// Another client's shutdown got there first: the daemon
+					// removed its session file and takes no more requests.
+					RemoveSessionFile(key)
+					http.NotFound(w, r)
+				case wrongDaemon:
+					http.Error(w, "pid does not match this daemon", http.StatusConflict)
+				}
+			})
+			proc := stubStopSignals(t, tt.hangs)
+
+			if err := StopDaemon(key); err != nil {
+				t.Fatalf("StopDaemon: %v", err)
+			}
+			if proc.signalled != tt.wantSignalled {
+				t.Errorf("signalled or killed = %v, want %v", proc.signalled, tt.wantSignalled)
+			}
+			if proc.polled != tt.wantWaited {
+				t.Errorf("waited for exit = %v, want %v", proc.polled, tt.wantWaited)
+			}
+			path, _ := sessionFilePath(key)
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Error("the session entry should be gone afterwards")
+			}
+		})
+	}
+}
+
+func TestWaitForExit(t *testing.T) {
+	tests := []struct {
+		name     string
+		hangs    bool
+		wantKill bool
+	}{
+		{name: "daemon exits", hangs: false},
+		{name: "daemon hangs, is killed after stopWait and waited for until gone", hangs: true, wantKill: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			proc := stubStopSignals(t, tt.hangs)
+			if !WaitForExit(os.Getpid()) {
+				t.Error("WaitForExit did not confirm daemon exit")
+			}
+			if proc.killed != tt.wantKill {
+				t.Errorf("killed = %v, want %v", proc.killed, tt.wantKill)
+			}
+			if proc.killed && !proc.polledAfterKill {
+				t.Error("WaitForExit returned before the killed daemon was gone")
+			}
+		})
+	}
+}
+
+func TestWaitForExit_DoesNotConfirmSurvivingProcess(t *testing.T) {
+	tests := []struct {
+		name    string
+		killErr error
+	}{
+		{name: "kill denied", killErr: syscall.EPERM},
+		{name: "kill accepted but process survives"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			stubStopSignals(t, true)
+			killProc = func(*os.Process) error { return tt.killErr }
+			procExists = func(*os.Process) bool { return true }
+			if WaitForExit(os.Getpid()) {
+				t.Error("WaitForExit confirmed exit while process was still alive")
+			}
+		})
+	}
+}
+
+func TestStopDaemon_KeepsSessionFileWhenKillDoesNotFinish(t *testing.T) {
+	key := startFakeDaemonSession(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/shutdown" {
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "stopping"})
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	})
+	stubStopSignals(t, true)
+	procExists = func(*os.Process) bool { return true }
+
+	if err := StopDaemon(key); err == nil {
+		t.Fatal("expected an error when the daemon survives the forced kill")
+	}
+	path, _ := sessionFilePath(key)
+	if _, err := os.Stat(path); err != nil {
+		t.Errorf("session entry removed before the daemon exited: %v", err)
+	}
+}
+
+func TestUnlessSessionTakenOver(t *testing.T) {
+	const noSessionFile = 0
+	tests := []struct {
+		name       string
+		sessionPID int
+		wantRun    bool
+	}{
+		{name: "no session file", sessionPID: noSessionFile, wantRun: true},
+		{name: "session file names this daemon", sessionPID: 4242, wantRun: true},
+		{name: "another daemon registered under the key", sessionPID: 4343},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testutil.SetHome(t, t.TempDir())
+			key := "takeover123"
+			if tt.sessionPID != noSessionFile {
+				if err := WriteSessionFile(key, SessionEntry{PID: tt.sessionPID}); err != nil {
+					t.Fatalf("WriteSessionFile: %v", err)
+				}
+			}
+			ran := false
+			UnlessSessionTakenOver(key, 4242, func() { ran = true })
+			if ran != tt.wantRun {
+				t.Errorf("ran = %v, want %v", ran, tt.wantRun)
+			}
+		})
+	}
+}
+
+func TestCleanOrphanedSessions_RemovesOldLoneLogs(t *testing.T) {
+	testutil.SetHome(t, t.TempDir())
+	dir, err := sessionsDir()
+	if err != nil {
+		t.Fatal(err)
+	}
+	oldLog := filepath.Join(dir, "oldkey123.log")
+	freshLog := filepath.Join(dir, "freshkey123.log")
+	oldLock := filepath.Join(dir, "lockkey123.lock")
+	for _, p := range []string{oldLog, freshLog, oldLock} {
+		testutil.WriteFile(t, p, "x")
+	}
+	stale := time.Now().Add(-2 * daemonFailureRetention)
+	for _, p := range []string{oldLog, oldLock} {
+		if err := os.Chtimes(p, stale, stale); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cleanOrphanedSessions()
+
+	if _, err := os.Stat(oldLog); !os.IsNotExist(err) {
+		t.Error("a log older than daemonFailureRetention with no session file should be removed")
+	}
+	if _, err := os.Stat(freshLog); err != nil {
+		t.Error("a fresh log may belong to a daemon that is still starting and must be kept")
+	}
+	if _, err := os.Stat(oldLock); err != nil {
+		t.Error("a lock file may be held by a starting client, whatever its age, and must be kept")
+	}
+}
+
+func TestKillProcess(t *testing.T) {
+	// Start a short-lived helper so we can call killProcess on a real
+	// Process handle (Windows OpenProcess rejects bogus PIDs).
+	cmd := exec.Command("sleep", "30")
+	if runtime.GOOS == "windows" {
+		cmd = exec.Command("ping", "-n", "30", "127.0.0.1")
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("start helper: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = cmd.Process.Kill()
+		_, _ = cmd.Process.Wait()
+	})
+	if err := killProcess(cmd.Process); err != nil {
+		t.Fatalf("killProcess: %v", err)
+	}
+}
+
+func TestStopDaemon_KeepsSessionFileOnKillPermissionDenied(t *testing.T) {
+	shortenStopWait(t)
+
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	}))
+	defer ts.Close()
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+	key := "killpermtest123"
+	entry := SessionEntry{
+		PID:    os.Getpid(),
+		Port:   port,
+		CWD:    "/tmp/repo",
+		Branch: "main",
+	}
+	if err := WriteSessionFile(key, entry); err != nil {
+		t.Fatalf("WriteSessionFile: %v", err)
+	}
+
+	origTerminate := terminateProc
+	terminateProc = func(proc *os.Process) error {
+		return nil
+	}
+	t.Cleanup(func() { terminateProc = origTerminate })
+
+	origExists := procExists
+	procExists = func(proc *os.Process) bool {
+		return true
+	}
+	t.Cleanup(func() { procExists = origExists })
+
+	origKill := killProc
+	killProc = func(proc *os.Process) error {
+		return syscall.EPERM
+	}
+	t.Cleanup(func() { killProc = origKill })
+
+	err := StopDaemon(key)
+	if err == nil {
+		t.Fatal("expected error when kill is denied")
+	}
+	msg := err.Error()
+	if !strings.Contains(msg, key) {
+		t.Errorf("error = %q, want it to mention key %q", msg, key)
+	}
+	if !strings.Contains(msg, strconv.Itoa(os.Getpid())) {
+		t.Errorf("error = %q, want it to mention pid %d", msg, os.Getpid())
+	}
+
+	path, _ := sessionFilePath(key)
+	if _, statErr := os.Stat(path); os.IsNotExist(statErr) {
+		t.Error("session file should be kept when kill is denied")
+	}
+}
+
+func TestStopDaemon_RemovesSessionFileAfterKill(t *testing.T) {
+	tests := []struct {
+		name    string
+		killErr error
+	}{
+		{name: "kill succeeds", killErr: nil},
+		{name: "kill proves gone", killErr: syscall.ESRCH},
+	}
+	shortenStopWait(t)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			testutil.SetHome(t, home)
+
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+			}))
+			defer ts.Close()
+			port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+			key := "killoktest123"
+			entry := SessionEntry{
+				PID:    os.Getpid(),
+				Port:   port,
+				CWD:    "/tmp/repo",
+				Branch: "main",
+			}
+			if err := WriteSessionFile(key, entry); err != nil {
+				t.Fatalf("WriteSessionFile: %v", err)
+			}
+
+			origTerminate := terminateProc
+			terminateProc = func(proc *os.Process) error { return nil }
+			t.Cleanup(func() { terminateProc = origTerminate })
+
+			killed := false
+			origExists := procExists
+			procExists = func(proc *os.Process) bool { return !killed }
+			t.Cleanup(func() { procExists = origExists })
+
+			origKill := killProc
+			killProc = func(proc *os.Process) error {
+				if tt.killErr == nil {
+					killed = true
+				}
+				return tt.killErr
+			}
+			t.Cleanup(func() { killProc = origKill })
+
+			if err := StopDaemon(key); err != nil {
+				t.Fatalf("StopDaemon: %v", err)
+			}
+
+			path, _ := sessionFilePath(key)
+			if _, err := os.Stat(path); !os.IsNotExist(err) {
+				t.Error("session file should be removed after kill succeeds or proves gone")
+			}
+		})
+	}
+}
+
+func TestAppendCommonDaemonFlags(t *testing.T) {
+	tests := []struct {
+		name string
+		f    commonDaemonFlags
+		want []string
+	}{
+		{
+			name: "empty flags produce no args",
+			f:    commonDaemonFlags{},
+			want: []string{"--preview-file", "/tmp/x.html"},
+		},
+		{
+			name: "all flags set",
+			f: commonDaemonFlags{
+				Port:                        3456,
+				Host:                        "0.0.0.0",
+				PublicURL:                   "https://mymac.ts.net",
+				AllowUnauthenticatedNetwork: true,
+				NoOpen:                      true,
+				Quiet:                       true,
+			},
+			want: []string{"--preview-file", "/tmp/x.html",
+				"--port", "3456",
+				"--host", "0.0.0.0",
+				"--public-url", "https://mymac.ts.net",
+				"--allow-unauthenticated-network",
+				"--no-open",
+				"--quiet"},
+		},
+		{
+			name: "explicit loopback host is forwarded",
+			f:    commonDaemonFlags{Host: "127.0.0.1"},
+			want: []string{"--preview-file", "/tmp/x.html", "--host", "127.0.0.1"},
+		},
+		{
+			name: "port only",
+			f:    commonDaemonFlags{Port: 8080},
+			want: []string{"--preview-file", "/tmp/x.html", "--port", "8080"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			base := []string{"--preview-file", "/tmp/x.html"}
+			got := appendCommonDaemonFlags(base, tt.f)
+			if len(got) != len(tt.want) {
+				t.Fatalf("got %v, want %v", got, tt.want)
+			}
+			for i := range got {
+				if got[i] != tt.want[i] {
+					t.Errorf("arg[%d]: got %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}

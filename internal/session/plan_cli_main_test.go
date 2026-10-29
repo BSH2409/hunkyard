@@ -1,0 +1,599 @@
+package session
+
+import (
+	"encoding/json"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/BSH2409/hunkyard/internal/daemon"
+	"github.com/BSH2409/hunkyard/internal/testutil"
+)
+
+func TestResolvePlanConfig_NameAndFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "plan.md")
+	os.WriteFile(path, []byte("# Test Plan"), 0644)
+
+	pc := resolvePlanConfig([]string{"--name", "auth-flow", path})
+	if pc.name != "auth-flow" {
+		t.Errorf("name = %q, want %q", pc.name, "auth-flow")
+	}
+	if pc.filePath != path {
+		t.Errorf("filePath = %q, want %q", pc.filePath, path)
+	}
+}
+
+func TestResolvePlanConfig_NoWait(t *testing.T) {
+	pc := resolvePlanConfig([]string{"--name", "chat", "--no-wait"})
+	if !pc.noWait || pc.name != "chat" || !pc.stdinExpected {
+		t.Errorf("pc = %+v, want noWait with name chat reading stdin", pc)
+	}
+}
+
+func TestSavePlanWithoutReview(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "chat")
+	var stdout, stderr strings.Builder
+
+	if err := savePlanWithoutReview(&stdout, &stderr, dir, "chat", []byte("# one\n"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := savePlanWithoutReview(&stdout, &stderr, dir, "chat", []byte("# one\n"), false); err != nil {
+		t.Fatal(err)
+	}
+	if err := savePlanWithoutReview(&stdout, &stderr, dir, "chat", []byte("# one\n\ntwo\n"), true); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := latestPlanVersion(dir); got != 2 {
+		t.Errorf("versions = %d, want 2 (unchanged content adds none)", got)
+	}
+	current, _ := os.ReadFile(filepath.Join(dir, "current.md"))
+	if string(current) != "# one\n\ntwo\n" {
+		t.Errorf("current.md = %q", current)
+	}
+	if stdout.String() != "chat\nchat\nchat\n" {
+		t.Errorf("stdout = %q, want the slug per call", stdout.String())
+	}
+	if !strings.Contains(stderr.String(), "saved as v001") || !strings.Contains(stderr.String(), "unchanged (v001)") || strings.Contains(stderr.String(), "v002") {
+		t.Errorf("stderr = %q (quiet run should print nothing)", stderr.String())
+	}
+}
+
+func TestRunPlan_NoWaitSavesWithoutReview(t *testing.T) {
+	home := t.TempDir()
+	setHome(t, home)
+	src := filepath.Join(t.TempDir(), "plan.md")
+	if err := os.WriteFile(src, []byte("# Chat\n\nhello\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RunPlan([]string{"--name", "my-chat", "--no-wait", "--quiet", src}); err != nil {
+		t.Fatalf("RunPlan --no-wait: %v", err)
+	}
+
+	got, err := os.ReadFile(filepath.Join(home, ".hunkyard", "plans", "my-chat", "v001.md"))
+	if err != nil || string(got) != "# Chat\n\nhello\n" {
+		t.Fatalf("v001.md = %q, %v", got, err)
+	}
+}
+
+func TestSavePlanWithoutReview_SaveError(t *testing.T) {
+	// The storage dir path is a file, so the save cannot create it.
+	blocker := filepath.Join(t.TempDir(), "taken")
+	if err := os.WriteFile(blocker, []byte("x"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	var stdout, stderr strings.Builder
+
+	err := savePlanWithoutReview(&stdout, &stderr, filepath.Join(blocker, "chat"), "chat", []byte("# one\n"), true)
+
+	if err == nil || !strings.Contains(stderr.String(), "Error saving plan") || stdout.String() != "" {
+		t.Fatalf("err = %v, stderr = %q, stdout = %q", err, stderr.String(), stdout.String())
+	}
+}
+
+func TestResolvePlanConfig_NameOnly(t *testing.T) {
+	pc := resolvePlanConfig([]string{"--name", "auth-flow"})
+	if pc.name != "auth-flow" {
+		t.Errorf("name = %q, want %q", pc.name, "auth-flow")
+	}
+	if pc.filePath != "" {
+		t.Errorf("filePath should be empty, got %q", pc.filePath)
+	}
+	if !pc.stdinExpected {
+		t.Error("expected stdinExpected=true when no file arg")
+	}
+}
+
+func TestResolvePlanSlug_UsesNameWhenProvided(t *testing.T) {
+	slug := resolvePlanSlug("my-custom-name", []byte("# Some Heading"))
+	if slug != "my-custom-name" {
+		t.Errorf("resolvePlanSlug with name = %q, want my-custom-name", slug)
+	}
+}
+
+func TestResolvePlanSlug_DerivesFromContent(t *testing.T) {
+	slug := resolvePlanSlug("", []byte("# Auth Flow\n\nDetails here"))
+	if slug == "" {
+		t.Error("expected non-empty slug derived from content")
+	}
+	if !strings.Contains(slug, "auth-flow") {
+		t.Errorf("slug = %q, expected to contain 'auth-flow'", slug)
+	}
+}
+
+func TestRunPlanHook_ApprovalEchoesCompleteToolInput(t *testing.T) {
+	testutil.SetHome(t, t.TempDir())
+
+	hookInput := json.RawMessage(`{
+		"session_id": "session-737",
+		"hook_event_name": "PermissionRequest",
+		"tool_name": "ExitPlanMode",
+		"tool_input": {
+			"plan": "# Auth Flow\n\nImplement the auth flow.",
+			"planFilePath": "/tmp/auth-flow.md",
+			"futureOption": {
+				"enabled": true,
+				"largeNumber": 9007199254740993,
+				"escaped": "\u003cfuture\u003e"
+			}
+		}
+	}`)
+	setPlanHookStdin(t, hookInput)
+
+	previousReviewHook := runClaudePlanReviewHook
+	runClaudePlanReviewHook = func(sessionID string, content []byte, emitDecision func(bool, string)) {
+		if sessionID != "session-737" {
+			t.Errorf("sessionID = %q, want session-737", sessionID)
+		}
+		if got, want := string(content), "# Auth Flow\n\nImplement the auth flow."; got != want {
+			t.Errorf("plan content = %q, want %q", got, want)
+		}
+		emitDecision(true, "")
+	}
+	t.Cleanup(func() {
+		runClaudePlanReviewHook = previousReviewHook
+	})
+
+	output := captureHookDecision(t, func() {
+		if err := RunPlanHook(); err != nil {
+			t.Fatalf("RunPlanHook() error = %v", err)
+		}
+	})
+
+	var response struct {
+		HookSpecificOutput struct {
+			HookEventName string `json:"hookEventName"`
+			Decision      struct {
+				Behavior           string          `json:"behavior"`
+				UpdatedInput       json.RawMessage `json:"updatedInput"`
+				UpdatedPermissions json.RawMessage `json:"updatedPermissions"`
+			} `json:"decision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		t.Fatalf("decode hook response: %v", err)
+	}
+	if response.HookSpecificOutput.HookEventName != "PermissionRequest" {
+		t.Errorf("hookEventName = %q, want PermissionRequest", response.HookSpecificOutput.HookEventName)
+	}
+	if response.HookSpecificOutput.Decision.Behavior != "allow" {
+		t.Errorf("behavior = %q, want allow", response.HookSpecificOutput.Decision.Behavior)
+	}
+
+	var event struct {
+		ToolInput json.RawMessage `json:"tool_input"`
+	}
+	if err := json.Unmarshal(hookInput, &event); err != nil {
+		t.Fatal(err)
+	}
+	expectedInput := decodeJSONUseNumber(t, event.ToolInput)
+	actualInput := decodeJSONUseNumber(t, response.HookSpecificOutput.Decision.UpdatedInput)
+	if !reflect.DeepEqual(actualInput, expectedInput) {
+		t.Fatalf(
+			"decision.updatedInput = %#v, want complete original tool_input %#v",
+			actualInput,
+			expectedInput,
+		)
+	}
+	if response.HookSpecificOutput.Decision.UpdatedPermissions != nil {
+		t.Errorf(
+			"unset plan_approve_mode unexpectedly emitted updatedPermissions: %s",
+			response.HookSpecificOutput.Decision.UpdatedPermissions,
+		)
+	}
+}
+
+func TestRunPlanHook_DisabledByEnvironment(t *testing.T) {
+	t.Setenv("HUNKYARD_PLAN_REVIEW", "off")
+	setPlanHookStdin(t, []byte(`{
+		"session_id": "session-disabled",
+		"tool_input": {"plan": "# Should not open"}
+	}`))
+
+	previousReviewHook := runClaudePlanReviewHook
+	runClaudePlanReviewHook = func(string, []byte, func(bool, string)) {
+		t.Fatal("did not expect disabled plan hook to start a review")
+	}
+	t.Cleanup(func() {
+		runClaudePlanReviewHook = previousReviewHook
+	})
+
+	output := captureHookDecision(t, func() {
+		if err := RunPlanHook(); err != nil {
+			t.Fatalf("RunPlanHook() error = %v", err)
+		}
+	})
+	if len(output) != 0 {
+		t.Fatalf("disabled hook output = %q, want empty output", output)
+	}
+}
+
+func TestRunPlan_EnvironmentOptOutDoesNotDisableManualReview(t *testing.T) {
+	t.Setenv("HUNKYARD_PLAN_REVIEW", "off")
+	testutil.SetHome(t, t.TempDir())
+
+	missingPlan := filepath.Join(t.TempDir(), "missing-plan.md")
+	if err := RunPlan([]string{missingPlan}); err == nil {
+		t.Fatal("manual RunPlan() unexpectedly skipped missing-file validation")
+	}
+}
+
+func TestRunPlanHook_ApprovalSetsConfiguredMode(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	if err := os.WriteFile(
+		filepath.Join(homeDir, ".hunkyard.config.json"),
+		[]byte(`{"plan_approve_mode":"auto"}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	hookInput := json.RawMessage(`{
+		"session_id": "session-mode",
+		"tool_input": {
+			"plan": "# Mode switch",
+			"planFilePath": "/tmp/mode-switch.md",
+			"futureOption": true
+		}
+	}`)
+	setPlanHookStdin(t, hookInput)
+
+	previousReviewHook := runClaudePlanReviewHook
+	runClaudePlanReviewHook = func(_ string, _ []byte, emitDecision func(bool, string)) {
+		emitDecision(true, "")
+	}
+	t.Cleanup(func() {
+		runClaudePlanReviewHook = previousReviewHook
+	})
+
+	output := captureHookDecision(t, func() {
+		if err := RunPlanHook(); err != nil {
+			t.Fatalf("RunPlanHook() error = %v", err)
+		}
+	})
+
+	var response struct {
+		HookSpecificOutput struct {
+			Decision struct {
+				UpdatedInput       json.RawMessage  `json:"updatedInput"`
+				UpdatedPermissions []map[string]any `json:"updatedPermissions"`
+			} `json:"decision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		t.Fatalf("decode hook response: %v", err)
+	}
+
+	if got, want := response.HookSpecificOutput.Decision.UpdatedPermissions, []map[string]any{{
+		"type":        "setMode",
+		"mode":        "auto",
+		"destination": "session",
+	}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("updatedPermissions = %#v, want %#v", got, want)
+	}
+
+	var event struct {
+		ToolInput json.RawMessage `json:"tool_input"`
+	}
+	if err := json.Unmarshal(hookInput, &event); err != nil {
+		t.Fatal(err)
+	}
+	if got, want := decodeJSONUseNumber(t, response.HookSpecificOutput.Decision.UpdatedInput),
+		decodeJSONUseNumber(t, event.ToolInput); !reflect.DeepEqual(got, want) {
+		t.Errorf("updatedInput = %#v, want full original tool_input %#v", got, want)
+	}
+}
+
+func TestRunPlanHook_ApprovalUsesLatestConfiguredMode(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	configPath := filepath.Join(homeDir, ".hunkyard.config.json")
+	if err := os.WriteFile(configPath, []byte(`{"plan_approve_mode":"auto"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	setPlanHookStdin(t, []byte(`{
+		"session_id": "session-latest-mode",
+		"tool_input": {"plan": "# Long-running review"}
+	}`))
+
+	previousReviewHook := runClaudePlanReviewHook
+	runClaudePlanReviewHook = func(_ string, _ []byte, emitDecision func(bool, string)) {
+		if err := os.WriteFile(configPath, []byte(`{"plan_approve_mode":"acceptEdits"}`), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		emitDecision(true, "")
+	}
+	t.Cleanup(func() {
+		runClaudePlanReviewHook = previousReviewHook
+	})
+
+	output := captureHookDecision(t, func() {
+		if err := RunPlanHook(); err != nil {
+			t.Fatalf("RunPlanHook() error = %v", err)
+		}
+	})
+
+	var response struct {
+		HookSpecificOutput struct {
+			Decision struct {
+				UpdatedPermissions []map[string]string `json:"updatedPermissions"`
+			} `json:"decision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		t.Fatalf("decode hook response: %v", err)
+	}
+	if got, want := response.HookSpecificOutput.Decision.UpdatedPermissions, []map[string]string{{
+		"type":        "setMode",
+		"mode":        "acceptEdits",
+		"destination": "session",
+	}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("updatedPermissions = %#v, want %#v", got, want)
+	}
+}
+
+func TestEmitHookDecision_InvalidPlanApproveModeWarnsAndPreservesOutput(t *testing.T) {
+	toolInput := json.RawMessage(`{"plan":"# Auth Flow","futureOption":true}`)
+
+	previousStderr := os.Stderr
+	stderrReader, stderrWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = stderrWriter
+	t.Cleanup(func() {
+		os.Stderr = previousStderr
+		stderrReader.Close()
+	})
+
+	output := captureHookDecision(t, func() {
+		emitHookDecision(true, "", toolInput, "unrestricted")
+	})
+	if err := stderrWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	stderr, err := io.ReadAll(stderrReader)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var response struct {
+		HookSpecificOutput struct {
+			Decision struct {
+				Behavior           string          `json:"behavior"`
+				UpdatedInput       json.RawMessage `json:"updatedInput"`
+				UpdatedPermissions json.RawMessage `json:"updatedPermissions"`
+			} `json:"decision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		t.Fatalf("decode hook response: %v", err)
+	}
+	if response.HookSpecificOutput.Decision.Behavior != "allow" {
+		t.Errorf("behavior = %q, want allow", response.HookSpecificOutput.Decision.Behavior)
+	}
+	if response.HookSpecificOutput.Decision.UpdatedPermissions != nil {
+		t.Errorf("invalid mode unexpectedly emitted updatedPermissions: %s", response.HookSpecificOutput.Decision.UpdatedPermissions)
+	}
+	if got, want := decodeJSONUseNumber(t, response.HookSpecificOutput.Decision.UpdatedInput),
+		decodeJSONUseNumber(t, toolInput); !reflect.DeepEqual(got, want) {
+		t.Errorf("updatedInput = %#v, want %#v", got, want)
+	}
+	if !strings.Contains(string(stderr), `ignoring invalid plan_approve_mode "unrestricted"`) {
+		t.Errorf("stderr = %q, want invalid-mode warning", stderr)
+	}
+}
+
+func TestPlanApproveModePermissionUpdate_ValidModes(t *testing.T) {
+	for _, mode := range []string{
+		"default", "manual", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions",
+	} {
+		t.Run(mode, func(t *testing.T) {
+			update, valid := planApproveModePermissionUpdate(mode)
+			if !valid {
+				t.Fatalf("mode %q rejected", mode)
+			}
+			if update["type"] != "setMode" || update["mode"] != mode || update["destination"] != "session" {
+				t.Errorf("update = %#v", update)
+			}
+		})
+	}
+}
+
+func decodeJSONUseNumber(t *testing.T, input []byte) any {
+	t.Helper()
+
+	decoder := json.NewDecoder(strings.NewReader(string(input)))
+	decoder.UseNumber()
+	var decoded any
+	if err := decoder.Decode(&decoded); err != nil {
+		t.Fatal(err)
+	}
+	return decoded
+}
+
+func setPlanHookStdin(t *testing.T, input []byte) {
+	t.Helper()
+
+	previousStdin := os.Stdin
+	stdinReader, stdinWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stdinWriter.Write(input); err != nil {
+		t.Fatal(err)
+	}
+	if err := stdinWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = stdinReader
+	t.Cleanup(func() {
+		os.Stdin = previousStdin
+		stdinReader.Close()
+	})
+}
+
+func TestEmitHookDecision_DenyBehaviorUnchanged(t *testing.T) {
+	toolInput := json.RawMessage(`{"plan":"# Auth Flow","futureOption":true}`)
+	output := captureHookDecision(t, func() {
+		emitHookDecision(false, "Address the review comments.", toolInput, "bypassPermissions")
+	})
+
+	var response struct {
+		HookSpecificOutput struct {
+			HookEventName string `json:"hookEventName"`
+			Decision      struct {
+				Behavior     string          `json:"behavior"`
+				Message      string          `json:"message"`
+				UpdatedInput json.RawMessage `json:"updatedInput"`
+			} `json:"decision"`
+		} `json:"hookSpecificOutput"`
+	}
+	if err := json.Unmarshal(output, &response); err != nil {
+		t.Fatalf("decode hook response: %v", err)
+	}
+
+	if response.HookSpecificOutput.HookEventName != "PermissionRequest" {
+		t.Errorf("hookEventName = %q, want PermissionRequest", response.HookSpecificOutput.HookEventName)
+	}
+	if response.HookSpecificOutput.Decision.Behavior != "deny" {
+		t.Errorf("behavior = %q, want deny", response.HookSpecificOutput.Decision.Behavior)
+	}
+	if response.HookSpecificOutput.Decision.Message != "Address the review comments." {
+		t.Errorf("message = %q, want review feedback", response.HookSpecificOutput.Decision.Message)
+	}
+	if response.HookSpecificOutput.Decision.UpdatedInput != nil {
+		t.Errorf("deny response unexpectedly included updatedInput: %s", response.HookSpecificOutput.Decision.UpdatedInput)
+	}
+}
+
+func captureHookDecision(t *testing.T, emit func()) []byte {
+	t.Helper()
+
+	previousStdout := os.Stdout
+	stdoutReader, stdoutWriter, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdout = stdoutWriter
+	t.Cleanup(func() {
+		os.Stdout = previousStdout
+	})
+
+	emit()
+
+	if err := stdoutWriter.Close(); err != nil {
+		t.Fatal(err)
+	}
+	output, err := io.ReadAll(stdoutReader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return output
+}
+
+// TestPlanReviewHooks_SendPlanHookName checks the plan_hook value each agent's
+// hook sends to the daemon, which picks the hook-specific finish prompt from
+// it. A fake daemon is registered under the plan's session key so the hook
+// connects to it instead of starting one.
+func TestPlanReviewHooks_SendPlanHookName(t *testing.T) {
+	tests := []struct {
+		name string
+		run  func(content []byte)
+		want string
+	}{
+		{
+			name: "claude",
+			run: func(content []byte) {
+				runClaudePlanReviewHook("hook-name-session", content, func(bool, string) {})
+			},
+			want: "plan_mode",
+		},
+		{
+			name: "codex",
+			run:  func(content []byte) { runCodexPlanReviewHook("hook-name-session", content) },
+			want: "codex",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			testutil.SetHome(t, t.TempDir())
+			t.Chdir(t.TempDir())
+
+			gotPlanHook := make(chan string, 1)
+			ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/api/health", "/api/session":
+					_ = json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+				case "/api/review-cycle":
+					select {
+					case gotPlanHook <- r.URL.Query().Get("plan_hook"):
+					default:
+					}
+					// Not approved, so the hook does not try to stop the daemon.
+					_ = json.NewEncoder(w).Encode(map[string]any{"approved": false, "prompt": "fix it"})
+				default:
+					http.NotFound(w, r)
+				}
+			}))
+			t.Cleanup(ts.Close)
+			port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+			content := []byte("# Hook Name\n\nbody\n")
+			cwd, err := daemon.ResolvedCWD()
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Pin the slug (ResolveSlug adds today's date) so the key can't
+			// drift between here and the hook.
+			if err := SavePlanSlug("hook-name-session", "hook-name"); err != nil {
+				t.Fatal(err)
+			}
+			key := PlanSessionKey(cwd, "hook-name")
+			if err := daemon.WriteSessionFile(key, daemon.SessionEntry{PID: os.Getpid(), Port: port}); err != nil {
+				t.Fatalf("WriteSessionFile: %v", err)
+			}
+
+			captureHookDecision(t, func() { tt.run(content) })
+
+			select {
+			case got := <-gotPlanHook:
+				if got != tt.want {
+					t.Errorf("plan_hook = %q, want %q", got, tt.want)
+				}
+			default:
+				t.Fatal("hook never called /api/review-cycle")
+			}
+		})
+	}
+}

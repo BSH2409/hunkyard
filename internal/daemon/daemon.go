@@ -1,0 +1,1196 @@
+package daemon
+
+import (
+	"bufio"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"log"
+	"net"
+	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/BSH2409/hunkyard/internal/config"
+	"github.com/BSH2409/hunkyard/internal/feedback"
+	"github.com/BSH2409/hunkyard/internal/localonly"
+)
+
+type CommonDaemonFlags struct {
+	Port                        int
+	Host                        string
+	PublicURL                   string
+	AllowUnauthenticatedNetwork bool
+	NoOpen                      bool
+	Quiet                       bool
+}
+
+func AppendCommonDaemonFlags(args []string, f CommonDaemonFlags) []string {
+	if f.Port != 0 {
+		args = append(args, "--port", strconv.Itoa(f.Port))
+	}
+	if f.Host != "" {
+		args = append(args, "--host", f.Host)
+	}
+	if f.PublicURL != "" {
+		args = append(args, "--public-url", f.PublicURL)
+	}
+	if f.AllowUnauthenticatedNetwork {
+		args = append(args, "--"+config.AllowUnauthenticatedNetworkFlag)
+	}
+	if f.NoOpen {
+		args = append(args, "--no-open")
+	}
+	if f.Quiet {
+		args = append(args, "--quiet")
+	}
+	return args
+}
+
+// aliveClient is used by isDaemonAlive which is called in a loop by
+// listSessionsForCWD — a short timeout keeps listing responsive.
+var aliveClient = &http.Client{Timeout: time.Second}
+
+// browserClient is used by DaemonHasBrowser which is called once per
+// daemon lifecycle and can tolerate a longer timeout.
+var browserClient = &http.Client{Timeout: 2 * time.Second}
+
+// shutdownClient is used by RequestShutdown; the endpoint answers before it
+// does any work, so a short timeout is enough.
+var shutdownClient = &http.Client{Timeout: time.Second}
+
+// stopWait bounds how long a stopping daemon may take to exit before it is
+// killed. It is longer than the daemon's own 2 s HTTP drain, so a daemon with
+// no agent run in flight still reaches its final write. Tests may shorten it.
+var stopWait = 3 * time.Second
+
+// terminateProc is the function StopDaemon uses to request graceful
+// termination. Tests may override it to simulate signal failures.
+var terminateProc = terminateProcess
+
+// killProcess force-kills a process that outlived the graceful-termination poll.
+func killProcess(proc *os.Process) error { return proc.Kill() }
+
+// killProc is the function StopDaemon and WaitForExit use to force-kill a
+// process that outlives the graceful-termination poll. Tests may override it.
+var killProc = killProcess
+
+// procExists is the function StopDaemon and WaitForExit use to poll for
+// process exit. Tests may override it to avoid killing real processes.
+var procExists = processExists
+
+const daemonFailureRetention = 10 * time.Minute
+
+// SessionEntry tracks a running daemon process in ~/.hunkyard/sessions/.
+type SessionEntry struct {
+	PID        int      `json:"pid"`
+	Port       int      `json:"port"`
+	Host       string   `json:"host,omitempty"`
+	PublicURL  string   `json:"public_url,omitempty"`
+	CWD        string   `json:"cwd"`
+	Args       []string `json:"args,omitempty"`
+	Branch     string   `json:"branch"`
+	ReviewPath string   `json:"review_path"`
+	StartedAt  string   `json:"started_at"`
+}
+
+// displayHost returns the host suitable for user-facing URLs.
+// Falls back to "localhost" for the default 127.0.0.1 binding or
+// when host is empty (older session files).
+func (e SessionEntry) DisplayHost() string {
+	return HostForDisplay(e.Host)
+}
+
+// BaseURL returns the user-facing HTTP base URL (browser, stderr).
+func (e SessionEntry) BaseURL() string {
+	return AdvertisedURL(e.PublicURL, e.Host, e.Port, "")
+}
+
+// AdvertisedURL builds the URL shown to users and opened in the browser.
+// When publicURL is set it is used as-is (optional path prefix included);
+// otherwise the listen host and port are used.
+func AdvertisedURL(publicURL, listenHost string, port int, path string) string {
+	if publicURL != "" {
+		base := strings.TrimSuffix(publicURL, "/")
+		if path == "" {
+			return base
+		}
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		return base + path
+	}
+	dh := HostForDisplay(listenHost)
+	if path == "" {
+		return fmt.Sprintf("http://%s:%d", dh, port)
+	}
+	if !strings.HasPrefix(path, "/") {
+		path = "/" + path
+	}
+	return fmt.Sprintf("http://%s:%d%s", dh, port, path)
+}
+
+// ConnURL uses loopback for wildcard listeners so owner requests remain local.
+func (e SessionEntry) ConnURL() string {
+	host := e.Host
+	switch host {
+	case "", "0.0.0.0":
+		host = "127.0.0.1"
+	case "::":
+		host = "::1"
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(e.Port))
+}
+
+// HostForDisplay maps a listen host to a user-facing hostname.
+func HostForDisplay(host string) string {
+	if host == "" || host == "127.0.0.1" || host == "0.0.0.0" || host == "::" {
+		return "localhost"
+	}
+	return host
+}
+
+// ResolvedCWD returns the current working directory with symlinks resolved.
+// This prevents macOS /var → /private/var mismatches in session keys.
+func ResolvedCWD() (string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		return cwd, nil //nolint:nilerr // best-effort: fall back to unresolved path
+	}
+	return resolved, nil
+}
+
+// sessionKey returns a deterministic hash used as the session filename.
+// Git mode (no args): sha256(cwd + "\0" + branch)[:12] — branch-scoped because diffs depend on it.
+// File mode (args present): sha256(cwd + "\0" + arg1 + "\0" + arg2 + ...)[:12] — branch-independent
+// because file reviews are not tied to a specific branch.
+func SessionKey(cwd string, branch string, args []string) string {
+	sorted := make([]string, len(args))
+	copy(sorted, args)
+	sort.Strings(sorted)
+	h := sha256.New()
+	h.Write([]byte(cwd))
+	h.Write([]byte{0})
+	if len(sorted) == 0 {
+		// Git mode: include branch so different branches get separate sessions.
+		h.Write([]byte(branch))
+	}
+	for _, a := range sorted {
+		h.Write([]byte{0})
+		h.Write([]byte(a))
+	}
+	return OwnerScopedKey(hex.EncodeToString(h.Sum(nil))[:12])
+}
+
+// OwnerScopedKey keeps separate host sessions from sharing a review consumer.
+func OwnerScopedKey(key string) string {
+	if !localonly.Enabled() {
+		return key
+	}
+	owner := feedback.CurrentIdentity()
+	if owner.Kind == "terminal" {
+		return key
+	}
+	hash := sha256.Sum256([]byte(key + "\x00owner\x00" + owner.Key))
+	return hex.EncodeToString(hash[:])[:12]
+}
+
+// LiveSessionKey returns the session/review key for a live-mode session.
+// Formula: sha256(cwd + "\0live\0" + origin)[:12].
+// The "\0live\0" separator ensures live reviews never collide with code
+// reviews in the same cwd (code reviews use "\0" + branch or "\0" + args).
+func LiveSessionKey(cwd, origin string) string {
+	h := sha256.New()
+	h.Write([]byte(cwd))
+	h.Write([]byte("\x00live\x00"))
+	h.Write([]byte(origin))
+	return hex.EncodeToString(h.Sum(nil))[:12]
+}
+
+// ValidSessionKey reports whether key looks like a hunkyard session ID (12 lowercase hex chars).
+func ValidSessionKey(key string) bool {
+	if len(key) != 12 {
+		return false
+	}
+	for _, c := range key {
+		if (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// InvalidSessionIDError returns the shared error for a malformed --session value.
+func InvalidSessionIDError(id string) error {
+	return fmt.Errorf("invalid session ID %q (expected 12-character hex)", id)
+}
+
+// sessionsDir returns the path to ~/.hunkyard/sessions/.
+func sessionsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("finding home directory: %w", err)
+	}
+	return filepath.Join(home, ".hunkyard", "sessions"), nil
+}
+
+// sessionFilePath returns the full path for a session file.
+func sessionFilePath(key string) (string, error) {
+	dir, err := sessionsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, key+".json"), nil
+}
+
+// reviewsDir returns the path to ~/.hunkyard/reviews/.
+func ReviewsDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("finding home directory: %w", err)
+	}
+	return filepath.Join(home, ".hunkyard", "reviews"), nil
+}
+
+// ReviewFilePath returns the v4 review identity path: a folder named <key>
+// (no extension) under ~/.hunkyard/reviews/. The actual JSON files live inside as
+// <key>/review.json and <key>/snapshots.json — see reviewPathsFor.
+func ReviewFilePath(key string) (string, error) {
+	dir, err := ReviewsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, key), nil
+}
+
+// WriteSessionFile writes a session entry to ~/.hunkyard/sessions/<key>.json.
+func WriteSessionFile(key string, entry SessionEntry) error {
+	path, err := sessionFilePath(key)
+	if err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(entry, "", "  ")
+	if err != nil {
+		return err
+	}
+	return config.AtomicWriteFile(path, data, 0600)
+}
+
+// ReadSessionFile reads a session entry from ~/.hunkyard/sessions/<key>.json.
+func ReadSessionFile(key string) (SessionEntry, error) {
+	path, err := sessionFilePath(key)
+	if err != nil {
+		return SessionEntry{}, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return SessionEntry{}, err
+	}
+	var entry SessionEntry
+	if err := json.Unmarshal(data, &entry); err != nil {
+		return SessionEntry{}, err
+	}
+	return entry, nil
+}
+
+// RemoveSessionFile deletes a session file and its log, and deletes the lock
+// file only when no client holds it.
+func RemoveSessionFile(key string) {
+	path, err := sessionFilePath(key)
+	if err != nil {
+		return
+	}
+	os.Remove(path)
+	// Keep a held lock in place: startup calls this after acquiring that lock.
+	dir := filepath.Dir(path)
+	os.Remove(filepath.Join(dir, key+".log"))
+	removeLockIfFree(filepath.Join(dir, key+".lock"))
+}
+
+// FindAliveSession looks up a session by key and returns it if alive.
+// Cleans up stale session files for dead processes.
+func FindAliveSession(key string) (SessionEntry, bool) {
+	entry, err := ReadSessionFile(key)
+	if err != nil {
+		return SessionEntry{}, false
+	}
+	if !isDaemonAlive(entry) {
+		RemoveSessionFile(key)
+		return SessionEntry{}, false
+	}
+	return entry, true
+}
+
+// ListSessionsForCWD returns all alive sessions whose CWD matches.
+// Cleans up stale session files as a side effect. A missing sessions
+// directory is not an error (no sessions yet); a failure to resolve or read
+// the directory is surfaced so callers can distinguish "no sessions" from "we
+// could not look".
+func ListSessionsForCWD(cwd string) ([]SessionEntry, error) {
+	sessions, _, err := scanSessionsForCWD(cwd)
+	return sessions, err
+}
+
+// ListSessionsForCWDWithKeys is like ListSessionsForCWD, but also returns the
+// stable session IDs in the same order as the entries. Commands that present
+// or accept an explicit session selector should use this variant.
+func ListSessionsForCWDWithKeys(cwd string) ([]SessionEntry, []string, error) {
+	return scanSessionsForCWD(cwd)
+}
+
+// SessionsForBranch narrows session candidates to the requested branch.
+func SessionsForBranch(sessions []SessionEntry, keys []string, branch string) ([]SessionEntry, []string) {
+	var matchedSessions []SessionEntry
+	var matchedKeys []string
+	for i, entry := range sessions {
+		if entry.Branch == branch && i < len(keys) {
+			matchedSessions = append(matchedSessions, entry)
+			matchedKeys = append(matchedKeys, keys[i])
+		}
+	}
+	return matchedSessions, matchedKeys
+}
+
+// listSessionsForCWD returns all alive sessions whose CWD matches, along with
+// their registry keys. Cleans up stale session files as a side effect.
+// Errors are discarded here: the callers that need keys (branch/cwd lookups)
+// treat any scan failure as "no match", which is the safe default.
+func listSessionsForCWD(cwd string) ([]SessionEntry, []string) {
+	sessions, keys, _ := scanSessionsForCWD(cwd)
+	return sessions, keys
+}
+
+// ListAllSessions returns all alive registered sessions and their registry
+// keys, regardless of working directory. It cleans up stale session files as a
+// side effect.
+func ListAllSessions() ([]SessionEntry, []string) {
+	dir, err := sessionsDir()
+	if err != nil {
+		return nil, nil
+	}
+	dirEntries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, nil
+	}
+	var alive []SessionEntry
+	var keys []string
+	for _, de := range dirEntries {
+		if !strings.HasSuffix(de.Name(), ".json") {
+			continue
+		}
+		key := strings.TrimSuffix(de.Name(), ".json")
+		data, err := os.ReadFile(filepath.Join(dir, de.Name()))
+		if err != nil {
+			continue
+		}
+		var entry SessionEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			continue
+		}
+		if isDaemonAlive(entry) {
+			alive = append(alive, entry)
+			keys = append(keys, key)
+		} else {
+			RemoveSessionFile(key)
+		}
+	}
+	return alive, keys
+}
+
+// scanSessionsForCWD walks the session registry and returns the alive sessions
+// matching cwd plus their keys. Cleans up stale session files as a side
+// effect. A missing registry directory yields an empty result and nil error;
+// a directory-resolution or read failure is returned so the exported
+// ListSessionsForCWD can surface it.
+func scanSessionsForCWD(cwd string) ([]SessionEntry, []string, error) {
+	dir, err := sessionsDir()
+	if err != nil {
+		return nil, nil, fmt.Errorf("resolving sessions dir: %w", err)
+	}
+	dirEntries, err := os.ReadDir(dir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil, nil
+		}
+		return nil, nil, fmt.Errorf("reading sessions dir: %w", err)
+	}
+	// Normalize on both sides so a session stored from any path style
+	// matches a probe with another style (matters on Windows where
+	// os.Getwd returns backslashes but tests/fixtures may use POSIX paths).
+	cwdSlash := filepath.ToSlash(cwd)
+	var alive []SessionEntry
+	var keys []string
+	for _, de := range dirEntries {
+		if !strings.HasSuffix(de.Name(), ".json") {
+			continue
+		}
+		key := strings.TrimSuffix(de.Name(), ".json")
+		data, err := os.ReadFile(filepath.Join(dir, de.Name()))
+		if err != nil {
+			continue
+		}
+		var entry SessionEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			continue
+		}
+		if filepath.ToSlash(entry.CWD) != cwdSlash {
+			continue
+		}
+		if localonly.Enabled() {
+			if _, err := LoadSessionOwner(key); err != nil {
+				continue
+			}
+		}
+		if isDaemonAlive(entry) {
+			alive = append(alive, entry)
+			keys = append(keys, key)
+		} else {
+			RemoveSessionFile(key)
+		}
+	}
+	return alive, keys, nil
+}
+
+// findSessionForCWDBranch scans all alive sessions for the given cwd and branch.
+// Returns the session, its key, and the number of branch matches found.
+// The session and key are only valid when matchCount == 1.
+func findSessionForCWDBranch(cwd, branch string) (entry SessionEntry, key string, matchCount int) {
+	sessions, keys := listSessionsForCWD(cwd)
+	var matched []int
+	for i, s := range sessions {
+		if s.Branch == branch {
+			matched = append(matched, i)
+		}
+	}
+	if len(matched) == 1 {
+		return sessions[matched[0]], keys[matched[0]], 1
+	}
+	return SessionEntry{}, "", len(matched)
+}
+
+// listSessionsForRepoRoot returns alive sessions whose CWD is within the given
+// git repository root. This handles the case where `hunkyard` was started from a
+// subdirectory (e.g. repo/api) but `hunkyard comment` is run from a different
+// subdirectory or the repo root itself.
+func ListSessionsForRepoRoot(repoRoot string) ([]SessionEntry, []string) {
+	dir, err := sessionsDir()
+	if err != nil {
+		return nil, nil
+	}
+	dirEntries, err := os.ReadDir(dir)
+	if err != nil {
+		return nil, nil
+	}
+	// Normalize separators on both sides — the stored CWD could have been
+	// written from any host, and on Windows os.Getwd() returns backslashes
+	// while subdirectory tests/fixtures often use forward slashes. Compare
+	// using POSIX form so the prefix check works regardless of origin.
+	repoRootSlash := filepath.ToSlash(repoRoot)
+	prefix := repoRootSlash + "/"
+	var alive []SessionEntry
+	var keys []string
+	for _, de := range dirEntries {
+		if !strings.HasSuffix(de.Name(), ".json") {
+			continue
+		}
+		key := strings.TrimSuffix(de.Name(), ".json")
+		data, err := os.ReadFile(filepath.Join(dir, de.Name()))
+		if err != nil {
+			continue
+		}
+		var entry SessionEntry
+		if err := json.Unmarshal(data, &entry); err != nil {
+			continue
+		}
+		entryCWD := filepath.ToSlash(entry.CWD)
+		if entryCWD != repoRootSlash && !strings.HasPrefix(entryCWD, prefix) {
+			continue
+		}
+		if isDaemonAlive(entry) {
+			alive = append(alive, entry)
+			keys = append(keys, key)
+		}
+	}
+	return alive, keys
+}
+
+// isDaemonAlive checks if the daemon process is running AND responding to HTTP.
+// After PID recycling, a different process could listen on the same port,
+// so we validate that the response body contains {"status":"ok"}.
+func isDaemonAlive(s SessionEntry) bool {
+	if s.PID <= 0 || s.Port <= 0 {
+		return false
+	}
+	proc, err := os.FindProcess(s.PID)
+	if err != nil {
+		return false
+	}
+	if !processExists(proc) {
+		return false
+	}
+	// HTTP health probe — ensures the port belongs to our daemon, not a reused PID.
+	// We validate the response body to guard against a non-hunkyard process on the same port.
+	resp, err := aliveClient.Get(s.ConnURL() + "/api/health")
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	return responseStatus(resp) == "ok"
+}
+
+// responseStatus returns the "status" field of a 200 JSON response and "" for
+// anything else, so callers can tell a hunkyard daemon from another service.
+func responseStatus(resp *http.Response) string {
+	if resp.StatusCode != http.StatusOK {
+		return ""
+	}
+	var body struct {
+		Status string `json:"status"`
+	}
+	if json.NewDecoder(resp.Body).Decode(&body) != nil {
+		return ""
+	}
+	return body.Status
+}
+
+// DaemonHasBrowser checks if the daemon has any connected browser clients.
+// Uses a pointer to distinguish "field missing" (older daemon) from "false".
+// When the field is missing, assumes a browser is connected (safe default).
+func DaemonHasBrowser(s SessionEntry) bool {
+	resp, err := browserClient.Get(s.ConnURL() + "/api/health")
+	if err != nil {
+		return true // can't reach daemon, assume browser exists
+	}
+	defer resp.Body.Close()
+	var result struct {
+		Status         string `json:"status"`
+		BrowserClients *bool  `json:"browser_clients"`
+	}
+	if resp.StatusCode != http.StatusOK {
+		return true
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return true
+	}
+	if result.Status != "ok" {
+		return true
+	}
+	if result.BrowserClients == nil {
+		return true // older daemon without this field — assume browser exists
+	}
+	return *result.BrowserClients
+}
+
+// acquireSessionLock tries to acquire a file-based lock for a session key using flock().
+// Returns the lock file handle on success. The caller must call releaseSessionLock.
+// flock is automatically released when the process dies, preventing stale locks.
+// Uses exponential backoff starting at 100ms, doubling up to 500ms.
+func acquireSessionLock(key string) (*os.File, error) {
+	dir, err := sessionsDir()
+	if err != nil {
+		return nil, err
+	}
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return nil, fmt.Errorf("creating sessions directory: %w", err)
+	}
+	lockPath := filepath.Join(dir, key+".lock")
+
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, err
+	}
+
+	deadline := time.Now().Add(5 * time.Second)
+	backoff := 100 * time.Millisecond
+	for time.Now().Before(deadline) {
+		err = flockExclusiveNB(f)
+		if err == nil {
+			if isFileAt(f, lockPath) {
+				return f, nil
+			}
+			// The holder deleted the file while this process waited on it,
+			// and a lock on a deleted file excludes nobody.
+			f.Close()
+			if f, err = os.OpenFile(lockPath, os.O_CREATE|os.O_WRONLY, 0644); err != nil {
+				return nil, err
+			}
+			continue
+		}
+		time.Sleep(backoff)
+		if backoff < 500*time.Millisecond {
+			backoff *= 2
+		}
+	}
+	f.Close()
+	return nil, fmt.Errorf("could not acquire session lock for %s", key)
+}
+
+// isFileAt reports whether f is still the file at path.
+func isFileAt(f *os.File, path string) bool {
+	held, err := f.Stat()
+	if err != nil {
+		return false
+	}
+	current, err := os.Stat(path)
+	return err == nil && os.SameFile(held, current)
+}
+
+// releaseSessionLock unlocks, closes, and removes the lock file.
+func releaseSessionLock(f *os.File) {
+	unlockAndRemove(f)
+}
+
+// removeLockIfFree deletes the lock file at path unless another process
+// holds it.
+func removeLockIfFree(path string) {
+	f, err := os.OpenFile(path, os.O_WRONLY, 0)
+	if err != nil {
+		return
+	}
+	removeOpenedLockIfFree(f, path)
+}
+
+// removeOpenedLockIfFree also checks whether the file was replaced after it
+// was opened, before deleting the path.
+func removeOpenedLockIfFree(f *os.File, path string) {
+	if flockExclusiveNB(f) != nil {
+		f.Close()
+		return
+	}
+	// The file may have been replaced after OpenFile but before the lock was
+	// acquired. Never remove a newer session's lock by its pathname.
+	if !isFileAt(f, path) {
+		_ = Funlock(f)
+		f.Close()
+		return
+	}
+	unlockAndRemove(f)
+}
+
+// setupDaemonCmd creates and configures the daemon child process.
+// Returns the command, readiness pipe read-end, write-end, log file, and any error.
+// The caller must close writeEnd and logFile after Start().
+//
+// Readiness is signaled via the child's stdout (an OS pipe). We deliberately
+// avoid cmd.ExtraFiles + FD 3: ExtraFiles is documented as unsupported on
+// Windows (see os/exec/exec.go), so the inherited handle is silently dropped
+// and the child's os.NewFile(3, ...) returns a stale handle whose writes go
+// nowhere. Stdout inheritance works on every supported OS, so the child reads
+// readiness via os.Stdout and the parent reads it via the pipe's read end.
+// _HUNKYARD_READY_STDOUT=1 tells the child to treat stdout as the readiness pipe
+// (otherwise stdout is the user's terminal and we must not emit the port).
+func setupDaemonCmd(key string, args []string, dir string) (*exec.Cmd, *os.File, *os.File, *os.File, error) {
+	selfPath, err := os.Executable()
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("finding executable: %w", err)
+	}
+
+	cmdArgs := append([]string{"_serve"}, args...)
+	cmd := exec.Command(selfPath, cmdArgs...)
+
+	if dir == "" {
+		dir, err = os.Getwd()
+		if err != nil {
+			return nil, nil, nil, nil, fmt.Errorf("getting working directory: %w", err)
+		}
+	}
+	cmd.Dir = dir
+	cmd.Stdin = nil
+
+	logPath, err := sessionLogPath(key)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("creating log path: %w", err)
+	}
+	logFile, err := os.Create(logPath)
+	if err != nil {
+		return nil, nil, nil, nil, fmt.Errorf("creating daemon log file: %w", err)
+	}
+	cmd.Stderr = logFile
+
+	readEnd, writeEnd, err := os.Pipe()
+	if err != nil {
+		logFile.Close()
+		return nil, nil, nil, nil, fmt.Errorf("creating readiness pipe: %w", err)
+	}
+	cmd.Stdout = writeEnd
+	cmd.Env = append(os.Environ(), "_HUNKYARD_READY_STDOUT=1")
+	cmd.SysProcAttr = daemonSysProcAttr()
+
+	return cmd, readEnd, writeEnd, logFile, nil
+}
+
+// prepareDaemonCmd removes stale session state before creating the log that
+// the new daemon inherits. This keeps fatal initialization errors readable by
+// the client after the daemon exits.
+func prepareDaemonCmd(key string, args []string, dir string) (*exec.Cmd, *os.File, *os.File, *os.File, error) {
+	RemoveSessionFile(key)
+	return setupDaemonCmd(key, args, dir)
+}
+
+func readPortFromPipe(readEnd *os.File) (portCh chan int, errCh chan error) {
+	portCh = make(chan int, 1)
+	errCh = make(chan error, 1)
+	go func() {
+		scanner := bufio.NewScanner(readEnd)
+		if !scanner.Scan() {
+			errCh <- fmt.Errorf("daemon closed readiness pipe without writing")
+			return
+		}
+		line := scanner.Text()
+		if strings.HasPrefix(line, "error:") {
+			errCh <- fmt.Errorf("%s", strings.TrimPrefix(line, "error:"))
+			return
+		}
+		port, err := strconv.Atoi(line)
+		if err != nil {
+			errCh <- fmt.Errorf("daemon wrote invalid port: %q", line)
+			return
+		}
+		portCh <- port
+	}()
+	return portCh, errCh
+}
+
+//nolint:unparam // error return is kept for consistent StartDaemon select-case handling
+func handleDaemonReady(key string, port, pid int, readEnd *os.File, cmd *exec.Cmd) (SessionEntry, error) {
+	readEnd.Close()
+	cmd.Process.Release()
+
+	entry, err := ReadSessionFile(key)
+	if err != nil {
+		log.Printf("Warning: failed to read session file for key %s: %v (using partial entry)", key, err)
+		cwd, _ := ResolvedCWD()
+		entry = SessionEntry{
+			PID:       pid,
+			Port:      port,
+			CWD:       cwd,
+			StartedAt: time.Now().UTC().Format(time.RFC3339),
+		}
+	}
+	return entry, nil
+}
+
+//nolint:unparam // SessionEntry return is kept for consistent StartDaemon select-case handling
+func handleDaemonPipeError(key string, readErr error, readEnd *os.File, cmd *exec.Cmd, exited chan error) (SessionEntry, error) {
+	readEnd.Close()
+	// Wait briefly for daemon exit — pipe EOF usually means it already crashed.
+	// cmd.Wait() completes near-instantly for a dead process; the timeout
+	// handles the rare case where the daemon closed FD 3 but is still running.
+	select {
+	case <-exited:
+	case <-time.After(500 * time.Millisecond):
+		cmd.Process.Kill()
+		<-exited
+	}
+	msg := ReadDaemonLog(key)
+	if msg != "" {
+		return SessionEntry{}, fmt.Errorf("daemon exited: %s", msg)
+	}
+	return SessionEntry{}, fmt.Errorf("daemon startup failed: %w", readErr)
+}
+
+// StartDaemon spawns a hunkyard _serve process in the background and waits for it to be ready.
+// The key must match what the daemon computes in runServe (sessionKey(cwd, branch, fileArgs)).
+// Raw args (including flags) are passed through to _serve which parses them itself.
+// Uses an OS pipe (FD 3) for the daemon to signal readiness by writing its port number.
+func StartDaemon(key string, args []string) (SessionEntry, error) {
+	return StartDaemonInDir(key, args, "")
+}
+
+// StartDaemonInDir is StartDaemon with an explicit working directory for the
+// daemon process. An empty dir means "inherit ours", which is what a review
+// started from the current directory wants. `hunkyard resume` passes the directory
+// recorded in the review file so a session can be restarted from anywhere.
+func StartDaemonInDir(key string, args []string, dir string) (SessionEntry, error) {
+	lock, err := acquireSessionLock(key)
+	if err != nil {
+		return SessionEntry{}, err
+	}
+	defer releaseSessionLock(lock)
+
+	if entry, alive := FindAliveSession(key); alive {
+		return entry, nil
+	}
+
+	cmd, readEnd, writeEnd, logFile, err := prepareDaemonCmd(key, args, dir)
+	if err != nil {
+		return SessionEntry{}, err
+	}
+
+	if err := cmd.Start(); err != nil {
+		logFile.Close()
+		readEnd.Close()
+		writeEnd.Close()
+		return SessionEntry{}, fmt.Errorf("starting daemon: %w", err)
+	}
+	writeEnd.Close()
+	logFile.Close()
+	newPID := cmd.Process.Pid
+
+	exited := make(chan error, 1)
+	go func() { exited <- cmd.Wait() }()
+
+	portCh, errCh := readPortFromPipe(readEnd)
+
+	select {
+	case port := <-portCh:
+		return handleDaemonReady(key, port, newPID, readEnd, cmd)
+
+	case readErr := <-errCh:
+		return handleDaemonPipeError(key, readErr, readEnd, cmd, exited)
+
+	case err := <-exited:
+		readEnd.Close()
+		msg := ReadDaemonLog(key)
+		if msg != "" {
+			return SessionEntry{}, fmt.Errorf("daemon exited: %s", msg)
+		}
+		return SessionEntry{}, fmt.Errorf("daemon exited: %w", err)
+
+	case <-time.After(10 * time.Second):
+		readEnd.Close()
+		cmd.Process.Kill()
+		<-exited
+		return SessionEntry{}, fmt.Errorf("daemon did not start within 10 seconds")
+	}
+}
+
+// sessionLogPath returns the path for a daemon's log file.
+func sessionLogPath(key string) (string, error) {
+	dir, err := sessionsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, key+".log"), nil
+}
+
+func daemonFailurePath(key, generation string) (string, error) {
+	dir, err := sessionsDir()
+	if err != nil {
+		return "", err
+	}
+	digest := sha256.Sum256([]byte(generation))
+	return filepath.Join(dir, fmt.Sprintf("%s-%x.error", key, digest)), nil
+}
+
+// WriteDaemonFailure preserves a fatal post-readiness initialization error for
+// the client that started this daemon. Failure records are generation-scoped
+// so a reused PID cannot be mistaken for an earlier daemon with the same key.
+func WriteDaemonFailure(key, generation string, err error) error {
+	path, pathErr := daemonFailurePath(key, generation)
+	if pathErr != nil {
+		return pathErr
+	}
+	return config.AtomicWriteFile(path, []byte(err.Error()), 0600)
+}
+
+// ReadDaemonFailure returns the fatal initialization error for one daemon generation.
+func ReadDaemonFailure(key, generation string) string {
+	path, err := daemonFailurePath(key, generation)
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// ReadDaemonLog reads and returns the trimmed contents of a daemon log file.
+func ReadDaemonLog(key string) string {
+	logPath, err := sessionLogPath(key)
+	if err != nil {
+		return ""
+	}
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+func cleanExpiredDaemonFailures(dir string) {
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return
+	}
+	cutoff := time.Now().Add(-daemonFailureRetention)
+	for _, entry := range entries {
+		name := entry.Name()
+		switch {
+		case strings.HasSuffix(name, ".error"):
+		case strings.HasSuffix(name, ".log"):
+			// A Windows daemon cannot delete its own open log when it stops,
+			// so a log can outlive its .json. A starting daemon briefly has
+			// only a log, hence the same retention.
+			if _, err := os.Stat(filepath.Join(dir, strings.TrimSuffix(name, ".log")+".json")); err == nil {
+				continue
+			}
+		default:
+			continue
+		}
+		info, err := entry.Info()
+		if err == nil && info.ModTime().Before(cutoff) {
+			_ = os.Remove(filepath.Join(dir, entry.Name()))
+		}
+	}
+}
+
+// OpenReadyPipe returns the readiness pipe (the inherited stdout) if this
+// process was spawned as a daemon with _HUNKYARD_READY_STDOUT=1. Returns nil
+// otherwise. The caller owns the returned file and must close it. After the
+// pipe is returned, os.Stdout is repointed at the log file (stderr) so any
+// stray writes to stdout don't corrupt the readiness handshake.
+func OpenReadyPipe() *os.File {
+	if os.Getenv("_HUNKYARD_READY_STDOUT") != "1" {
+		return nil
+	}
+	os.Unsetenv("_HUNKYARD_READY_STDOUT")
+	pipe := os.Stdout
+	// Repoint stdout at stderr (the daemon log file) so subsequent writes
+	// to fmt.Println/log don't accidentally race the port handshake or
+	// keep the parent's read-end open after we close the pipe.
+	os.Stdout = os.Stderr
+	return pipe
+}
+
+// SignalReadiness writes the port number to the readiness pipe.
+// pipe may be nil (not running as daemon), in which case this is a no-op.
+func SignalReadiness(pipe *os.File, port int) {
+	if pipe == nil {
+		return
+	}
+	fmt.Fprintf(pipe, "%d\n", port)
+	pipe.Close()
+}
+
+// DaemonFatal reports a startup error through the readiness pipe so the
+// parent process receives a structured message, then exits.
+// pipe may be nil (not running as daemon); the error is always logged to stderr.
+func DaemonFatal(pipe *os.File, format string, args ...interface{}) {
+	msg := fmt.Sprintf(format, args...)
+	log.Print(msg)
+	if pipe != nil {
+		fmt.Fprintf(pipe, "error:%s\n", msg)
+		pipe.Close()
+	}
+	os.Exit(1)
+}
+
+// terminationProvesGone reports whether a failed termination attempt is
+// evidence that the process no longer exists. EPERM and other failures are
+// evidence about our privileges, not about the process.
+func terminationProvesGone(err error) bool {
+	return errors.Is(err, os.ErrProcessDone) || errors.Is(err, syscall.ESRCH)
+}
+
+// ShutdownResult is how a daemon answered RequestShutdown.
+type ShutdownResult int
+
+const (
+	// ShutdownUnavailable means no answer, or an older daemon without
+	// /api/shutdown.
+	ShutdownUnavailable ShutdownResult = iota
+	// ShutdownAccepted means the daemon is shutting down gracefully.
+	ShutdownAccepted
+	// ShutdownWrongDaemon means another daemon now serves the entry's port, so
+	// the entry is stale and its PID may belong to an unrelated process.
+	ShutdownWrongDaemon
+)
+
+// RequestShutdown asks the daemon over HTTP to shut down gracefully, which,
+// unlike a signal, reaches a Windows daemon in another console.
+func RequestShutdown(s SessionEntry) ShutdownResult {
+	url := s.ConnURL() + "/api/shutdown?pid=" + strconv.Itoa(s.PID)
+	resp, err := shutdownClient.Post(url, "application/json", nil)
+	if err != nil {
+		return ShutdownUnavailable
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusConflict {
+		return ShutdownWrongDaemon
+	}
+	if responseStatus(resp) == "stopping" {
+		return ShutdownAccepted
+	}
+	return ShutdownUnavailable
+}
+
+// WaitForExit waits for the process to exit and kills it if it is still alive
+// after stopWait. It reports whether the process is gone, so callers do not
+// remove files that a surviving daemon may write again.
+func WaitForExit(pid int) bool {
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		// On Windows FindProcess opens a process handle and can fail when the
+		// daemon has already exited. Probe the PID to distinguish that from
+		// access being denied to a process that is still running.
+		return !procExists(&os.Process{Pid: pid})
+	}
+	gone, _ := waitOrKill(proc)
+	return gone
+}
+
+// waitOrKill waits stopWait for proc to exit, kills it if it is still alive,
+// and waits again. It reports whether the process is gone. err is the kill
+// error when the kill failed and does not prove the process is gone.
+func waitOrKill(proc *os.Process) (gone bool, err error) {
+	if waitForExit(proc, stopWait) {
+		return true, nil
+	}
+	if err := killProc(proc); err != nil {
+		if terminationProvesGone(err) {
+			return true, nil
+		}
+		return false, err
+	}
+	// A kill is asynchronous on Windows, and the daemon's files stay open
+	// until it is gone.
+	return waitForExit(proc, stopWait), nil
+}
+
+// sessionOwnedBy reports whether key's session file still names the daemon
+// with the given PID.
+func sessionOwnedBy(key string, pid int) bool {
+	entry, err := ReadSessionFile(key)
+	return err == nil && entry.PID == pid
+}
+
+// UnlessSessionTakenOver runs fn under key's session lock unless another
+// daemon has registered under key. A starting daemon's client holds that lock
+// until the daemon has registered, so none can take the key over while fn
+// runs.
+func UnlessSessionTakenOver(key string, pid int, fn func()) {
+	lock, err := acquireSessionLock(key)
+	if err != nil {
+		log.Printf("Warning: could not lock session %s, skipping cleanup after daemon exit: %v", key, err)
+		return
+	}
+	defer releaseSessionLock(lock)
+	if entry, err := ReadSessionFile(key); err == nil && entry.PID != pid {
+		return
+	}
+	fn()
+}
+
+// waitForExit polls until proc has exited or timeout elapses, and reports
+// whether it exited.
+func waitForExit(proc *os.Process, timeout time.Duration) bool {
+	deadline := time.Now().Add(timeout)
+	for procExists(proc) {
+		if !time.Now().Before(deadline) {
+			return false
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return true
+}
+
+// StopDaemon stops the daemon for the given session key.
+func StopDaemon(key string) error {
+	entry, err := ReadSessionFile(key)
+	if err != nil {
+		return fmt.Errorf("no session found: %w", err)
+	}
+
+	// Verify this PID is actually our hunkyard daemon (not a reused PID)
+	if !isDaemonAlive(entry) {
+		RemoveSessionFile(key)
+		return nil
+	}
+
+	proc, err := os.FindProcess(entry.PID)
+	if err != nil {
+		RemoveSessionFile(key)
+		return nil //nolint:nilerr // process not found, session already cleaned up
+	}
+
+	switch RequestShutdown(entry) {
+	case ShutdownWrongDaemon:
+		if sessionOwnedBy(key, entry.PID) {
+			RemoveSessionFile(key)
+		}
+		return nil
+	case ShutdownUnavailable:
+		// A daemon already shutting down for another client removed its
+		// session file before it stopped answering; that client kills it if
+		// it hangs.
+		if !sessionOwnedBy(key, entry.PID) {
+			waitForExit(proc, stopWait)
+			return nil
+		}
+		if err := terminateProc(proc); err != nil && !terminationProvesGone(err) {
+			return fmt.Errorf("could not stop daemon %s (pid %d): %w; session file kept so you can retry", key, entry.PID, err)
+		}
+	}
+
+	gone, err := waitOrKill(proc)
+	if err != nil {
+		return fmt.Errorf("could not stop daemon %s (pid %d): %w; session file kept so you can retry", key, entry.PID, err)
+	}
+	if !gone {
+		return fmt.Errorf("could not confirm daemon %s (pid %d) exited after kill; session file kept so you can retry", key, entry.PID)
+	}
+	// A daemon that stopped gracefully removed its own file, and a successor
+	// may own the key by now.
+	if sessionOwnedBy(key, entry.PID) {
+		RemoveSessionFile(key)
+	}
+	return nil
+}
+
+// stopAllDaemonsForCWD stops all daemons running in the given directory.
+func stopAllDaemonsForCWD(cwd string) {
+	_, keys := listSessionsForCWD(cwd)
+	for _, key := range keys {
+		StopDaemon(key)
+	}
+}
+
+// cleanOrphanedSessions removes session files whose daemon PID is dead.
+// It silently ignores all errors — intended for best-effort background use.
+func cleanOrphanedSessions() {
+	sessDir, err := sessionsDir()
+	if err != nil {
+		return
+	}
+	entries, err := os.ReadDir(sessDir)
+	if err != nil {
+		return
+	}
+	cleanExpiredDaemonFailures(sessDir)
+	for _, de := range entries {
+		if !strings.HasSuffix(de.Name(), ".json") {
+			continue
+		}
+		path := filepath.Join(sessDir, de.Name())
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var entry SessionEntry
+		if json.Unmarshal(data, &entry) != nil {
+			continue
+		}
+		if !isDaemonAlive(entry) {
+			os.Remove(path)
+			key := strings.TrimSuffix(de.Name(), ".json")
+			os.Remove(filepath.Join(sessDir, key+".log"))
+			removeLockIfFree(filepath.Join(sessDir, key+".lock"))
+		}
+	}
+}

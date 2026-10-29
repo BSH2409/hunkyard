@@ -1,0 +1,176 @@
+{
+  "source": "https://github.com/octocat/Hello-World/pull/1/files",
+  "base": "553c2077f0edc3d5dc5d17262f6aa498e69d6f8e",
+  "head": "7044a8a032e85b6ab611033b2ac8af7ce85805b2",
+  "captured_at": "2026-10-19T07:01:42.776Z",
+  "viewport": {
+    "width": 1440,
+    "height": 900
+  },
+  "themes": {
+    "light": {
+      "html": {
+        "background": "rgb(255, 255, 255)",
+        "color": "rgb(31, 35, 40)",
+        "font": "sans-serif",
+        "font_size": "16px",
+        "line_height": "normal",
+        "border": "rgb(31, 35, 40)"
+      },
+      "body": {
+        "background": "rgb(255, 255, 255)",
+        "color": "rgb(31, 35, 40)",
+        "font": "\"Mona Sans VF\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans Backtick Fix\", \"Noto Sans\", Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+        "font_size": "14px",
+        "line_height": "21px",
+        "border": "rgb(31, 35, 40)"
+      },
+      ".file-header": {
+        "background": "rgb(246, 248, 250)",
+        "color": "rgb(31, 35, 40)",
+        "font": "\"Mona Sans VF\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans Backtick Fix\", \"Noto Sans\", Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+        "font_size": "14px",
+        "line_height": "21px",
+        "border": "rgb(31, 35, 40) rgb(31, 35, 40) rgb(209, 217, 224)"
+      },
+      ".blob-code-deletion": {
+        "background": "rgb(255, 235, 233)",
+        "color": "rgb(31, 35, 40)",
+        "font": "\"Mona Sans VF\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans Backtick Fix\", \"Noto Sans\", Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+        "font_size": "14px",
+        "line_height": "20px",
+        "border": "rgb(31, 35, 40)"
+      },
+      ".blob-code-addition": {
+        "background": "rgb(218, 251, 225)",
+        "color": "rgb(31, 35, 40)",
+        "font": "\"Mona Sans VF\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans Backtick Fix\", \"Noto Sans\", Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+        "font_size": "14px",
+        "line_height": "20px",
+        "border": "rgb(31, 35, 40)"
+      },
+      ".blob-num-deletion": {
+        "background": "rgb(255, 206, 203)",
+        "color": "rgb(31, 35, 40)",
+        "font": "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+        "font_size": "12px",
+        "line_height": "20px",
+        "border": "rgb(207, 34, 46)"
+      },
+      ".blob-num-addition": {
+        "background": "rgb(172, 238, 187)",
+        "color": "rgb(31, 35, 40)",
+        "font": "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+        "font_size": "12px",
+        "line_height": "20px",
+        "border": "rgb(26, 127, 55) rgb(26, 127, 55) rgb(26, 127, 55) rgba(209, 217, 224, 0.7)"
+      },
+      ".blob-code-hunk": {
+        "background": "rgb(221, 244, 255)",
+        "color": "rgb(89, 99, 110)",
+        "font": "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+        "font_size": "12px",
+        "line_height": "20px",
+        "border": "rgb(89, 99, 110)"
+      },
+      ".blob-num-hunk": {
+        "background": "rgb(182, 227, 255)",
+        "color": "rgb(89, 99, 110)",
+        "font": "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+        "font_size": "12px",
+        "line_height": "20px",
+        "border": "rgb(89, 99, 110)"
+      },
+      "attributes": {
+        "colorMode": "auto",
+        "lightTheme": "light",
+        "darkTheme": "dark",
+        "a11yAnimatedImages": "system",
+        "a11yLinkUnderlines": "true",
+        "turboLoaded": ""
+      }
+    },
+    "dark": {
+      "html": {
+        "background": "rgb(13, 17, 23)",
+        "color": "rgb(240, 246, 252)",
+        "font": "sans-serif",
+        "font_size": "16px",
+        "line_height": "normal",
+        "border": "rgb(240, 246, 252)"
+      },
+      "body": {
+        "background": "rgb(13, 17, 23)",
+        "color": "rgb(240, 246, 252)",
+        "font": "\"Mona Sans VF\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans Backtick Fix\", \"Noto Sans\", Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+        "font_size": "14px",
+        "line_height": "21px",
+        "border": "rgb(240, 246, 252)"
+      },
+      ".file-header": {
+        "background": "rgb(21, 27, 35)",
+        "color": "rgb(240, 246, 252)",
+        "font": "\"Mona Sans VF\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans Backtick Fix\", \"Noto Sans\", Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+        "font_size": "14px",
+        "line_height": "21px",
+        "border": "rgb(240, 246, 252) rgb(240, 246, 252) rgb(61, 68, 77)"
+      },
+      ".blob-code-deletion": {
+        "background": "rgba(248, 81, 73, 0.1)",
+        "color": "rgb(240, 246, 252)",
+        "font": "\"Mona Sans VF\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans Backtick Fix\", \"Noto Sans\", Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+        "font_size": "14px",
+        "line_height": "20px",
+        "border": "rgb(240, 246, 252)"
+      },
+      ".blob-code-addition": {
+        "background": "rgba(46, 160, 67, 0.15)",
+        "color": "rgb(240, 246, 252)",
+        "font": "\"Mona Sans VF\", -apple-system, BlinkMacSystemFont, \"Segoe UI\", \"Noto Sans Backtick Fix\", \"Noto Sans\", Helvetica, Arial, sans-serif, \"Apple Color Emoji\", \"Segoe UI Emoji\"",
+        "font_size": "14px",
+        "line_height": "20px",
+        "border": "rgb(240, 246, 252)"
+      },
+      ".blob-num-deletion": {
+        "background": "rgba(248, 81, 73, 0.3)",
+        "color": "rgb(240, 246, 252)",
+        "font": "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+        "font_size": "12px",
+        "line_height": "20px",
+        "border": "rgb(218, 54, 51)"
+      },
+      ".blob-num-addition": {
+        "background": "rgba(63, 185, 80, 0.3)",
+        "color": "rgb(240, 246, 252)",
+        "font": "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+        "font_size": "12px",
+        "line_height": "20px",
+        "border": "rgb(35, 134, 54) rgb(35, 134, 54) rgb(35, 134, 54) rgba(61, 68, 77, 0.7)"
+      },
+      ".blob-code-hunk": {
+        "background": "rgba(56, 139, 253, 0.1)",
+        "color": "rgb(145, 152, 161)",
+        "font": "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+        "font_size": "12px",
+        "line_height": "20px",
+        "border": "rgb(145, 152, 161)"
+      },
+      ".blob-num-hunk": {
+        "background": "rgb(12, 45, 107)",
+        "color": "rgb(145, 152, 161)",
+        "font": "ui-monospace, SFMono-Regular, \"SF Mono\", Menlo, Consolas, \"Liberation Mono\", monospace",
+        "font_size": "12px",
+        "line_height": "20px",
+        "border": "rgb(145, 152, 161)"
+      },
+      "attributes": {
+        "colorMode": "auto",
+        "lightTheme": "light",
+        "darkTheme": "dark",
+        "a11yAnimatedImages": "system",
+        "a11yLinkUnderlines": "true",
+        "turboLoaded": ""
+      }
+    }
+  }
+}

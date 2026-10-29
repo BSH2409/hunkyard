@@ -1,0 +1,15 @@
+[tools]
+go = "1.26.0"
+node = "22"
+golangci-lint = "2.11.4"
+
+[env]
+PORT = "8080"
+
+# Worktree config (read by `dev wt` commands)
+WT_COPY_DIRS = "test/e2e/node_modules"
+
+[tasks.up]
+description = "Build and run hunkyard"
+run = "make build && ./hunkyard test/shell/notification-plan.md"
+raw = true

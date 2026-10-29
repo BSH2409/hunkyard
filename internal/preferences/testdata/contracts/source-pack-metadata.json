@@ -1,0 +1,12 @@
+{
+  "code-like-him": {
+    "digest": "3a7444a43337272125fa5339f61683d72cb2c6c134d33f405e6f6474c2d88eed",
+    "files": {
+      "SKILL.md": "680520a7e55e328e2f06704c519c4ce854719762aac9f09ac57d89d341faef76",
+      "reference/anti-patterns.md": "bb4174bdde578d443c0681ef60b590984bf8436c31e02a2d2d78b5f8ef00f6b2",
+      "reference/structural-decomposition.md": "02e3ff58d2850b1d07df22e2133e9836593421e3897346b89edb4f87fd9b8487",
+      "reference/testing-posture.md": "d49eb7f77a576446904fdfd774e4b20d321b190c16495d5ee06fd8543671d21b"
+    },
+    "refreshed_at": "2026-08-19T12:00:00Z"
+  }
+}

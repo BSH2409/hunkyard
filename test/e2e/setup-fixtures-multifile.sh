@@ -1,0 +1,171 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PORT="${1:-3127}"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+HUNKYARD_SRC="$(cd "$SCRIPT_DIR/../.." && pwd)"
+# shellcheck source=lib.sh
+source "$SCRIPT_DIR/lib.sh"
+DIR=$(e2e_native_tempdir)
+BIN_DIR=$(mktemp -d)
+e2e_cleanup_install
+e2e_cleanup_add "$DIR" "$BIN_DIR"
+
+cd "$DIR"
+
+# Init a git repo (file mode inside a git repo, mirrors real usage)
+git init -q
+git config user.email "test@test.com"
+git config user.name "Test"
+
+# === Markdown file ===
+cat > plan.md << 'MDFILE'
+# Migration Plan
+
+## Overview
+
+Migrating the database from PostgreSQL to CockroachDB.
+
+## Steps
+
+1. Audit current schema
+2. Test compatibility
+3. Run migration scripts
+4. Validate data integrity
+
+## Notes
+
+> CockroachDB is wire-compatible with PostgreSQL but has some differences.
+
+```sql
+SELECT * FROM users WHERE created_at > NOW() - INTERVAL '30 days';
+```
+MDFILE
+
+# === Go file ===
+cat > main.go << 'GOFILE'
+package main
+
+import (
+	"fmt"
+	"net/http"
+	"os"
+)
+
+func main() {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+
+	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintf(w, "Hello, %s!", r.URL.Path[1:])
+	})
+
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		fmt.Fprint(w, "ok")
+	})
+
+	fmt.Printf("Listening on :%s\n", port)
+	http.ListenAndServe(":"+port, nil)
+}
+GOFILE
+
+# === Elixir file ===
+cat > handler.ex << 'EXFILE'
+defmodule MyApp.Handler do
+  @moduledoc """
+  HTTP request handler for the notification service.
+  """
+
+  alias MyApp.Notifications
+
+  def handle_request(%{method: "POST", path: "/notify"} = conn) do
+    case Jason.decode(conn.body) do
+      {:ok, %{"user_id" => user_id, "message" => message}} ->
+        notification = Notifications.create(user_id, message)
+        send_json(conn, 201, notification)
+
+      {:error, _reason} ->
+        send_json(conn, 400, %{error: "Invalid JSON"})
+    end
+  end
+
+  def handle_request(%{method: "GET", path: "/health"} = conn) do
+    send_json(conn, 200, %{status: "ok"})
+  end
+
+  def handle_request(conn) do
+    send_json(conn, 404, %{error: "Not found"})
+  end
+
+  defp send_json(conn, status, body) do
+    conn
+    |> put_resp_content_type("application/json")
+    |> send_resp(status, Jason.encode!(body))
+  end
+end
+EXFILE
+
+# === Subdirectory with files ===
+mkdir -p lib
+
+cat > lib/utils.ex << 'EXFILE'
+defmodule MyApp.Utils do
+  @moduledoc "Utility functions."
+
+  def capitalize(s) when is_binary(s) do
+    String.capitalize(s)
+  end
+
+  def truncate(s, max_length) when is_binary(s) and is_integer(max_length) do
+    if String.length(s) > max_length do
+      String.slice(s, 0, max_length) <> "..."
+    else
+      s
+    end
+  end
+end
+EXFILE
+
+cat > lib/config.ex << 'EXFILE'
+defmodule MyApp.Config do
+  @moduledoc "Application configuration helpers."
+
+  def get_env(key, default \\ nil) do
+    System.get_env(key) || default
+  end
+
+  def port do
+    get_env("PORT", "4000") |> String.to_integer()
+  end
+
+  def environment do
+    get_env("MIX_ENV", "dev")
+  end
+end
+EXFILE
+
+# Mermaid file (.mmd, mermaid.js.org's recommended extension): rendered by the
+# built-in pluggable renderer with a Diagram / Source toggle.
+cat > flow.mmd << 'MMDFILE'
+flowchart TD
+  Start[Receive request] --> Auth{Authorized?}
+  Auth -->|yes| Handle[Handle request]
+  Auth -->|no| Reject[Reject]
+MMDFILE
+
+git add -A && git commit -q -m "initial commit"
+
+# Build hunkyard binary outside the fixture dir (skip if HUNKYARD_BIN is set)
+if [ -z "${HUNKYARD_BIN:-}" ]; then
+  HUNKYARD_BIN="$BIN_DIR/$(e2e_bin_name)"
+  (cd "$HUNKYARD_SRC" && go build -o "$HUNKYARD_BIN" ./cmd/hunkyard)
+fi
+
+# Isolate from user's ~/.hunkyard.config.json (and USERPROFILE on Windows).
+e2e_export_fake_home "$DIR"
+
+# Run hunkyard in file mode with explicit files AND a directory
+e2e_serve "$HUNKYARD_BIN" _serve --no-open --port "$PORT" plan.md main.go handler.ex flow.mmd lib/

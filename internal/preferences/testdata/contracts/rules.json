@@ -1,0 +1,1859 @@
+{
+  "schema_version": 1,
+  "provenance": "Ruby RuleCatalog under fixed 2026-08-19 clock; synthetic observations and rules only",
+  "cases": [
+    {
+      "name": "explicit_global",
+      "seed": [],
+      "initial": [],
+      "steps": [
+        {
+          "action": {
+            "type": "upsert",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "observation": {
+              "id": "explicit",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s1",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule_72c2b0062571864cbe3ecdd8594122f956f0aa05d6fc0edd90ac56718de009ed",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "feedback",
+            "status": "active",
+            "observations": [
+              {
+                "id": "explicit",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": true,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 1,
+              "session_count": 1,
+              "repository_count": 1,
+              "explicit_count": 1
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        }
+      ],
+      "expected_rules": [
+        {
+          "id": "rule_72c2b0062571864cbe3ecdd8594122f956f0aa05d6fc0edd90ac56718de009ed",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "global",
+            "repo_key": null
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "feedback",
+          "status": "active",
+          "observations": [
+            {
+              "id": "explicit",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s1",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": true,
+              "safe_excerpt": "Prefer early returns"
+            }
+          ],
+          "evidence": {
+            "observation_count": 1,
+            "session_count": 1,
+            "repository_count": 1,
+            "explicit_count": 1
+          },
+          "examples": [
+            "Prefer early returns"
+          ],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "repository_independence",
+      "seed": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "initial": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "steps": [
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "a",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s1",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "candidate",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 1,
+              "session_count": 1,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "b",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s1",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "candidate",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "b",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 2,
+              "session_count": 1,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "c",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s2",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "active",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "b",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "c",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 3,
+              "session_count": 2,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        }
+      ],
+      "expected_rules": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "active",
+          "observations": [
+            {
+              "id": "a",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s1",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            },
+            {
+              "id": "b",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s1",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            },
+            {
+              "id": "c",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s2",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            }
+          ],
+          "evidence": {
+            "observation_count": 3,
+            "session_count": 2,
+            "repository_count": 1,
+            "explicit_count": 0
+          },
+          "examples": [
+            "Prefer early returns"
+          ],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "global_independence",
+      "seed": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "global",
+            "repo_key": null
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "initial": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "global",
+            "repo_key": null
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "steps": [
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "a",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s1",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "candidate",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 1,
+              "session_count": 1,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "b",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s2",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "candidate",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "b",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 2,
+              "session_count": 2,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "c",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "beta-a1b2c3d4e5f6",
+              "session_key": "s3",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "active",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "b",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "c",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s3",
+                "repo_key": "beta-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 3,
+              "session_count": 3,
+              "repository_count": 2,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        }
+      ],
+      "expected_rules": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "global",
+            "repo_key": null
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "active",
+          "observations": [
+            {
+              "id": "a",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s1",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            },
+            {
+              "id": "b",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s2",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            },
+            {
+              "id": "c",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s3",
+              "repo_key": "beta-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            }
+          ],
+          "evidence": {
+            "observation_count": 3,
+            "session_count": 3,
+            "repository_count": 2,
+            "explicit_count": 0
+          },
+          "examples": [
+            "Prefer early returns"
+          ],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "core_evidence",
+      "seed": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "initial": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "steps": [
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "0",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s1",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "candidate",
+            "observations": [
+              {
+                "id": "0",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 1,
+              "session_count": 1,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "1",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s1",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "candidate",
+            "observations": [
+              {
+                "id": "0",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "1",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 2,
+              "session_count": 1,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "2",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s2",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "active",
+            "observations": [
+              {
+                "id": "0",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "1",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "2",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 3,
+              "session_count": 2,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "3",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s2",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "active",
+            "observations": [
+              {
+                "id": "0",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "1",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "2",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "3",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 4,
+              "session_count": 2,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "4",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s3",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "core",
+            "observations": [
+              {
+                "id": "0",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "1",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "2",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "3",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "4",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s3",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 5,
+              "session_count": 3,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        }
+      ],
+      "expected_rules": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "core",
+          "observations": [
+            {
+              "id": "0",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s1",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            },
+            {
+              "id": "1",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s1",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            },
+            {
+              "id": "2",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s2",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            },
+            {
+              "id": "3",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s2",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            },
+            {
+              "id": "4",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s3",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            }
+          ],
+          "evidence": {
+            "observation_count": 5,
+            "session_count": 3,
+            "repository_count": 1,
+            "explicit_count": 0
+          },
+          "examples": [
+            "Prefer early returns"
+          ],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "dormancy",
+      "seed": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-02-20T12:00:00Z"
+        }
+      ],
+      "initial": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "dormant",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-02-20T12:00:00Z"
+        }
+      ],
+      "steps": [],
+      "expected_rules": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "dormant",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-02-20T12:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "retirement",
+      "seed": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "initial": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "steps": [
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "a",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s1",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "candidate",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 1,
+              "session_count": 1,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "b",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s2",
+              "turn_key": "t1",
+              "safe_excerpt": "Prefer early returns",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "active",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "b",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 2,
+              "session_count": 2,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "retire",
+            "rule_id": "rule-1"
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "superseded",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              },
+              {
+                "id": "b",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Prefer early returns"
+              }
+            ],
+            "evidence": {
+              "observation_count": 2,
+              "session_count": 2,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Prefer early returns"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z",
+            "retired_at": "2026-08-19T12:00:00Z"
+          }
+        }
+      ],
+      "expected_rules": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "superseded",
+          "observations": [
+            {
+              "id": "a",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s1",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            },
+            {
+              "id": "b",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s2",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Prefer early returns"
+            }
+          ],
+          "evidence": {
+            "observation_count": 2,
+            "session_count": 2,
+            "repository_count": 1,
+            "explicit_count": 0
+          },
+          "examples": [
+            "Prefer early returns"
+          ],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z",
+          "retired_at": "2026-08-19T12:00:00Z"
+        }
+      ]
+    },
+    {
+      "name": "safe_examples",
+      "seed": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "initial": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "candidate",
+          "observations": [],
+          "evidence": {
+            "observation_count": 0,
+            "session_count": 0,
+            "repository_count": 0,
+            "explicit_count": 0
+          },
+          "examples": [],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "steps": [
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "a",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s1",
+              "turn_key": "t1",
+              "safe_excerpt": "Read https://example.test/guide",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "candidate",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Read [URL]"
+              }
+            ],
+            "evidence": {
+              "observation_count": 1,
+              "session_count": 1,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Read [URL]"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "b",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s2",
+              "turn_key": "t1",
+              "safe_excerpt": "password=synthetic",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "active",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Read [URL]"
+              },
+              {
+                "id": "b",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": null
+              }
+            ],
+            "evidence": {
+              "observation_count": 2,
+              "session_count": 2,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Read [URL]"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        },
+        {
+          "action": {
+            "type": "confirm",
+            "rule_id": "rule-1",
+            "observation": {
+              "id": "c",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "source": "hook",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "session_key": "s3",
+              "turn_key": "t1",
+              "safe_excerpt": "Keep helpers focused",
+              "signals": {
+                "correction": true,
+                "durable_language": false,
+                "likely_task_local": false
+              },
+              "suggested_surfaces": [
+                "ruby"
+              ]
+            }
+          },
+          "expected": {
+            "id": "rule-1",
+            "directive": "Prefer early returns over nested conditionals.",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "ruby"
+            ],
+            "origin": "inferred",
+            "status": "active",
+            "observations": [
+              {
+                "id": "a",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s1",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Read [URL]"
+              },
+              {
+                "id": "b",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s2",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": null
+              },
+              {
+                "id": "c",
+                "captured_at": "2026-08-19T12:00:00Z",
+                "session_key": "s3",
+                "repo_key": "alpha-a1b2c3d4e5f6",
+                "explicit": false,
+                "safe_excerpt": "Keep helpers focused"
+              }
+            ],
+            "evidence": {
+              "observation_count": 3,
+              "session_count": 3,
+              "repository_count": 1,
+              "explicit_count": 0
+            },
+            "examples": [
+              "Read [URL]",
+              "Keep helpers focused"
+            ],
+            "created_at": "2026-08-19T12:00:00Z",
+            "updated_at": "2026-08-19T12:00:00Z"
+          }
+        }
+      ],
+      "expected_rules": [
+        {
+          "id": "rule-1",
+          "directive": "Prefer early returns over nested conditionals.",
+          "scope": {
+            "kind": "repository",
+            "repo_key": "blogvault-a1b2c3d4e5f6"
+          },
+          "surfaces": [
+            "ruby"
+          ],
+          "origin": "inferred",
+          "status": "active",
+          "observations": [
+            {
+              "id": "a",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s1",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Read [URL]"
+            },
+            {
+              "id": "b",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s2",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": null
+            },
+            {
+              "id": "c",
+              "captured_at": "2026-08-19T12:00:00Z",
+              "session_key": "s3",
+              "repo_key": "alpha-a1b2c3d4e5f6",
+              "explicit": false,
+              "safe_excerpt": "Keep helpers focused"
+            }
+          ],
+          "evidence": {
+            "observation_count": 3,
+            "session_count": 3,
+            "repository_count": 1,
+            "explicit_count": 0
+          },
+          "examples": [
+            "Read [URL]",
+            "Keep helpers focused"
+          ],
+          "created_at": "2026-08-19T12:00:00Z",
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ]
+    }
+  ]
+}

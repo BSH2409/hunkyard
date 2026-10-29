@@ -1,0 +1,26 @@
+{
+  "name": "hunkyard",
+  "description": "Local browser diff review with feedback returned to the launching Codex session.",
+  "keywords": [
+    "code-review",
+    "diff",
+    "inline-comments",
+    "plan-review"
+  ],
+  "skills": "./skills/",
+  "hooks": "./hooks/hooks.json",
+  "interface": {
+    "displayName": "Hunkyard",
+    "shortDescription": "Inline code and plan review for Codex",
+    "longDescription": "Review local changes, exact or merge-base commit ranges, and files. Published feedback and selected skills return to the launching Codex session; preferences are classified locally.",
+    "developerName": "Hunkyard",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Code Review",
+      "Local Feedback"
+    ],
+    "defaultPrompt": [
+      "Use $hunkyard to review my current local changes."
+    ]
+  }
+}

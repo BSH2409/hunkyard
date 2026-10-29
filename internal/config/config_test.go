@@ -1,0 +1,1112 @@
+package config
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/BSH2409/hunkyard/internal/testutil"
+	"github.com/BSH2409/hunkyard/internal/vcs"
+)
+
+func TestLoadConfigFromFile(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	os.WriteFile(configPath, []byte(`{
+  "port": 3456,
+  "no_open": true,
+  "quiet": true,
+  "ignore_patterns": ["*.lock", "vendor/"]
+}`), 0644)
+
+	cfg, presence, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.Port != 3456 {
+		t.Errorf("port = %d, want 3456", cfg.Port)
+	}
+	if !cfg.NoOpen {
+		t.Error("no_open should be true")
+	}
+	if !cfg.Quiet {
+		t.Error("quiet should be true")
+	}
+	if len(cfg.IgnorePatterns) != 2 {
+		t.Errorf("ignore_patterns = %v", cfg.IgnorePatterns)
+	}
+	if !presence.NoOpen {
+		t.Error("presence.NoOpen should be true")
+	}
+	if !presence.IgnorePatterns {
+		t.Error("presence.IgnorePatterns should be true")
+	}
+}
+
+func TestLoadConfigFileMissing(t *testing.T) {
+	cfg, presence, err := LoadConfigFile("/nonexistent/.hunkyard.config.json")
+	if err != nil {
+		t.Fatalf("missing file should not error: %v", err)
+	}
+	if cfg.Port != 0 {
+		t.Errorf("expected zero config")
+	}
+	if presence.NoOpen || presence.IgnorePatterns {
+		t.Error("missing file should have no presence flags")
+	}
+}
+
+func TestLoadConfigFile_VCSJJ(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	if err := os.WriteFile(configPath, []byte(`{"vcs": "jj"}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("loadConfigFile: %v", err)
+	}
+	if cfg.VCS != "jj" {
+		t.Errorf("vcs = %q, want jj", cfg.VCS)
+	}
+}
+
+func TestMergeConfigs_AuthorFallback_JJ_PreservesExplicitAuthor(t *testing.T) {
+	global := Config{VCS: "jj", Author: "Explicit Author"}
+	project := Config{}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.VCS != "jj" {
+		t.Errorf("merged.VCS = %q, want jj", merged.VCS)
+	}
+	if merged.Author != "Explicit Author" {
+		t.Errorf("merged.Author = %q, want %q", merged.Author, "Explicit Author")
+	}
+}
+
+func TestLoadConfigFileInvalidJSON(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	os.WriteFile(configPath, []byte(`{invalid json`), 0644)
+
+	_, _, err := LoadConfigFile(configPath)
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+}
+
+func TestLoadConfigFilePresenceEmptyValues(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	os.WriteFile(configPath, []byte(`{"ignore_patterns": []}`), 0644)
+
+	cfg, presence, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.IgnorePatterns) != 0 {
+		t.Errorf("ignore_patterns = %v, want empty", cfg.IgnorePatterns)
+	}
+	if !presence.IgnorePatterns {
+		t.Error("presence.IgnorePatterns should be true even for empty array")
+	}
+}
+
+func TestMergeConfigs(t *testing.T) {
+	global := Config{Port: 3000, AgentCmd: "global-agent"}
+	global.IgnorePatterns = []string{"*.lock"}
+
+	project := Config{Port: 8080}
+	project.IgnorePatterns = []string{"*.pb.go"}
+
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.Port != 8080 {
+		t.Errorf("port = %d, want 8080 (project override)", merged.Port)
+	}
+	if merged.AgentCmd != "global-agent" {
+		t.Errorf("agent_cmd lost")
+	}
+	if len(merged.IgnorePatterns) != 2 {
+		t.Errorf("patterns = %v, want union", merged.IgnorePatterns)
+	}
+}
+
+func TestMergeConfigsHostGlobalOnly(t *testing.T) {
+	// A project config must not override host — doing so would let a malicious
+	// repo disable the DNS-rebinding defense by setting host to "0.0.0.0".
+	global := Config{Host: "127.0.0.1"}
+	project := Config{Host: "0.0.0.0"}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.Host != "127.0.0.1" {
+		t.Errorf("host = %q, want global value %q (project must not override)", merged.Host, "127.0.0.1")
+	}
+}
+
+func TestMergeConfigsOpenCmdGlobalOnly(t *testing.T) {
+	global := Config{OpenCmd: "/usr/local/bin/hunkyard-open"}
+	project := Config{OpenCmd: "/tmp/untrusted-open"}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.OpenCmd != "/usr/local/bin/hunkyard-open" {
+		t.Errorf("open_cmd = %q, want global value", merged.OpenCmd)
+	}
+}
+
+func TestBaseBranchConfig(t *testing.T) {
+	t.Run("loadConfigFile parses base_branch", func(t *testing.T) {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, ".hunkyard.config.json")
+		os.WriteFile(configPath, []byte(`{"base_branch": "uat"}`), 0644)
+
+		cfg, _, err := LoadConfigFile(configPath)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if cfg.BaseBranch != "uat" {
+			t.Errorf("base_branch = %q, want %q", cfg.BaseBranch, "uat")
+		}
+	})
+
+	t.Run("mergeConfigs: project base_branch overrides global", func(t *testing.T) {
+		global := Config{BaseBranch: "main"}
+		project := Config{BaseBranch: "uat"}
+		merged := mergeConfigs(global, project, ConfigPresence{})
+		if merged.BaseBranch != "uat" {
+			t.Errorf("base_branch = %q, want %q", merged.BaseBranch, "uat")
+		}
+	})
+
+	t.Run("mergeConfigs: global base_branch preserved when project unset", func(t *testing.T) {
+		global := Config{BaseBranch: "develop"}
+		project := Config{}
+		merged := mergeConfigs(global, project, ConfigPresence{})
+		if merged.BaseBranch != "develop" {
+			t.Errorf("base_branch = %q, want %q", merged.BaseBranch, "develop")
+		}
+	})
+
+	t.Run("mergeConfigs: project live_cookie_file overrides global", func(t *testing.T) {
+		global := Config{LiveCookieFile: "~/.hunkyard/global-cookies.txt"}
+		project := Config{LiveCookieFile: ".hunkyard/live-cookies.txt"}
+		merged := mergeConfigs(global, project, ConfigPresence{})
+		if merged.LiveCookieFile != ".hunkyard/live-cookies.txt" {
+			t.Errorf("live_cookie_file = %q, want .hunkyard/live-cookies.txt", merged.LiveCookieFile)
+		}
+	})
+
+	t.Run("mergeConfigs: project live_cookie overrides global", func(t *testing.T) {
+		global := Config{LiveCookie: "global=1"}
+		project := Config{LiveCookie: "project=1"}
+		merged := mergeConfigs(global, project, ConfigPresence{})
+		if merged.LiveCookie != "project=1" {
+			t.Errorf("live_cookie = %q, want project=1", merged.LiveCookie)
+		}
+	})
+
+	t.Run("mergeConfigs: project live_cdp_url overrides global", func(t *testing.T) {
+		global := Config{LiveCDPURL: "http://127.0.0.1:9222"}
+		project := Config{LiveCDPURL: "http://127.0.0.1:9333"}
+		merged := mergeConfigs(global, project, ConfigPresence{})
+		if merged.LiveCDPURL != "http://127.0.0.1:9333" {
+			t.Errorf("live_cdp_url = %q, want http://127.0.0.1:9333", merged.LiveCDPURL)
+		}
+	})
+
+	t.Run("LoadConfig: project base_branch wins over global", func(t *testing.T) {
+		homeDir := t.TempDir()
+		testutil.SetHome(t, homeDir)
+		os.WriteFile(
+			filepath.Join(homeDir, ".hunkyard.config.json"),
+			[]byte(`{"base_branch": "main"}`),
+			0644,
+		)
+		projectDir := t.TempDir()
+		os.WriteFile(
+			filepath.Join(projectDir, ".hunkyard.config.json"),
+			[]byte(`{"base_branch": "uat"}`),
+			0644,
+		)
+
+		cfg := LoadConfig(projectDir)
+		if cfg.BaseBranch != "uat" {
+			t.Errorf("base_branch = %q, want %q", cfg.BaseBranch, "uat")
+		}
+	})
+}
+
+func TestMergeConfigsZeroValues(t *testing.T) {
+	global := Config{Port: 3000, NoOpen: true, Quiet: true}
+	project := Config{} // all zero — should not override
+
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.Port != 3000 {
+		t.Errorf("port should stay 3000")
+	}
+	if !merged.NoOpen {
+		t.Error("no_open should stay true")
+	}
+	if !merged.Quiet {
+		t.Error("quiet should stay true")
+	}
+}
+
+func TestMergeConfigsBoolOverride(t *testing.T) {
+	// Project explicitly sets no_open: false to override global no_open: true
+	global := Config{NoOpen: true, Quiet: true}
+	project := Config{NoOpen: false, Quiet: false}
+	presence := ConfigPresence{NoOpen: true, Quiet: true}
+
+	merged := mergeConfigs(global, project, presence)
+	if merged.NoOpen {
+		t.Error("project no_open: false should override global no_open: true")
+	}
+	if merged.Quiet {
+		t.Error("project quiet: false should override global quiet: true")
+	}
+}
+
+func TestLoadConfig(t *testing.T) {
+	// Set up global config
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	globalPath := filepath.Join(homeDir, ".hunkyard.config.json")
+	os.WriteFile(globalPath, []byte(`{"port": 3000, "open_cmd": "/usr/local/bin/hunkyard-open", "ignore_patterns": ["*.lock"]}`), 0644)
+
+	// Set up project dir with config
+	projectDir := t.TempDir()
+	os.WriteFile(filepath.Join(projectDir, ".hunkyard.config.json"), []byte(`{"port": 8080, "open_cmd": "/tmp/untrusted-open", "ignore_patterns": ["*.pb.go"]}`), 0644)
+
+	cfg := LoadConfig(projectDir)
+
+	if cfg.Port != 8080 {
+		t.Errorf("port = %d, want 8080 (project override)", cfg.Port)
+	}
+	if cfg.OpenCmd != "/usr/local/bin/hunkyard-open" {
+		t.Errorf("open_cmd = %q, want global value", cfg.OpenCmd)
+	}
+	if len(cfg.IgnorePatterns) != 2 {
+		t.Errorf("ignore_patterns = %v, want 2 entries", cfg.IgnorePatterns)
+	}
+}
+
+func TestMatchPattern(t *testing.T) {
+	tests := []struct {
+		pattern string
+		path    string
+		want    bool
+	}{
+		// Suffix match (pattern starts with *)
+		{"*.lock", "go.sum.lock", true},
+		{"*.lock", "vendor/go.lock", true},
+		{"*.lock", "lockfile", false},
+		{"*.pb.go", "api/v1/service.pb.go", true},
+		{"*.pb.go", "main.go", false},
+
+		// Directory prefix (pattern ends with /)
+		{"vendor/", "vendor/foo.go", true},
+		{"vendor/", "vendor/bar/baz.go", true},
+		{"vendor/", "myvendor/foo.go", false},
+		{"generated/", "generated/types.go", true},
+		{"node_modules/", "node_modules/lodash/index.js", true},
+		{".hunkyard/", ".hunkyard/sessions/abc123.json", true},
+		{".hunkyard/", ".hunkyard/config", true},
+		{".hunkyard/", ".hunkyard.json", false},
+
+		// Exact filename match (no / in pattern, no leading *)
+		{"package-lock.json", "package-lock.json", true},
+		{"package-lock.json", "sub/package-lock.json", true},
+		{".env", ".env", true},
+		{".env", "src/.env", true},
+
+		// Filename glob (no /, has wildcard)
+		{"*.min.js", "assets/app.min.js", true},
+		{"*.min.js", "app.min.js", true},
+		{"*.min.js", "app.js", false},
+
+		// Path with / (match against full path)
+		{"generated/*.pb.go", "generated/service.pb.go", true},
+		{"generated/*.pb.go", "other/service.pb.go", false},
+	}
+	for _, tt := range tests {
+		got := MatchPattern(tt.pattern, tt.path)
+		if got != tt.want {
+			t.Errorf("MatchPattern(%q, %q) = %v, want %v", tt.pattern, tt.path, got, tt.want)
+		}
+	}
+}
+
+func TestFilterIgnored(t *testing.T) {
+	files := []vcs.FileChange{
+		{Path: "main.go", Status: "modified"},
+		{Path: "go.sum.lock", Status: "modified"},
+		{Path: "vendor/lib/foo.go", Status: "added"},
+		{Path: "api/service.pb.go", Status: "modified"},
+		{Path: "README.md", Status: "modified"},
+	}
+	patterns := []string{"*.lock", "vendor/", "*.pb.go"}
+	filtered := FilterIgnored(files, patterns)
+	if len(filtered) != 2 {
+		t.Fatalf("got %d files, want 2: %v", len(filtered), filtered)
+	}
+	if filtered[0].Path != "main.go" {
+		t.Errorf("filtered[0] = %q", filtered[0].Path)
+	}
+	if filtered[1].Path != "README.md" {
+		t.Errorf("filtered[1] = %q", filtered[1].Path)
+	}
+}
+
+func TestFilterIgnoredEmpty(t *testing.T) {
+	files := []vcs.FileChange{{Path: "main.go", Status: "modified"}}
+	filtered := FilterIgnored(files, nil)
+	if len(filtered) != 1 {
+		t.Errorf("expected no filtering with nil patterns")
+	}
+}
+
+func TestFilterPathsIgnored(t *testing.T) {
+	paths := []string{
+		"src/main.go",
+		"src/generated/types.go",
+		"package-lock.json",
+	}
+	patterns := []string{"generated/", "package-lock.json"}
+	filtered := filterPathsIgnored(paths, patterns)
+	if len(filtered) != 1 || filtered[0] != "src/main.go" {
+		t.Errorf("got %v", filtered)
+	}
+}
+
+func TestConfigString(t *testing.T) {
+	cfg := Config{Port: 3456, IgnorePatterns: []string{"*.lock"}}
+	s := cfg.String()
+	if s == "{}" {
+		t.Error("expected non-empty JSON output")
+	}
+}
+
+func TestLoadConfigRuntimeDefaults(t *testing.T) {
+	// No config files at all — runtime defaults should apply
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	projectDir := t.TempDir()
+
+	cfg := LoadConfig(projectDir)
+	wantPatterns := []string{".hunkyard/"}
+	if len(cfg.IgnorePatterns) != len(wantPatterns) || cfg.IgnorePatterns[0] != wantPatterns[0] {
+		t.Errorf("IgnorePatterns = %v, want %v", cfg.IgnorePatterns, wantPatterns)
+	}
+}
+
+func TestLoadConfigRuntimeDefaultsOverriddenByEmptyValues(t *testing.T) {
+	// Project config sets ignore_patterns to [] — overrides the runtime default.
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	projectDir := t.TempDir()
+	os.WriteFile(filepath.Join(projectDir, ".hunkyard.config.json"),
+		[]byte(`{"ignore_patterns": []}`), 0644)
+
+	cfg := LoadConfig(projectDir)
+	if len(cfg.IgnorePatterns) != 0 {
+		t.Errorf("IgnorePatterns = %v, want empty (explicitly overridden)", cfg.IgnorePatterns)
+	}
+}
+
+func TestLoadConfigRuntimeDefaultsOverriddenByGlobal(t *testing.T) {
+	// Global config sets ignore_patterns — no runtime default applied
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	os.WriteFile(filepath.Join(homeDir, ".hunkyard.config.json"),
+		[]byte(`{"ignore_patterns": ["*.tmp"]}`), 0644)
+	projectDir := t.TempDir()
+
+	cfg := LoadConfig(projectDir)
+	wantPatterns := []string{"*.tmp"}
+	if len(cfg.IgnorePatterns) != len(wantPatterns) || cfg.IgnorePatterns[0] != wantPatterns[0] {
+		t.Errorf("IgnorePatterns = %v, want %v", cfg.IgnorePatterns, wantPatterns)
+	}
+}
+
+func TestLoadConfigAuthorFallsBackToGit(t *testing.T) {
+	// Isolated HOME so no global config interferes
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+
+	// Set up a git repo with user.name configured
+	repoDir := t.TempDir()
+	testutil.Git(t, repoDir, "init")
+	testutil.Git(t, repoDir, "config", "user.email", "test@test.com")
+	testutil.Git(t, repoDir, "config", "user.name", "Ada Lovelace")
+
+	// LoadConfig calls git without -C, so we must be inside the repo
+	t.Chdir(repoDir)
+
+	cfg := LoadConfig(repoDir)
+	if cfg.Author != "Ada Lovelace" {
+		t.Errorf("Author = %q, want %q", cfg.Author, "Ada Lovelace")
+	}
+}
+
+func TestLoadConfigAuthorFromConfig(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+
+	projectDir := t.TempDir()
+	os.WriteFile(filepath.Join(projectDir, ".hunkyard.config.json"), []byte(`{"author": "Grace Hopper"}`), 0644)
+
+	cfg := LoadConfig(projectDir)
+	if cfg.Author != "Grace Hopper" {
+		t.Errorf("Author = %q, want %q", cfg.Author, "Grace Hopper")
+	}
+}
+
+func TestLoadConfigSameFileNoDuplicatePatterns(t *testing.T) {
+	// When CWD is the home dir, global and project config resolve to the same file.
+	// Patterns should not be duplicated.
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	os.WriteFile(filepath.Join(homeDir, ".hunkyard.config.json"),
+		[]byte(`{"ignore_patterns": ["*.lock", "*.min.js", "*.min.css", ".hunkyard.json"]}`), 0644)
+
+	cfg := LoadConfig(homeDir)
+
+	// Should have exactly 4 patterns, not 8
+	if len(cfg.IgnorePatterns) != 4 {
+		t.Errorf("IgnorePatterns = %v (len %d), want 4 unique entries (not duplicated)", cfg.IgnorePatterns, len(cfg.IgnorePatterns))
+	}
+}
+
+func TestMergeConfigs_AgentCmd(t *testing.T) {
+	global := Config{AgentCmd: "claude -p"}
+	project := Config{}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.AgentCmd != "claude -p" {
+		t.Fatalf("expected global agent_cmd to carry through, got %q", merged.AgentCmd)
+	}
+
+	// project-level agent_cmd must be ignored — only global config may set it
+	project2 := Config{AgentCmd: "codex exec"}
+	merged2 := mergeConfigs(global, project2, ConfigPresence{})
+	if merged2.AgentCmd != "claude -p" {
+		t.Fatalf("expected project agent_cmd to be ignored, got %q", merged2.AgentCmd)
+	}
+}
+
+func TestNoIntegrationCheckConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	if err := os.WriteFile(configPath, []byte(`{"no_integration_check": true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.NoIntegrationCheck {
+		t.Error("expected NoIntegrationCheck to be true")
+	}
+}
+
+func TestNoIntegrationCheckMerge(t *testing.T) {
+	global := Config{NoIntegrationCheck: false}
+	project := Config{NoIntegrationCheck: true}
+	presence := ConfigPresence{NoIntegrationCheck: true}
+	merged := mergeConfigs(global, project, presence)
+	if !merged.NoIntegrationCheck {
+		t.Error("project NoIntegrationCheck=true should override global")
+	}
+}
+
+func TestNoUpdateCheckConfig(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	if err := os.WriteFile(configPath, []byte(`{"no_update_check": true}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.NoUpdateCheck {
+		t.Error("expected NoUpdateCheck to be true")
+	}
+}
+
+func TestNoUpdateCheckMerge(t *testing.T) {
+	global := Config{NoUpdateCheck: false}
+	project := Config{NoUpdateCheck: true}
+	presence := ConfigPresence{NoUpdateCheck: true}
+	merged := mergeConfigs(global, project, presence)
+	if !merged.NoUpdateCheck {
+		t.Error("project NoUpdateCheck=true should override global")
+	}
+}
+
+func TestSaveGlobalConfig_RoundTrip(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+
+	// Write a key
+	err := SaveGlobalConfig(func(m map[string]json.RawMessage) error {
+		data, _ := json.Marshal(true)
+		m["no_open"] = data
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SaveGlobalConfig: %v", err)
+	}
+
+	// Read it back via loadConfigFile
+	cfg, presence, err := LoadConfigFile(filepath.Join(homeDir, ".hunkyard.config.json"))
+	if err != nil {
+		t.Fatalf("loadConfigFile: %v", err)
+	}
+	if !cfg.NoOpen {
+		t.Error("NoOpen = false, want true")
+	}
+	if !presence.NoOpen {
+		t.Error("expected NoOpen presence to be true")
+	}
+}
+
+func TestSaveGlobalConfig_PreservesExistingKeys(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+
+	// Write initial config manually
+	configPath := filepath.Join(homeDir, ".hunkyard.config.json")
+	os.WriteFile(configPath, []byte(`{"port": 3456, "quiet": true}`), 0644)
+
+	// Update a different key
+	err := SaveGlobalConfig(func(m map[string]json.RawMessage) error {
+		data, _ := json.Marshal("Custom Author")
+		m["author"] = data
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("SaveGlobalConfig: %v", err)
+	}
+
+	// Read back — both old and new keys should be present
+	cfg, _, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("loadConfigFile: %v", err)
+	}
+	if cfg.Port != 3456 {
+		t.Errorf("Port = %d, want 3456 (should be preserved)", cfg.Port)
+	}
+	if !cfg.Quiet {
+		t.Error("Quiet should be preserved as true")
+	}
+	if cfg.Author != "Custom Author" {
+		t.Errorf("Author = %q, want Custom Author", cfg.Author)
+	}
+}
+
+func TestMergeConfigs_AgentCmdProjectIgnored(t *testing.T) {
+	// Even if project config has agent_cmd, it must be ignored for security
+	global := Config{}
+	project := Config{AgentCmd: "malicious-command"}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.AgentCmd != "" {
+		t.Errorf("project agent_cmd should be ignored, got %q", merged.AgentCmd)
+	}
+}
+
+func TestLoadConfig_PlanApproveModeGlobalOnly(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	if err := os.WriteFile(
+		filepath.Join(homeDir, ".hunkyard.config.json"),
+		[]byte(`{"plan_approve_mode":"acceptEdits"}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(projectDir, ".hunkyard.config.json"),
+		[]byte(`{"plan_approve_mode":"bypassPermissions"}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := LoadConfig(projectDir).PlanApproveMode; got != "acceptEdits" {
+		t.Errorf("PlanApproveMode = %q, want global value acceptEdits", got)
+	}
+}
+
+func TestLoadConfig_PlanApproveModeProjectCannotEnable(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	projectDir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(projectDir, ".hunkyard.config.json"),
+		[]byte(`{"plan_approve_mode":"auto"}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := LoadConfig(projectDir).PlanApproveMode; got != "" {
+		t.Errorf("PlanApproveMode = %q, want empty when only project config sets it", got)
+	}
+}
+
+func TestMergeConfigs_IgnorePatternsUnion(t *testing.T) {
+	global := Config{IgnorePatterns: []string{"*.lock", "vendor/"}}
+	project := Config{IgnorePatterns: []string{"*.pb.go"}}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+
+	// mergeConfigs appends project patterns to global (straight union)
+	if len(merged.IgnorePatterns) != 3 {
+		t.Errorf("expected 3 patterns, got %d: %v", len(merged.IgnorePatterns), merged.IgnorePatterns)
+	}
+	seen := make(map[string]bool)
+	for _, p := range merged.IgnorePatterns {
+		seen[p] = true
+	}
+	if !seen["*.lock"] {
+		t.Error("expected *.lock in merged patterns")
+	}
+	if !seen["vendor/"] {
+		t.Error("expected vendor/ in merged patterns")
+	}
+	if !seen["*.pb.go"] {
+		t.Error("expected *.pb.go in merged patterns")
+	}
+}
+
+func TestLoadConfig_OutputField(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	projectDir := t.TempDir()
+	os.WriteFile(filepath.Join(projectDir, ".hunkyard.config.json"),
+		[]byte(`{"output": "/tmp/output"}`), 0644)
+
+	cfg := LoadConfig(projectDir)
+	if cfg.Output != "/tmp/output" {
+		t.Errorf("Output = %q, want /tmp/output", cfg.Output)
+	}
+}
+
+func TestStaleReviewDaysOrDefault(t *testing.T) {
+	days := func(v int) *int { return &v }
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want int
+	}{
+		{name: "nil pointer defaults", cfg: Config{StaleReviewDays: nil}, want: DefaultStaleReviewDays},
+		{name: "zero defaults", cfg: Config{StaleReviewDays: days(0)}, want: DefaultStaleReviewDays},
+		{name: "negative defaults", cfg: Config{StaleReviewDays: days(-5)}, want: DefaultStaleReviewDays},
+		{name: "explicit value", cfg: Config{StaleReviewDays: days(90)}, want: 90},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.cfg.StaleReviewDaysOrDefault(); got != tt.want {
+				t.Errorf("StaleReviewDaysOrDefault() = %d, want %d", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCleanupOnApproveEnabled(t *testing.T) {
+	trueVal := true
+	falseVal := false
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{
+			name: "nil pointer defaults to true",
+			cfg:  Config{CleanupOnApprove: nil},
+			want: true,
+		},
+		{
+			name: "explicit true",
+			cfg:  Config{CleanupOnApprove: &trueVal},
+			want: true,
+		},
+		{
+			name: "explicit false",
+			cfg:  Config{CleanupOnApprove: &falseVal},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cfg.CleanupOnApproveEnabled()
+			if got != tt.want {
+				t.Errorf("CleanupOnApproveEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNotifyOnRoundReadyEnabled(t *testing.T) {
+	trueVal := true
+	falseVal := false
+
+	tests := []struct {
+		name string
+		cfg  Config
+		want bool
+	}{
+		{
+			name: "nil pointer defaults to false",
+			cfg:  Config{NotifyOnRoundReady: nil},
+			want: false,
+		},
+		{
+			name: "explicit true",
+			cfg:  Config{NotifyOnRoundReady: &trueVal},
+			want: true,
+		},
+		{
+			name: "explicit false",
+			cfg:  Config{NotifyOnRoundReady: &falseVal},
+			want: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.cfg.NotifyOnRoundReadyEnabled()
+			if got != tt.want {
+				t.Errorf("NotifyOnRoundReadyEnabled() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestDefaultConfig(t *testing.T) {
+	cfg := defaultConfig()
+
+	if cfg.Port != 0 {
+		t.Errorf("Port = %d, want 0", cfg.Port)
+	}
+	if cfg.NoOpen {
+		t.Error("NoOpen should be false")
+	}
+	if !cfg.CleanupOnApprove {
+		t.Error("CleanupOnApprove should be true")
+	}
+	if cfg.NotifyOnRoundReady {
+		t.Error("NotifyOnRoundReady should be false")
+	}
+	if cfg.StaleReviewDays != DefaultStaleReviewDays {
+		t.Errorf("StaleReviewDays = %d, want %d", cfg.StaleReviewDays, DefaultStaleReviewDays)
+	}
+	if len(cfg.IgnorePatterns) != 4 {
+		t.Fatalf("IgnorePatterns has %d entries, want 4", len(cfg.IgnorePatterns))
+	}
+	expectedPatterns := map[string]bool{
+		"*.lock":     true,
+		"*.min.js":   true,
+		"*.min.css":  true,
+		".hunkyard/": true,
+	}
+	for _, p := range cfg.IgnorePatterns {
+		if !expectedPatterns[p] {
+			t.Errorf("unexpected pattern %q", p)
+		}
+	}
+
+	// Verify the output is valid JSON via the String method
+	s := cfg.String()
+	var m map[string]json.RawMessage
+	if err := json.Unmarshal([]byte(s), &m); err != nil {
+		t.Errorf("defaultConfig().String() is not valid JSON: %v", err)
+	}
+}
+
+func TestLoadConfigFile_AutoViewedPatterns(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	os.WriteFile(configPath, []byte(`{"auto_viewed_patterns": ["*.lock", "generated/", "PLAN.md"]}`), 0644)
+
+	cfg, presence, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.AutoViewedPatterns) != 3 {
+		t.Errorf("auto_viewed_patterns = %v, want 3 entries", cfg.AutoViewedPatterns)
+	}
+	if cfg.AutoViewedPatterns[0] != "*.lock" {
+		t.Errorf("auto_viewed_patterns[0] = %q, want *.lock", cfg.AutoViewedPatterns[0])
+	}
+	if !presence.AutoViewedPatterns {
+		t.Error("presence.AutoViewedPatterns should be true")
+	}
+}
+
+func TestLoadConfigFile_AutoViewedPatternsPresenceEmpty(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	os.WriteFile(configPath, []byte(`{"auto_viewed_patterns": []}`), 0644)
+
+	cfg, presence, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(cfg.AutoViewedPatterns) != 0 {
+		t.Errorf("auto_viewed_patterns = %v, want empty", cfg.AutoViewedPatterns)
+	}
+	if !presence.AutoViewedPatterns {
+		t.Error("presence.AutoViewedPatterns should be true even for empty array")
+	}
+}
+
+func TestMergeConfigs_AutoViewedPatternsUnion(t *testing.T) {
+	global := Config{AutoViewedPatterns: []string{"*.lock"}}
+	project := Config{AutoViewedPatterns: []string{"PLAN.md"}}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+
+	// mergeConfigs appends project patterns to global (straight union)
+	if len(merged.AutoViewedPatterns) != 2 {
+		t.Errorf("expected 2 patterns, got %d: %v", len(merged.AutoViewedPatterns), merged.AutoViewedPatterns)
+	}
+	seen := make(map[string]bool)
+	for _, p := range merged.AutoViewedPatterns {
+		seen[p] = true
+	}
+	if !seen["*.lock"] {
+		t.Error("expected *.lock in merged auto-viewed patterns")
+	}
+	if !seen["PLAN.md"] {
+		t.Error("expected PLAN.md in merged auto-viewed patterns")
+	}
+}
+
+func TestLoadHookMaps(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	if err := os.WriteFile(filepath.Join(homeDir, ".hunkyard.config.json"),
+		[]byte(`{"hooks":{"on_finish_approved":"inline:global"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, ".hunkyard.config.json"),
+		[]byte(`{"hooks":{"on_finish_unresolved":"inline:project"}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	global, project := LoadHookMaps(projectDir)
+	if global["on_finish_approved"] != "inline:global" {
+		t.Fatalf("global hooks = %v", global)
+	}
+	if project["on_finish_unresolved"] != "inline:project" {
+		t.Fatalf("project hooks = %v", project)
+	}
+}
+
+func TestMergeConfigs_ProjectHooksOverride(t *testing.T) {
+	global := Config{Hooks: map[string]string{"on_finish_approved": "inline:global"}}
+	project := Config{Hooks: map[string]string{"on_finish_approved": "inline:project"}}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.Hooks["on_finish_approved"] != "inline:project" {
+		t.Fatalf("hooks = %v", merged.Hooks)
+	}
+}
+
+func TestCloseOnApproveAfterMsEnabled(t *testing.T) {
+	ms500 := 500
+	msZero := 0
+	msNegative := -1
+
+	tests := []struct {
+		name       string
+		cfg        Config
+		wantMs     int
+		wantEnable bool
+	}{
+		{"nil pointer disables", Config{CloseOnApproveAfterMs: nil}, 0, false},
+		{"positive value enables", Config{CloseOnApproveAfterMs: &ms500}, 500, true},
+		{"zero enables (close immediately)", Config{CloseOnApproveAfterMs: &msZero}, 0, true},
+		{"negative value treated as disabled", Config{CloseOnApproveAfterMs: &msNegative}, 0, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotMs, gotEnabled := tt.cfg.CloseOnApproveAfterMsEnabled()
+			if gotEnabled != tt.wantEnable || gotMs != tt.wantMs {
+				t.Errorf("CloseOnApproveAfterMsEnabled() = (%d, %v), want (%d, %v)", gotMs, gotEnabled, tt.wantMs, tt.wantEnable)
+			}
+		})
+	}
+}
+
+func TestLoadConfigFile_CloseOnApproveAfterMs(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	if err := os.WriteFile(configPath, []byte(`{"close_on_approve_after_ms": 3000}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, _, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.CloseOnApproveAfterMs == nil || *cfg.CloseOnApproveAfterMs != 3000 {
+		t.Errorf("CloseOnApproveAfterMs = %v, want 3000", cfg.CloseOnApproveAfterMs)
+	}
+}
+
+func TestMergeConfigs_CloseOnApproveAfterMsGlobalOnly(t *testing.T) {
+	// Project config must not be able to force a reviewer's tab to auto-close.
+	globalMs := 2000
+	projectMs := 0
+	global := Config{CloseOnApproveAfterMs: &globalMs}
+	project := Config{CloseOnApproveAfterMs: &projectMs}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.CloseOnApproveAfterMs == nil || *merged.CloseOnApproveAfterMs != 2000 {
+		t.Errorf("CloseOnApproveAfterMs = %v, want global value 2000 (project must not override)", merged.CloseOnApproveAfterMs)
+	}
+}
+
+func TestLoadConfig_CloseOnApproveAfterMs_ProjectCannotEnable(t *testing.T) {
+	// Only global config may set close_on_approve_after_ms — a project-level
+	// .hunkyard.config.json setting it must be ignored entirely.
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	projectDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(projectDir, ".hunkyard.config.json"),
+		[]byte(`{"close_on_approve_after_ms": 1500}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := LoadConfig(projectDir)
+	if ms, enabled := cfg.CloseOnApproveAfterMsEnabled(); enabled {
+		t.Errorf("close_on_approve_after_ms enabled from project config (ms=%d), want disabled", ms)
+	}
+}
+
+func TestLoadConfig_CloseOnApproveAfterMs_GlobalWorks(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	if err := os.WriteFile(filepath.Join(homeDir, ".hunkyard.config.json"),
+		[]byte(`{"close_on_approve_after_ms": 4000}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := t.TempDir()
+
+	cfg := LoadConfig(projectDir)
+	ms, enabled := cfg.CloseOnApproveAfterMsEnabled()
+	if !enabled || ms != 4000 {
+		t.Errorf("CloseOnApproveAfterMsEnabled() = (%d, %v), want (4000, true)", ms, enabled)
+	}
+}
+
+func TestDefaultConfig_DoesNotIncludeCloseOnApproveAfterMs(t *testing.T) {
+	// Scaffolding (`hunkyard config --generate`) must not accidentally enable
+	// auto-close — the generated template omits this key entirely.
+	s := DefaultConfigString()
+	if strings.Contains(s, "close_on_approve_after_ms") {
+		t.Errorf("DefaultConfigString() contains close_on_approve_after_ms, want omitted:\n%s", s)
+	}
+}
+
+func TestDefaultConfig_IncludesStaleReviewDays(t *testing.T) {
+	// Unlike close_on_approve_after_ms, scaffolding stale_review_days with the
+	// default is safe — the background sweep already uses 14 when unset.
+	s := DefaultConfigString()
+	if !strings.Contains(s, `"stale_review_days"`) {
+		t.Errorf("DefaultConfigString() missing stale_review_days:\n%s", s)
+	}
+	want := fmt.Sprintf(`"stale_review_days": %d`, DefaultStaleReviewDays)
+	if !strings.Contains(s, want) {
+		t.Errorf("DefaultConfigString() missing %q:\n%s", want, s)
+	}
+}
+
+func TestLoadConfigFile_DefaultMarkdownView(t *testing.T) {
+	dir := t.TempDir()
+	configPath := filepath.Join(dir, ".hunkyard.config.json")
+	os.WriteFile(configPath, []byte(`{"default_markdown_view": "document"}`), 0644)
+
+	cfg, _, err := LoadConfigFile(configPath)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.DefaultMarkdownView != "document" {
+		t.Errorf("default_markdown_view = %q, want document", cfg.DefaultMarkdownView)
+	}
+}
+
+func TestLoadConfigFile_DefaultMarkdownViewInvalid(t *testing.T) {
+	// Invalid values are ignored (cleared to unset) with a stderr warning,
+	// matching how unknown vcs values fall back instead of failing load.
+	for _, raw := range []string{`{"default_markdown_view": "DOC"}`, `{"default_markdown_view": "markdown"}`, `{"default_markdown_view": "side-by-side"}`} {
+		dir := t.TempDir()
+		configPath := filepath.Join(dir, ".hunkyard.config.json")
+		os.WriteFile(configPath, []byte(raw), 0644)
+
+		cfg, _, err := LoadConfigFile(configPath)
+		if err != nil {
+			t.Fatalf("%s: unexpected error: %v", raw, err)
+		}
+		if cfg.DefaultMarkdownView != "" {
+			t.Errorf("%s: default_markdown_view = %q, want empty (ignored)", raw, cfg.DefaultMarkdownView)
+		}
+	}
+}
+
+func TestMergeConfigs_DefaultMarkdownViewProjectOverrides(t *testing.T) {
+	tests := []struct {
+		name    string
+		global  string
+		project string
+		want    string
+	}{
+		{"project overrides global", "diff", "document", "document"},
+		{"project can set diff over global document", "document", "diff", "diff"},
+		{"empty project keeps global", "document", "", "document"},
+		{"both empty stays unset", "", "", ""},
+		{"global alone applies", "document", "", "document"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			merged := mergeConfigs(Config{DefaultMarkdownView: tt.global}, Config{DefaultMarkdownView: tt.project}, ConfigPresence{})
+			if merged.DefaultMarkdownView != tt.want {
+				t.Errorf("merged = %q, want %q", merged.DefaultMarkdownView, tt.want)
+			}
+		})
+	}
+}
+
+func TestLoadConfig_DefaultMarkdownViewEndToEnd(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	if err := os.WriteFile(
+		filepath.Join(homeDir, ".hunkyard.config.json"),
+		[]byte(`{"default_markdown_view":"diff"}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+	projectDir := t.TempDir()
+	if err := os.WriteFile(
+		filepath.Join(projectDir, ".hunkyard.config.json"),
+		[]byte(`{"default_markdown_view":"document"}`),
+		0o644,
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	if got := LoadConfig(projectDir).DefaultMarkdownView; got != "document" {
+		t.Errorf("DefaultMarkdownView = %q, want project value document", got)
+	}
+}
+
+func TestLoadConfig_DefaultMarkdownViewUnset(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	projectDir := t.TempDir()
+
+	if got := LoadConfig(projectDir).DefaultMarkdownView; got != "" {
+		t.Errorf("DefaultMarkdownView = %q, want empty when unset", got)
+	}
+}

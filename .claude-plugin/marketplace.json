@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "hunkyard",
+  "owner": {
+    "name": "BSH2409"
+  },
+  "plugins": [
+    {
+      "name": "hunkyard",
+      "description": "Local browser diff review and feedback for the launching Claude CLI session.",
+      "source": "./integrations/claude-code",
+      "homepage": "https://github.com/BSH2409/hunkyard",
+      "category": "development"
+    }
+  ]
+}

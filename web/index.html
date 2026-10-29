@@ -1,0 +1,531 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Hunkyard</title>
+<link rel="icon" type="image/png" sizes="96x96" href="favicon-96x96.png">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="apple-touch-icon" sizes="180x180" href="apple-touch-icon.png">
+<link rel="manifest" href="site.webmanifest">
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="hunkyard-palette.css">
+<link rel="stylesheet" href="style.css">
+<!-- Theme palette before first paint, in every mode (review, live, preview). -->
+<script src="pierre/palettes.js"></script>
+<script src="hunkyard-theme-palette.js"></script>
+<script>window.hunkyard.themePalette.applySaved();</script>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <button class="ft-toggle" id="fileTreeToggle" title="Toggle sidebar (b)" aria-label="Toggle sidebar" aria-expanded="true">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true"><path class="ft-toggle-fill" d="M2.5 3.5h3v9h-3z" fill="currentColor" stroke="none"/><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M5.5 2.5v11"/></svg>
+    </button>
+    <span class="header-title" aria-label="Hunkyard">hunkyard<span class="header-logo-dot">.</span></span>
+    <button class="update-btn" id="updateBtn" style="display:none" title="Updates available" aria-label="Updates available">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 2v8m0 0l-3-3m3 3l3-3"/><path d="M2.5 11v1.75c0 .69.56 1.25 1.25 1.25h8.5c.69 0 1.25-.56 1.25-1.25V11"/></svg>
+      <span class="update-btn-label">Updates</span>
+    </button>
+    <div class="compare-rail" id="compareRail" role="group" aria-label="Diff target">
+      <span class="base-branch-picker" id="baseBranchPicker" style="display:none">
+        <button class="header-chip base-branch-btn" id="baseBranchBtn" title="Compare against" aria-haspopup="listbox" aria-expanded="false">
+          <span class="compare-target-prefix">against</span>
+          <span class="base-branch-label" id="baseBranchLabel"></span>
+          <svg class="base-branch-chevron" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 3.75 5 6.25 7.5 3.75"/></svg>
+        </button>
+        <div class="base-branch-menu" id="baseBranchMenu">
+          <input class="base-branch-search" id="baseBranchSearch" type="text" placeholder="Search refs or rev…" autocomplete="off" aria-label="Search compare targets or enter a revision" />
+          <div class="compare-target-use-custom" id="compareTargetUseCustom" style="display:none"></div>
+          <div class="compare-target-tabs" id="compareTargetTabs">
+            <button type="button" class="compare-target-tab active" data-tab="refs">Refs</button>
+            <button type="button" class="compare-target-tab" data-tab="commits">Commits</button>
+          </div>
+          <div class="base-branch-list" id="baseBranchList"></div>
+        </div>
+      </span>
+      <svg class="compare-rail-arrow" id="baseBranchArrow" width="14" height="14" viewBox="0 0 16 16" fill="none" style="display:none" aria-hidden="true"><path d="M10 4L6 8l4 4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+      <span class="header-chip header-context" id="branchContext" style="display:none">
+        <span class="branch-icon">
+          <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M11.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5zm-2.25.75a2.25 2.25 0 1 1 3 2.122V6A2.5 2.5 0 0 1 10 8.5H6a1 1 0 0 0-1 1v1.128a2.251 2.251 0 1 1-1.5 0V5.372a2.25 2.25 0 1 1 1.5 0v1.836A2.492 2.492 0 0 1 6 7h4a1 1 0 0 0 1-1v-.628A2.25 2.25 0 0 1 9.5 3.25zM4.25 12a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5zM3.5 3.25a.75.75 0 1 1 1.5 0 .75.75 0 0 1-1.5 0z"/></svg>
+        </span>
+        <span id="branchName"></span>
+      </span>
+      <div class="stack-chip" id="stackChip" style="display:none">
+        <button class="stack-chip-btn" id="stackChipBtn" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="stackPopover">
+          <svg class="stack-chip-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M2 4h12v1.5H2zM2 7.25h12v1.5H2zM2 10.5h12V12H2z"/></svg>
+          <span class="stack-chip-label" id="stackChipLabel">Stack</span>
+          <span class="stack-chip-chevron" aria-hidden="true">&#x25BE;</span>
+        </button>
+        <button class="stack-chip-exit" id="stackChipExit" type="button" title="Exit to working tree" aria-label="Exit to working tree">&#x2715;</button>
+        <div class="stack-popover" id="stackPopover" role="menu" aria-label="Stack navigation"></div>
+      </div>
+      <button class="resume-pr-pill" id="resumePrPill" type="button" style="display:none" aria-label="Resume previous range view"></button>
+    </div>
+    <span class="header-notify" id="headerNotify"></span>
+  </div>
+  <div class="header-right">
+    <button class="pr-toggle-btn" id="prToggle" style="display:none" title="Pull request overview" aria-label="Pull request overview">
+      <svg class="pr-toggle-icon" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+        <path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"/>
+      </svg>
+      <span class="pr-toggle-number" id="prToggleNumber"></span>
+    </button>
+    <div class="comment-nav-group" id="commentNavGroup" style="display:none">
+      <button class="comment-nav-btn" id="commentNavPrev" title="Previous comment ([)" aria-label="Previous comment">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+          <path d="M4 10l4-4 4 4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+      <button class="comment-count-btn" id="commentCount" title="Toggle comments panel" aria-label="Toggle comments panel">
+        <svg class="comment-count-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+          <path d="M1 2.75C1 1.784 1.784 1 2.75 1h10.5c.966 0 1.75.784 1.75 1.75v7.5A1.75 1.75 0 0 1 13.25 12H9.06l-2.573 2.573A1.458 1.458 0 0 1 4 13.543V12H2.75A1.75 1.75 0 0 1 1 10.25Z" stroke-linejoin="round"/>
+        </svg>
+        <span class="comment-count-number" id="commentCountNumber"></span>
+      </button>
+      <button class="comment-nav-btn" id="commentNavNext" title="Next comment (])" aria-label="Next comment">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true">
+          <path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </button>
+    </div>
+    <div class="scope-toggle hunkyard-story-view-toggle" id="storyViewToggle" style="display:none">
+      <button class="toggle-btn active" data-story-view="story" title="Show story view">Story</button>
+      <button class="toggle-btn" data-story-view="diff" title="Show diff view">Diff</button>
+    </div>
+    <button class="btn btn-sm" id="diffToggle" style="display:none">Toggle Diff</button>
+    <button class="theme-toggle" id="settingsToggle" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0a8.2 8.2 0 0 1 .701.031C9.444.095 9.99.645 10.16 1.29l.288 1.107c.018.066.079.158.212.224.231.114.454.243.668.386.123.082.233.09.299.071l1.103-.303c.644-.176 1.392.021 1.82.63.27.385.506.792.704 1.218.315.675.111 1.422-.364 1.891l-.814.806c-.049.048-.098.147-.088.294.016.257.016.515 0 .772-.01.147.038.246.088.294l.814.806c.475.469.679 1.216.364 1.891a7.977 7.977 0 0 1-.704 1.217c-.428.61-1.176.807-1.82.63l-1.102-.302c-.067-.019-.177-.011-.3.071a5.909 5.909 0 0 1-.668.386c-.133.066-.194.158-.211.224l-.29 1.106c-.168.646-.715 1.196-1.458 1.26a8.006 8.006 0 0 1-1.402 0c-.743-.064-1.289-.614-1.458-1.26l-.289-1.106c-.018-.066-.079-.158-.212-.224a5.738 5.738 0 0 1-.668-.386c-.123-.082-.233-.09-.299-.071l-1.103.303c-.644.176-1.392-.021-1.82-.63a8.12 8.12 0 0 1-.704-1.218c-.315-.675-.111-1.422.363-1.891l.815-.806c.05-.048.098-.147.088-.294a6.214 6.214 0 0 1 0-.772c.01-.147-.038-.246-.088-.294l-.815-.806C.635 6.045.431 5.298.746 4.623a7.92 7.92 0 0 1 .704-1.217c.428-.61 1.176-.807 1.82-.63l1.102.302c.067.019.177.011.3-.071.214-.143.437-.272.668-.386.133-.066.194-.158.211-.224l.29-1.106C6.009.645 6.556.095 7.299.03 7.53.01 7.764 0 8 0Zm-.571 1.525c-.036.003-.108.036-.137.146l-.289 1.105c-.147.561-.549.967-.998 1.189-.173.086-.34.183-.5.29-.417.278-.97.423-1.529.27l-1.103-.303c-.109-.03-.175.016-.195.045-.22.312-.412.644-.573.99-.014.031-.021.11.059.19l.815.806c.411.406.562.957.53 1.456a4.709 4.709 0 0 0 0 .582c.032.499-.119 1.05-.53 1.456l-.815.806c-.081.08-.073.159-.059.19.162.346.353.677.573.989.02.03.085.076.195.046l1.102-.303c.56-.153 1.113-.008 1.53.27.161.107.328.204.501.29.447.222.85.629.997 1.189l.289 1.105c.029.109.101.143.137.146a6.6 6.6 0 0 0 1.142 0c.036-.003.108-.036.137-.146l.289-1.105c.147-.561.549-.967.998-1.189.173-.086.34-.183.5-.29.417-.278.97-.423 1.529-.27l1.103.303c.109.029.175-.016.195-.045.22-.313.411-.644.573-.99.014-.031.021-.11-.059-.19l-.815-.806c-.411-.406-.562-.957-.53-1.456a4.709 4.709 0 0 0 0-.582c-.032-.499.119-1.05.53-1.456l.815-.806c.081-.08.073-.159.059-.19a6.464 6.464 0 0 0-.573-.989c-.02-.03-.085-.076-.195-.046l-1.102.303c-.56.153-1.113.008-1.53-.27a4.44 4.44 0 0 0-.501-.29c-.447-.222-.85-.629-.997-1.189l-.289-1.105c-.029-.11-.101-.143-.137-.146a6.6 6.6 0 0 0-1.142 0ZM11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0ZM9.5 8a1.5 1.5 0 1 0-3.001.001A1.5 1.5 0 0 0 9.5 8Z"/></svg>
+    </button>
+    <button class="theme-toggle" id="tocToggle" title="Table of contents" aria-label="Table of contents">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" aria-hidden="true"><path d="M2.5 4h11M2.5 8h11M2.5 12h11" stroke-linecap="round"/></svg>
+    </button>
+    <button class="btn btn-primary" id="finishBtn">Review changes</button>
+  </div>
+</div>
+
+<div id="toc" class="toc toc-hidden">
+  <div class="toc-header">
+    <span>Contents</span>
+    <button class="toc-close" title="Close table of contents" aria-label="Close table of contents">&#x2715;</button>
+  </div>
+  <ul class="toc-list"></ul>
+</div>
+
+<div id="copyStatus" role="status" aria-live="polite" style="position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap"></div>
+
+<div class="mobile-file-picker-bar mobile-file-picker-hidden" id="mobileFilePickerBar" aria-label="File navigation">
+  <label class="mobile-file-picker-label" for="mobileFilePicker">File:</label>
+  <select class="mobile-file-picker-select" id="mobileFilePicker" aria-label="Select file to review"></select>
+</div>
+
+<div class="main-layout">
+  <div class="file-tree-panel" id="fileTreePanel">
+    <div class="tree-section--conversation" id="treeConversationSection"></div>
+    <div class="file-tree-header">
+      <span class="file-tree-title">Files</span>
+      <span class="file-tree-stats" id="fileTreeStats"></span>
+    </div>
+    <div class="file-tree-search"><input id="fileTreeFilter" type="search" placeholder="Filter changed files…" aria-label="Filter changed files" autocomplete="off"></div>
+    <div class="commit-picker" id="commitDropdown" style="display:none">
+      <button class="commit-picker-btn" id="commitDropdownBtn">
+        <span class="commit-picker-prefix">commits</span>
+        <span class="commit-picker-label" id="commitDropdownLabel">All commits</span>
+        <svg class="commit-picker-chevron" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 3.75 5 6.25 7.5 3.75"/></svg>
+      </button>
+      <div class="commit-picker-menu" id="commitDropdownMenu">
+        <div class="commit-picker-hint">Click: from · Alt+click: through</div>
+        <div class="commit-picker-item active" data-commit="" role="button" tabindex="0"><span class="commit-picker-item-check-spacer" aria-hidden="true"></span>All commits</div>
+        <button type="button" class="commit-picker-clear-through" id="commitClearThrough" style="display:none">Clear through</button>
+        <div class="commit-picker-separator"></div>
+        <div class="commit-picker-list" id="commitDropdownList"></div>
+      </div>
+    </div>
+    <div class="file-tree-body" id="fileTreeBody"></div>
+  </div>
+  <div class="sidebar-resize-handle" id="fileTreeResizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize file tree" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100"></div>
+  <div class="main-content">
+    <div class="review-toolbar" id="reviewToolbar">
+      <div class="review-toolbar-title"><strong id="filesChangedTitle">Files changed</strong><span class="review-file-count" id="filesChangedCount"></span></div>
+      <span class="viewed-count" id="viewedCount"></span>
+      <button type="button" class="btn btn-sm" id="singleFileToggle" aria-pressed="false">Single file</button>
+    <div class="scope-toggle" id="scopeToggle" style="display:none">
+      <button class="toggle-btn active" data-scope="all" title="All changes">All</button>
+      <button class="toggle-btn" data-scope="branch" title="Committed changes">Branch</button>
+      <button class="toggle-btn" data-scope="staged" title="Staged changes">Staged</button>
+      <button class="toggle-btn" data-scope="unstaged" title="Unstaged changes">Unstaged</button>
+    </div>
+    <div class="diff-mode-toggle" id="diffModeToggle" style="display:none">
+      <button class="toggle-btn active" data-mode="split" title="Split diff">Split</button>
+      <button class="toggle-btn" data-mode="unified" title="Unified diff">Unified</button>
+    </div>
+    </div>
+    <div id="reviewConversation" class="review-conversation" hidden></div>
+    <div id="filesContainer">
+      <div class="loading" style="padding: 40px; text-align: center; color: var(--hunkyard-editor-fg-muted);">Loading...</div>
+    </div>
+    <!-- Story mode root: rail + paginated pane. Hidden (display:none) unless
+         session.story is present; populated by app.js renderStory* functions. -->
+    <div id="storyRoot" class="hunkyard-story-root">
+      <nav class="hunkyard-story-rail" id="storyRail" aria-label="Story chapters"></nav>
+      <div class="sidebar-resize-handle hunkyard-story-rail-resizer" id="storyRailResizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize story chapter list" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100"></div>
+      <div class="hunkyard-story-rail-scrim" id="storyRailScrim"></div>
+      <main class="hunkyard-story-pane" id="storyPane">
+        <div class="hunkyard-story-pane__inner" id="storyPaneInner"></div>
+      </main>
+    </div>
+  </div>
+  <div class="sidebar-resize-handle" id="commentsPanelResizer" role="separator" tabindex="0" aria-orientation="vertical" aria-label="Resize comments panel" aria-valuenow="50" aria-valuemin="0" aria-valuemax="100"></div>
+  <div class="comments-panel comments-panel-hidden" id="commentsPanel">
+    <div class="comments-panel-header">
+      <div class="comments-panel-header-row1">
+        <div class="comments-panel-header-left">
+          <span class="comments-panel-title">Comments</span>
+          <span class="comments-panel-count-badge" id="commentsPanelCountBadge">0</span>
+        </div>
+        <div class="comments-panel-header-actions">
+          <button class="comments-panel-close" title="Close comments panel" aria-label="Close comments panel">&#x2715;</button>
+        </div>
+      </div>
+      <div class="comments-panel-header-row2">
+        <div class="comments-filter-toggle" id="commentsFilterPill" role="radiogroup" aria-label="Filter comments">
+          <button type="button" class="toggle-btn active" data-filter="all" role="radio" aria-checked="true" tabindex="0">All <span class="filter-count">0</span></button>
+          <button type="button" class="toggle-btn" data-filter="open" role="radio" aria-checked="false" tabindex="-1">Open <span class="filter-count">0</span></button>
+          <button type="button" class="toggle-btn" data-filter="resolved" role="radio" aria-checked="false" tabindex="-1">Resolved <span class="filter-count">0</span></button>
+        </div>
+        <button type="button" class="comments-panel-expand-all" id="commentsPanelExpandAll" aria-pressed="false">Expand all</button>
+      </div>
+    </div>
+    <div class="comments-panel-body" id="commentsPanelBody" aria-live="polite" aria-label="Comments list"></div>
+  </div>
+  <div class="pr-panel pr-panel-hidden" id="prPanel" aria-label="Pull request overview">
+    <div class="pr-panel-body" id="prPanelBody"></div>
+  </div>
+</div>
+
+<div class="waiting-overlay" id="waitingOverlay" role="dialog" aria-modal="true" aria-labelledby="waitingHeading">
+  <div class="waiting-dialog" id="waitingDialog">
+    <!-- Header -->
+    <div class="waiting-header">
+      <svg class="success-mark" viewBox="0 0 64 64" aria-hidden="true">
+        <circle class="success-mark-ring" cx="32" cy="32" r="28"/>
+        <path class="success-mark-check" d="M19 33 L28 42 L45 23"/>
+      </svg>
+      <h3 id="waitingHeading">Review submitted</h3>
+      <p id="waitingMessage"></p>
+      <p id="preferenceStatus" role="status"></p>
+      <div class="summary-receipt" id="summaryReceipt" style="display:none">
+        <span class="summary-line" id="summaryLine"></span>
+        <button class="summary-copy-btn" id="summaryCopyBtn" aria-label="Copy summary to clipboard">
+          <svg class="icon-copy" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="5" width="8" height="8" rx="1.5"/><path d="M11 5V3.5A1.5 1.5 0 009.5 2h-6A1.5 1.5 0 002 3.5v6A1.5 1.5 0 003.5 11H5"/></svg>
+          <svg class="icon-check" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="display:none"><path d="M3 8.5L6.5 12L13 4"/></svg>
+        </button>
+      </div>
+      <p class="waiting-edits" id="waitingEdits"></p>
+    </div>
+
+    <!-- Prompt copy row -->
+    <div class="prompt-copy-row" id="promptCopyRow">
+      <span class="prompt-preview" id="promptPreview"></span>
+      <button class="prompt-copy-btn" id="waitingClipboard" aria-label="Copy prompt to clipboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>
+        <span class="copy-label">Copy</span>
+      </button>
+    </div>
+    <div class="prompt-full-text" id="waitingPrompt"></div>
+
+    <!-- Footer -->
+    <div class="waiting-footer">
+      <button class="btn btn-sm" id="backToEditing">Back to editing</button>
+    </div>
+  </div>
+</div>
+
+<dialog id="publishReviewDialog" class="publish-review-dialog" aria-labelledby="publishReviewHeading">
+  <form>
+    <header class="publish-review-header"><h3 id="publishReviewHeading">Submit review</h3></header>
+    <div class="publish-review-body">
+      <div class="publish-summary">
+        <label for="publishSummary">Review summary</label>
+        <textarea id="publishSummary" rows="4" maxlength="65536" placeholder="Summarize your feedback…" aria-describedby="publishSummaryHint"></textarea>
+        <p id="publishSummaryHint">Optional. Applies to the whole review.</p>
+      </div>
+      <fieldset class="publish-decision">
+        <legend>Review decision</legend>
+        <label><input type="radio" name="disposition" value="comment" checked> Comment</label>
+        <label><input type="radio" name="disposition" value="approve"> Approve</label>
+        <label><input type="radio" name="disposition" value="request_changes"> Request changes</label>
+      </fieldset>
+      <div id="publishSkills"></div>
+    </div>
+    <footer class="publish-review-footer">
+      <p>Sent to the CLI session that opened this review.</p>
+      <div class="confirm-actions-row">
+        <button type="button" class="btn" id="publishReviewCancel">Cancel</button>
+        <button type="submit" class="btn btn-primary" id="publishReviewSubmit">Submit review</button>
+      </div>
+    </footer>
+  </form>
+</dialog>
+<script src="hunkyard-skills.js"></script>
+<script src="hunkyard-review.js"></script>
+
+<div class="confirm-overlay" id="noChangesOverlay" role="dialog" aria-modal="true" aria-labelledby="noChangesHeading">
+  <div class="confirm-dialog">
+    <h3 id="noChangesHeading">No changes this round</h3>
+    <p>You haven't added any new comments or replies. The remaining unresolved threads are from a previous round — the agent has no new feedback to act on.</p>
+    <div class="confirm-actions">
+      <div class="confirm-actions-row">
+        <button class="btn btn-primary" id="noChangesResolveAll">Resolve all &amp; approve</button>
+        <button class="btn" id="noChangesGoBack">Go back</button>
+      </div>
+      <button class="confirm-send-anyway" id="noChangesSendAnyway">Send anyway</button>
+    </div>
+  </div>
+</div>
+
+<div class="settings-overlay" id="settingsOverlay" role="dialog" aria-modal="true" aria-label="Settings">
+  <div class="settings-dialog">
+    <div class="settings-tabs" role="tablist" aria-label="Settings sections">
+      <button class="settings-tab active" data-tab="settings" role="tab" aria-selected="true" aria-controls="settingsPane" id="tab-settings">Settings</button>
+      <button class="settings-tab" data-tab="shortcuts" role="tab" aria-selected="false" aria-controls="shortcutsPane" id="tab-shortcuts">Shortcuts</button>
+      <button class="settings-tab" data-tab="updates" role="tab" aria-selected="false" aria-controls="updatesPane" id="tab-updates">Updates</button>
+      <button class="settings-tab" data-tab="about" role="tab" aria-selected="false" aria-controls="aboutPane" id="tab-about">About</button>
+      <button class="settings-tab-close" id="settingsClose" aria-label="Close">&times;</button>
+    </div>
+    <div class="settings-content">
+      <div class="settings-pane active" data-pane="settings" id="settingsPane" role="tabpanel" aria-labelledby="tab-settings"></div>
+      <div class="settings-pane" data-pane="shortcuts" id="shortcutsPane" role="tabpanel" aria-labelledby="tab-shortcuts"></div>
+      <div class="settings-pane" data-pane="updates" id="updatesPane" role="tabpanel" aria-labelledby="tab-updates"></div>
+      <div class="settings-pane" data-pane="about" id="aboutPane" role="tabpanel" aria-labelledby="tab-about"></div>
+    </div>
+  </div>
+</div>
+
+<div class="diagram-overlay" id="diagramOverlay" role="dialog" aria-modal="true" aria-label="Diagram fullscreen view">
+  <div class="diagram-overlay-toolbar" role="toolbar" aria-label="Diagram view controls">
+    <button class="btn btn-sm" id="diagramZoomOut" aria-label="Zoom out" title="Zoom out">&minus;</button>
+    <span class="diagram-overlay-zoom" id="diagramZoomLabel" aria-live="polite">100%</span>
+    <button class="btn btn-sm" id="diagramZoomIn" aria-label="Zoom in" title="Zoom in">+</button>
+    <button class="btn btn-sm" id="diagramZoomReset" aria-label="Reset view" title="Reset view">Reset</button>
+    <button class="btn btn-sm" id="diagramOverlayClose" aria-label="Close fullscreen view" title="Close (Esc)">&times;</button>
+  </div>
+  <div class="diagram-overlay-viewport" id="diagramOverlayViewport">
+    <div class="diagram-overlay-canvas" id="diagramOverlayCanvas"></div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    // Path-based fork. The server serves this same index.html raw at /live,
+    // so pathname is the most reliable trigger — survives reload, doesn't
+    // depend on a query string being present.
+    var isLive = window.location.pathname === '/live';
+    var isPreview = window.location.pathname === '/preview';
+
+    if (isLive || isPreview) {
+      // Keep <body> intact and just mark <html> with a mode class. style-live.css
+      // hides code-review-only chrome (file tree, main-content, comments-panel,
+      // pr-panel, etc.) while keeping the header + settings overlay alive, so the
+      // shared bootstrap (theme pill, settings dialog, shared helpers) keeps working.
+      document.documentElement.classList.add('hunkyard-mode-live');
+      // Pull in shared helpers + live-mode CSS, then the controller.
+      var sh = document.createElement('script'); sh.src = 'hunkyard-shared.js';
+      document.head.appendChild(sh);
+
+      var cr = document.createElement('script'); cr.src = 'hunkyard-renderer.js';
+      document.head.appendChild(cr);
+
+      var dr = document.createElement('script'); dr.src = 'hunkyard-draft.js';
+      document.head.appendChild(dr);
+
+      var ctpl = document.createElement('script'); ctpl.src = 'hunkyard-comment-templates.js';
+      document.head.appendChild(ctpl);
+
+      var sse = document.createElement('script'); sse.src = 'hunkyard-sse.js';
+      document.head.appendChild(sse);
+
+      var cf = document.createElement('script'); cf.src = 'hunkyard-comment-form.js';
+      document.head.appendChild(cf);
+
+      var ru = document.createElement('script'); ru.src = 'live-route-utils.js';
+      document.head.appendChild(ru);
+
+      // markdown-it powers comment-body rendering inside the shared
+      // buildCommentCard. Loaded for /live too so live rows reach parity
+      // with code-review's renderer. DOMPurify + comment-html sanitize the
+      // html:true output before innerHTML assignment.
+      var mi = document.createElement('script'); mi.src = 'markdown-it.min.js'; mi.async = false;
+      document.head.appendChild(mi);
+      var dp = document.createElement('script'); dp.src = 'dompurify.min.js'; dp.async = false;
+      document.head.appendChild(dp);
+      var chm = document.createElement('script'); chm.src = 'comment-html.js'; chm.async = false;
+      document.head.appendChild(chm);
+
+      var l = document.createElement('link');
+      l.rel = 'stylesheet';
+      l.href = 'style-live.css';
+      document.head.appendChild(l);
+
+      // Sub-modules loaded in parallel; live-mode.js (loaded last) requires
+      // their window.hunkyard.* / window.hunkyard.live.* namespaces to be present.
+      var liveDeps = [
+        'hunkyard-icons.js',
+        'hunkyard-comment-card-helpers.js',
+        'hunkyard-comment-card.js',
+        'hunkyard-shortcuts.js',
+        'hunkyard-settings-panes.js',
+        'hunkyard-settings-overlay.js',
+        'agent-protocol.js',
+        'live-mode.dispatch.js',
+        'live-mode.inflight.js',
+        'live-mode.toggle.js',
+        'live-mode.composer.js',
+        'live-mode.menu.js',
+        'live-mode.shortcut.js',
+        'live-mode.queue.js',
+        'live-mode.origin.js',
+        'live-mode.connection.js',
+        'live-mode.size.js',
+        'live-mode.row.js',
+        'live-mode.panel.js',
+        'live-mode.panel-render.js',
+        'live-mode.sse.js',
+        'hunkyard-tab-ready.js',
+        'live-mode.comments-loader.js',
+        'live-mode.redirect-notice.js',
+        'live-mode-pin-filter.js',
+        'live-mode-resolution-gate.js',
+        'live-mode-pin-state.js',
+        'live-mode-thread-scroll.js',
+        'live-mode-reanchor-click.js',
+        'live-mode-reanchor-put.js',
+        'live-mode-deeplink.js',
+        'live-mode-round-resolve.js',
+        'live-mode-round-tooltip.js',
+        'live-mode.menu-controller.js',
+      ];
+      // async=false on dynamically-inserted scripts preserves DOM order for
+      // execution while still loading in parallel. Without this, a module
+      // like live-mode.dispatch.js may execute before agent-protocol.js
+      // has parsed, leaving window.hunkyard.agentProtocol undefined and crashing
+      // boot with "Cannot read properties of undefined (reading 'A2C')".
+      var depTags = liveDeps.map(function (p) {
+        var t = document.createElement('script');
+        t.src = p;
+        t.async = false;
+        document.head.appendChild(t);
+        return t;
+      });
+
+      // Defer live-mode.js until all deps have parsed. Promise.all over a
+      // settled-on-either-load-or-error promise per tag means adding a new
+      // module to liveDeps automatically participates in the gate — no
+      // hand-counted totalNeeded to keep in sync. Errors don't hang boot;
+      // they surface a banner and log a console error with the failed src
+      // so the user can see which module failed.
+      function trackTag(tag, optional) {
+        return new Promise(function (resolve) {
+          tag.addEventListener('load', function () { resolve({ ok: true, src: tag.src }); });
+          tag.addEventListener('error', function () {
+            // markdown-it is optional — booting without it degrades comment
+            // rendering but doesn't crash the app. Treat as resolved for the
+            // boot gate; render path falls back to plain text.
+            if (!optional) {
+              try { console.error('[hunkyard] live-mode dep failed to load:', tag.src); } catch (_) {}
+            }
+            resolve({ ok: false, src: tag.src, optional: !!optional });
+          });
+        });
+      }
+      var bootGate = [trackTag(sh), trackTag(cr), trackTag(dr), trackTag(ctpl), trackTag(sse), trackTag(cf), trackTag(ru), trackTag(mi, true), trackTag(dp), trackTag(chm)]
+        .concat(depTags.map(function (t) { return trackTag(t); }));
+      Promise.all(bootGate).then(function (results) {
+        var failed = results.filter(function (r) { return !r.ok && !r.optional; });
+        if (failed.length) {
+          var box = document.createElement('div');
+          box.style.cssText = 'position:fixed;inset:24px;background:var(--hunkyard-bg-card,#1a1d24);color:var(--hunkyard-red,#f7768e);border:1px dashed var(--hunkyard-red,#f7768e);border-radius:6px;padding:16px;font-family:var(--hunkyard-font-mono,monospace);font-size:13px;z-index:2147483647;white-space:pre-wrap';
+          box.textContent = 'Live mode failed to load:\n' + failed.map(function (r) { return '  • ' + r.src; }).join('\n');
+          document.body.appendChild(box);
+          return;
+        }
+        if (window.hunkyard && window.hunkyard.shared) window.hunkyard.shared.applyThemeFromCookie();
+        var s = document.createElement('script');
+        s.src = 'live-mode.js';
+        document.body.appendChild(s);
+      });
+    } else {
+      // Code-review chrome — load existing vendor + app.js.
+      // async=false on dynamically-inserted scripts preserves DOM order for
+      // execution while still loading in parallel. Without this, app.js may
+      // execute before hunkyard-shared.js parses, producing
+      // "Cannot read properties of undefined (reading 'installSidebarResize')"
+      // (and similar for other window.hunkyard.shared.* helpers).
+      var v1 = document.createElement('script'); v1.src = 'markdown-it.min.js'; v1.async = false; document.body.appendChild(v1);
+      var dp = document.createElement('script'); dp.src = 'dompurify.min.js'; dp.async = false; document.body.appendChild(dp);
+      var chm = document.createElement('script'); chm.src = 'comment-html.js'; chm.async = false; document.body.appendChild(chm);
+      var v4 = document.createElement('script'); v4.src = 'diff-match-patch.min.js'; v4.async = false; document.body.appendChild(v4);
+      // Shared helpers (escapeHTML, fetchJSON, installSidebarResize, theme cookie, etc.)
+      // used by app.js. Must load before app.js.
+      var sh = document.createElement('script'); sh.src = 'hunkyard-shared.js'; sh.async = false; document.body.appendChild(sh);
+      var cr = document.createElement('script'); cr.src = 'hunkyard-renderer.js'; cr.async = false; document.body.appendChild(cr);
+      var dr = document.createElement('script'); dr.src = 'hunkyard-draft.js'; dr.async = false; document.body.appendChild(dr);
+      var ctpl = document.createElement('script'); ctpl.src = 'hunkyard-comment-templates.js'; ctpl.async = false; document.body.appendChild(ctpl);
+      var sse = document.createElement('script'); sse.src = 'hunkyard-sse.js'; sse.async = false; document.body.appendChild(sse);
+      var cf = document.createElement('script'); cf.src = 'hunkyard-comment-form.js'; cf.async = false; document.body.appendChild(cf);
+      // Pure rendering helpers shared with live-mode rows. Must load before app.js.
+      var ch = document.createElement('script'); ch.src = 'hunkyard-comment-card-helpers.js'; ch.async = false; document.body.appendChild(ch);
+      // Shared comment-card renderer (used by app.js and live-mode). Must load before app.js.
+      var cc = document.createElement('script'); cc.src = 'hunkyard-comment-card.js'; cc.async = false; document.body.appendChild(cc);
+      // Shared shortcut registry, persistence, and key normalization.
+      var ks = document.createElement('script'); ks.src = 'hunkyard-shortcuts.js'; ks.async = false; document.body.appendChild(ks);
+      // Shared settings-overlay panes (Shortcuts + About). Must load before app.js.
+      var sp = document.createElement('script'); sp.src = 'hunkyard-settings-panes.js'; sp.async = false; document.body.appendChild(sp);
+      // Optional boost for low-contrast syntax colours (window.hunkyard.themeBoost).
+      var tb = document.createElement('script'); tb.src = 'hunkyard-theme-boost.js'; tb.async = false; document.body.appendChild(tb);
+      // Shared settings-overlay shell (open/close/Esc/focus-trap/tab nav). Must load before app.js.
+      var so = document.createElement('script'); so.src = 'hunkyard-settings-overlay.js'; so.async = false; document.body.appendChild(so);
+      // Shiki highlighting for fenced code (comments, documents), then line-block
+      // building (buildLineBlocks). Both must load before app.js.
+      var chl = document.createElement('script'); chl.src = 'hunkyard-code-highlight.js'; chl.async = false; document.body.appendChild(chl);
+      // Pluggable renderers (registry, fullscreen overlay, built-in mermaid).
+      // Must load before hunkyard-line-blocks.js and app.js.
+      var rg = document.createElement('script'); rg.src = 'hunkyard-renderers.js'; rg.async = false; document.body.appendChild(rg);
+      var dov = document.createElement('script'); dov.src = 'hunkyard-diagram-overlay.js'; dov.async = false; document.body.appendChild(dov);
+      var rm = document.createElement('script'); rm.src = 'hunkyard-renderer-mermaid.js'; rm.async = false; document.body.appendChild(rm);
+      // Math (KaTeX, loaded on first use) and GitHub's emoji shortcode table. Must load before app.js.
+      var mth = document.createElement('script'); mth.src = 'hunkyard-math.js'; mth.async = false; document.body.appendChild(mth);
+      var emj = document.createElement('script'); emj.src = 'gemoji.min.js'; emj.async = false; document.body.appendChild(emj);
+      var lb = document.createElement('script'); lb.src = 'hunkyard-line-blocks.js'; lb.async = false; document.body.appendChild(lb);
+      // GitHub Flavored Markdown extensions for the document renderer. Must load before app.js.
+      var gfm = document.createElement('script'); gfm.src = 'hunkyard-gfm.js'; gfm.async = false; document.body.appendChild(gfm);
+      // Word-level diff computation (pure functions). Must load before app.js.
+      var df = document.createElement('script'); df.src = 'hunkyard-diff-renderer.js'; df.async = false; document.body.appendChild(df);
+      // SVG icon constants used by app.js. Must load before app.js.
+      var ic = document.createElement('script'); ic.src = 'hunkyard-icons.js'; ic.async = false; document.body.appendChild(ic);
+      // Glob matcher for auto-viewed-patterns (window.hunkyard.globMatch). Must load before app.js.
+      var gm = document.createElement('script'); gm.src = 'hunkyard-glob-match.js'; gm.async = false; document.body.appendChild(gm);
+      // Tab title badge when a round becomes ready while the tab is hidden.
+      var tr = document.createElement('script'); tr.src = 'hunkyard-tab-ready.js'; tr.async = false; document.body.appendChild(tr);
+      // @pierre/diffs (window.PierreDiffs) — split ESM bundle; module scripts
+      // don't join the async=false ordering above, so app.js awaits this
+      // promise before its first render. Resolves null if it fails to load.
+      window.hunkyardPierreReady = new Promise(function(resolve) {
+        var pm = document.createElement('script'); pm.type = 'module'; pm.src = 'pierre/pierre-diffs.js';
+        pm.onload = function() { resolve(window.PierreDiffs || null); };
+        pm.onerror = function() { resolve(null); };
+        document.body.appendChild(pm);
+      });
+      var pa = document.createElement('script'); pa.src = 'hunkyard-pierre-adapter.js'; pa.async = false; document.body.appendChild(pa);
+      var pv = document.createElement('script'); pv.src = 'hunkyard-pierre-view.js'; pv.async = false; document.body.appendChild(pv);
+      var pr = document.createElement('script'); pr.src = 'hunkyard-pierre-runtime.js'; pr.async = false; document.body.appendChild(pr);
+      var pd = document.createElement('script'); pd.src = 'hunkyard-pierre-dom.js'; pd.async = false; document.body.appendChild(pd);
+      // Find in the review list (Cmd/Ctrl+F over Pierre's virtualized rows).
+      var fd = document.createElement('script'); fd.src = 'hunkyard-find.js'; fd.async = false; document.body.appendChild(fd);
+      var a = document.createElement('script'); a.src = 'app.js'; a.async = false; document.body.appendChild(a);
+    }
+  })();
+</script>
+</body>
+</html>

@@ -1,0 +1,56 @@
+package prompt
+
+import (
+	"fmt"
+	"os"
+	"path/filepath"
+
+	integrationassets "github.com/BSH2409/hunkyard/integrations"
+)
+
+var stockPromptFiles = []string{
+	"on_finish_approved.md",
+	"on_finish_approved.story.md",
+	"on_finish_unresolved.md",
+	"on_finish_unresolved.story.md",
+}
+
+var stockStoryPromptFiles = []string{
+	"on_story_generate.md",
+}
+
+// InstallPrompts copies stock finish templates into destDir (typically ~/.hunkyard/prompts or .hunkyard/prompts).
+func InstallPrompts(destDir string, force bool) error {
+	return installStockFiles(destDir, force, stockPromptFiles)
+}
+
+// InstallStoryPrompt copies the stock on_story_generate template into destDir
+// (typically ~/.hunkyard/prompts or .hunkyard/prompts).
+func InstallStoryPrompt(destDir string, force bool) error {
+	return installStockFiles(destDir, force, stockStoryPromptFiles)
+}
+
+func installStockFiles(destDir string, force bool, names []string) error {
+	if err := os.MkdirAll(destDir, 0o755); err != nil {
+		return fmt.Errorf("creating %s: %w", destDir, err)
+	}
+	for _, name := range names {
+		src := "integrations/prompts/" + name
+		data, err := integrationassets.FS.ReadFile(src)
+		if err != nil {
+			return fmt.Errorf("reading stock prompt %s: %w", name, err)
+		}
+		dst := filepath.Join(destDir, name)
+		if !force {
+			if _, err := os.Stat(dst); err == nil {
+				fmt.Printf("  Skipped:   %s (already exists, use --force to overwrite)\n", dst)
+				continue
+			}
+		}
+		if err := os.WriteFile(dst, data, 0o644); err != nil {
+			return fmt.Errorf("writing %s: %w", dst, err)
+		}
+		fmt.Printf("  Installed: %s\n", dst)
+	}
+	return nil
+}

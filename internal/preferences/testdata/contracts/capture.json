@@ -1,0 +1,357 @@
+{
+  "schema_version": 1,
+  "provenance": "Ruby ObservationStore/ExplicitCapture; fixed clock, isolated roots, synthetic feedback only",
+  "cases": [
+    {
+      "name": "durable_and_duplicate",
+      "steps": [
+        {
+          "input": {
+            "Feedback": "Always use early returns in my Ruby code",
+            "Source": "hook",
+            "SessionID": "session-a",
+            "TurnID": "turn-a",
+            "RepoKey": "blogvault-a1b2c3d4e5f6"
+          },
+          "action": "created",
+          "reason": null,
+          "observation": {
+            "id": "obs_1b4060a9a2c243b9711f72a056c14eac3826e19dbdc747b7b1549af53d1d3294",
+            "captured_at": "2026-08-19T12:00:00Z",
+            "source": "hook",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": "fa57a52dbf08190218529730a3e99db6946c6c29220fb6e0551e21598b0b05db",
+            "turn_key": "2dfa6d12e5e99b53826bac533da9c2d2cdfab39a57d0c068344efc283e4878a9",
+            "prompt_fingerprint": "aaab188f3fa0be2872f3149055925401bde8e2d3b29906d7cb7411e09154a02a",
+            "safe_excerpt": "Always use early returns in my Ruby code",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": [
+              "ruby"
+            ]
+          }
+        },
+        {
+          "input": {
+            "Feedback": "Always use early returns in my Ruby code",
+            "Source": "hook",
+            "SessionID": "session-a",
+            "TurnID": "turn-a",
+            "RepoKey": "blogvault-a1b2c3d4e5f6"
+          },
+          "action": "duplicate",
+          "reason": "duplicate",
+          "observation": {
+            "id": "obs_1b4060a9a2c243b9711f72a056c14eac3826e19dbdc747b7b1549af53d1d3294",
+            "captured_at": "2026-08-19T12:00:00Z",
+            "source": "hook",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": "fa57a52dbf08190218529730a3e99db6946c6c29220fb6e0551e21598b0b05db",
+            "turn_key": "2dfa6d12e5e99b53826bac533da9c2d2cdfab39a57d0c068344efc283e4878a9",
+            "prompt_fingerprint": "aaab188f3fa0be2872f3149055925401bde8e2d3b29906d7cb7411e09154a02a",
+            "safe_excerpt": "Always use early returns in my Ruby code",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": [
+              "ruby"
+            ]
+          }
+        }
+      ],
+      "rules": null,
+      "persona_files": null
+    },
+    {
+      "name": "task_local",
+      "steps": [
+        {
+          "input": {
+            "Feedback": "rename this local variable to payload",
+            "Source": "hook",
+            "SessionID": "session-a",
+            "TurnID": "turn-a",
+            "RepoKey": "blogvault-a1b2c3d4e5f6"
+          },
+          "action": "ignored",
+          "reason": "not_capturable",
+          "observation": null
+        }
+      ],
+      "rules": null,
+      "persona_files": null
+    },
+    {
+      "name": "sensitive",
+      "steps": [
+        {
+          "input": {
+            "Feedback": "Prefer password=synthetic-test-value",
+            "Source": "hook",
+            "SessionID": "session-a",
+            "TurnID": "turn-a",
+            "RepoKey": "blogvault-a1b2c3d4e5f6"
+          },
+          "action": "ignored",
+          "reason": "sensitive_content",
+          "observation": null
+        }
+      ],
+      "rules": null,
+      "persona_files": null
+    },
+    {
+      "name": "correction_context",
+      "steps": [
+        {
+          "input": {
+            "Feedback": "No, keep the domain boundary clear instead",
+            "Source": "hook",
+            "SessionID": "session-a",
+            "TurnID": "turn-a",
+            "RepoKey": "blogvault-a1b2c3d4e5f6",
+            "Context": {
+              "source": "provided",
+              "previous_user_request": "Read /private/customer/files/example.rb for customer_id 12345",
+              "agent_response": "I created a generic helper.\n```ruby\ndef helper(value); value; end\n```"
+            }
+          },
+          "action": "created",
+          "reason": null,
+          "observation": {
+            "id": "obs_d3f60601b0ffad55a8bc135276790010ebd464941bb71e0ef07628ec31657110",
+            "captured_at": "2026-08-19T12:00:00Z",
+            "source": "hook",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": "fa57a52dbf08190218529730a3e99db6946c6c29220fb6e0551e21598b0b05db",
+            "turn_key": "2dfa6d12e5e99b53826bac533da9c2d2cdfab39a57d0c068344efc283e4878a9",
+            "prompt_fingerprint": "74f3b5504f0d9067412c449833780581357e191574b1cf7c6908b8394f23be50",
+            "safe_excerpt": "No, keep the domain boundary clear instead",
+            "signals": {
+              "correction": true,
+              "durable_language": false,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": [],
+            "context": {
+              "previous_user_request": "Read [PATH] for customer_id [ID]",
+              "agent_response": "I created a generic helper.",
+              "source": "provided"
+            }
+          }
+        }
+      ],
+      "rules": null,
+      "persona_files": null
+    },
+    {
+      "name": "without_turn_id",
+      "steps": [
+        {
+          "input": {
+            "Feedback": "Always use early returns in my Ruby code",
+            "Source": "hook",
+            "SessionID": "session-a",
+            "TurnID": null,
+            "RepoKey": "blogvault-a1b2c3d4e5f6",
+            "Context": {
+              "source": "provided",
+              "previous_user_request": "Read /private/customer/files/example.rb for customer_id 12345",
+              "agent_response": "I created a generic helper.\n```ruby\ndef helper(value); value; end\n```"
+            }
+          },
+          "action": "created",
+          "reason": null,
+          "observation": {
+            "id": "obs_e62ad4e4ee2c397698d4d28444e172a51ebee00ccaf021aa90b83cfc2a8a61d2",
+            "captured_at": "2026-08-19T12:00:00Z",
+            "source": "hook",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": "fa57a52dbf08190218529730a3e99db6946c6c29220fb6e0551e21598b0b05db",
+            "turn_key": null,
+            "prompt_fingerprint": "aaab188f3fa0be2872f3149055925401bde8e2d3b29906d7cb7411e09154a02a",
+            "safe_excerpt": "Always use early returns in my Ruby code",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": [
+              "ruby"
+            ],
+            "context": {
+              "previous_user_request": "Read [PATH] for customer_id [ID]",
+              "agent_response": "I created a generic helper.",
+              "source": "provided"
+            }
+          }
+        },
+        {
+          "input": {
+            "Feedback": "Always use early returns in my Ruby code",
+            "Source": "hook",
+            "SessionID": "session-a",
+            "TurnID": null,
+            "RepoKey": "blogvault-a1b2c3d4e5f6",
+            "Context": {
+              "source": "provided",
+              "previous_user_request": "Read /private/customer/files/example.rb for customer_id 12345",
+              "agent_response": "I created a generic helper.\n```ruby\ndef helper(value); value; end\n```"
+            }
+          },
+          "action": "duplicate",
+          "reason": "duplicate",
+          "observation": {
+            "id": "obs_e62ad4e4ee2c397698d4d28444e172a51ebee00ccaf021aa90b83cfc2a8a61d2",
+            "captured_at": "2026-08-19T12:00:00Z",
+            "source": "hook",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": "fa57a52dbf08190218529730a3e99db6946c6c29220fb6e0551e21598b0b05db",
+            "turn_key": null,
+            "prompt_fingerprint": "aaab188f3fa0be2872f3149055925401bde8e2d3b29906d7cb7411e09154a02a",
+            "safe_excerpt": "Always use early returns in my Ruby code",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": [
+              "ruby"
+            ],
+            "context": {
+              "previous_user_request": "Read [PATH] for customer_id [ID]",
+              "agent_response": "I created a generic helper.",
+              "source": "provided"
+            }
+          }
+        },
+        {
+          "input": {
+            "Feedback": "Always use early returns in my Ruby code",
+            "Source": "hook",
+            "SessionID": "session-a",
+            "TurnID": null,
+            "RepoKey": "blogvault-a1b2c3d4e5f6",
+            "Context": {
+              "source": "provided",
+              "previous_user_request": "Read /private/customer/files/example.rb for customer_id 12345",
+              "agent_response": "I made a different helper."
+            }
+          },
+          "action": "created",
+          "reason": null,
+          "observation": {
+            "id": "obs_668fd8257b18866a39ef7c5bc2831d0695935b232c5bb2d43d565dc89b4c61b8",
+            "captured_at": "2026-08-19T12:00:00Z",
+            "source": "hook",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": "fa57a52dbf08190218529730a3e99db6946c6c29220fb6e0551e21598b0b05db",
+            "turn_key": null,
+            "prompt_fingerprint": "aaab188f3fa0be2872f3149055925401bde8e2d3b29906d7cb7411e09154a02a",
+            "safe_excerpt": "Always use early returns in my Ruby code",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": [
+              "ruby"
+            ],
+            "context": {
+              "previous_user_request": "Read [PATH] for customer_id [ID]",
+              "agent_response": "I made a different helper.",
+              "source": "provided"
+            }
+          }
+        }
+      ],
+      "rules": null,
+      "persona_files": null
+    },
+    {
+      "name": "explicit",
+      "steps": [
+        {
+          "input": {
+            "Feedback": "Always use early returns in my Ruby code",
+            "Source": "hook",
+            "SessionID": "session-a",
+            "TurnID": "turn-a",
+            "RepoKey": null,
+            "Explicit": true,
+            "Scope": "global",
+            "Directive": "Prefer early returns over nested conditionals.",
+            "Surfaces": [
+              "ruby"
+            ]
+          },
+          "action": "activated",
+          "reason": null,
+          "observation": {
+            "id": "obs_5ef393b32fe037e48a6ee1dda9dee876895351532fd2c5e8782c59677eda74d6",
+            "captured_at": "2026-08-19T12:00:00Z",
+            "source": "explicit",
+            "repo_key": null,
+            "session_key": "fa57a52dbf08190218529730a3e99db6946c6c29220fb6e0551e21598b0b05db",
+            "turn_key": "2dfa6d12e5e99b53826bac533da9c2d2cdfab39a57d0c068344efc283e4878a9",
+            "prompt_fingerprint": "aaab188f3fa0be2872f3149055925401bde8e2d3b29906d7cb7411e09154a02a",
+            "safe_excerpt": "Always use early returns in my Ruby code",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": [
+              "ruby"
+            ]
+          }
+        }
+      ],
+      "rules": [
+        {
+          "created_at": "2026-08-19T12:00:00Z",
+          "directive": "Prefer early returns over nested conditionals.",
+          "evidence": {
+            "explicit_count": 1,
+            "observation_count": 1,
+            "repository_count": 0,
+            "session_count": 1
+          },
+          "examples": [
+            "Always use early returns in my Ruby code"
+          ],
+          "id": "rule_72c2b0062571864cbe3ecdd8594122f956f0aa05d6fc0edd90ac56718de009ed",
+          "observations": [
+            {
+              "captured_at": "2026-08-19T12:00:00Z",
+              "explicit": true,
+              "id": "obs_5ef393b32fe037e48a6ee1dda9dee876895351532fd2c5e8782c59677eda74d6",
+              "repo_key": null,
+              "safe_excerpt": "Always use early returns in my Ruby code",
+              "session_key": "fa57a52dbf08190218529730a3e99db6946c6c29220fb6e0551e21598b0b05db"
+            }
+          ],
+          "origin": "feedback",
+          "scope": {
+            "kind": "global",
+            "repo_key": null
+          },
+          "status": "active",
+          "surfaces": [
+            "ruby"
+          ],
+          "updated_at": "2026-08-19T12:00:00Z"
+        }
+      ],
+      "persona_files": {
+        "core.md": "<!-- Generated by learn-preferences; do not edit. -->\n<!-- Defaults only: current user instructions and repository standards win. -->\n",
+        "ruby.md": "<!-- Generated by learn-preferences; do not edit. -->\n<!-- Defaults only: current user instructions and repository standards win. -->\n- Prefer early returns over nested conditionals.\n"
+      }
+    }
+  ]
+}

@@ -1,0 +1,120 @@
+# Frontend Architecture
+
+## Two-Paradigm Page Fork
+
+`index.html` serves both modes from a single HTML shell. A script block at load time checks `window.location.pathname`:
+- `/live` → live mode (iframe-based pin review)
+- Everything else → code-review mode (file tree + diff/document views)
+
+Each mode dynamically loads its own script set. They share: theme pill, settings overlay, and extracted modules.
+
+## Module Pattern
+
+All custom JS uses the IIFE + dual-export pattern:
+
+```javascript
+(function () {
+  'use strict';
+  // ... implementation ...
+  var api = { publicFn1, publicFn2 };
+  if (typeof window !== 'undefined') {
+    window.hunkyard = window.hunkyard || {};
+    window.hunkyard.<namespace> = api;
+  }
+  if (typeof module === 'object' && module.exports) {
+    module.exports = api;
+  }
+})();
+```
+
+- Runtime: accessed via `window.hunkyard.<namespace>`
+- Tests: required via `module.exports` (Node.js `--test`)
+- Never use ES modules (`import`/`export`) — no build step exists
+
+## Shared Modules (used by both modes)
+
+| Module | Namespace | Purpose |
+|--------|-----------|---------|
+| `hunkyard-shared.js` | `window.hunkyard.shared` | Cookie helpers, theme, tip rotation, image upload |
+| `hunkyard-renderer.js` | `window.hunkyard.renderer` | ContentRenderer registry (register/deregister/current) |
+| `hunkyard-sse.js` | `window.hunkyard.sse` | SSE client factory (createSSE) |
+| `hunkyard-draft.js` | `window.hunkyard.draft` | Autosave drafts to localStorage |
+| `hunkyard-comment-templates.js` | `window.hunkyard.commentTemplates` | Template bar + saved-snippet CRUD |
+| `hunkyard-comment-form.js` | `window.hunkyard.commentForm` | Shared comment form creation |
+| `hunkyard-comment-card.js` | `window.hunkyard.commentCard` | Comment card rendering + reply threading |
+| `hunkyard-comment-card-helpers.js` | `window.hunkyard.commentCardHelpers` | Author colors, timestamps, markdown rendering |
+| `hunkyard-settings-overlay.js` | `window.hunkyard.settingsOverlay` | Settings dialog lifecycle |
+| `hunkyard-settings-panes.js` | `window.hunkyard.settingsPanes` | Settings tab content |
+
+## Code-Review Modules (used only by code-review mode)
+
+| Module | Namespace | Purpose |
+|--------|-----------|---------|
+| `hunkyard-icons.js` | `window.hunkyard.icons` | SVG icon constants (ICON_CHEVRON, ICON_EDIT, etc.) |
+| `hunkyard-line-blocks.js` | `window.hunkyard.lineBlocks` | buildLineBlocks (markdown → commentable line blocks) |
+| `hunkyard-gfm.js` | `window.hunkyard.gfm` | GitHub Flavored Markdown extensions for documents and comments (task lists, alerts, footnotes, math, emoji, `~` strikethrough, `www.` autolinks, tagfilter). See `docs/markdown.md` |
+| `hunkyard-math.js` | `window.hunkyard.math` | KaTeX math: lazy load, inline HTML, placeholder upgrade, ```` ```math ```` fence renderer |
+| `hunkyard-renderers.js` | `window.hunkyard.renderers` | Pluggable renderer registry (fence + file renderers, render targets, anchorFor clicks). See `docs/renderers.md` |
+| `hunkyard-diagram-overlay.js` | `window.hunkyard.diagramOverlay` | Fullscreen pan/zoom view for rendered SVG output |
+| `hunkyard-find.js` | `window.hunkyard.find` | Find bar for the review list (Cmd/Ctrl+F): searches the file model, highlights matches in Pierre's shadow roots |
+| `hunkyard-renderer-mermaid.js` | (registers `mermaid` twice) | Built-in Mermaid renderer: a fence registration for ```` ```mermaid ````, a file registration for `*.mermaid` / `*.mmd` |
+| `hunkyard-code-highlight.js` | `window.hunkyard.codeHighlight` | Shiki highlighting for fenced code (comments, documents) via Pierre's worker pool |
+| `hunkyard-diff-renderer.js` | `window.hunkyard.diffRenderer` | Word-level diff for the rendered markdown diff (files mode rounds) |
+| `hunkyard-pierre-adapter.js` | `window.hunkyard.pierreAdapter` | Pure mapping: Hunkyard hunks/comments/forms → Pierre diffs, annotations, themes |
+| `hunkyard-pierre-view.js` | `window.hunkyard.pierreView` | The review list on Pierre CodeView (items, lazy hydration, annotation cache, jumps) |
+
+## ContentRenderer Interface
+
+Modes register a renderer that the shared chrome (comment cards, settings) can call without knowing the active mode:
+
+```javascript
+window.hunkyard.renderer.register({
+  scrollToAnchor(anchor),     // scroll viewport to a comment's target
+  highlightAnchor(anchor),    // visually highlight the target
+  clearHighlight(),           // remove highlight
+  onAnnotationIntent(cb),     // subscribe to "user wants to comment here"
+  getMode(),                  // "code-review" | "live"
+  getAnchorType(),            // "line" | "dom"
+});
+```
+
+Code-review registers its renderer in `app.js`. Live-mode registers in `live-mode.js`.
+
+## Script Loading
+
+No bundler. Scripts are loaded dynamically with `async=false` (preserves execution order while loading in parallel). A Promise-based boot gate waits for all dependencies before loading the mode's main entry point:
+
+1. Early scripts (shared helpers) load first
+2. `liveDeps` array lists all sub-modules
+3. `Promise.all(bootGate)` waits for all load events
+4. Only then loads `live-mode.js` (or `app.js` for code-review)
+
+When adding a new shared module:
+- Add to `liveDeps` array in `index.html` if live-mode needs it
+- Add to the code-review script chain if code-review needs it
+- Both modes must load shared modules BEFORE their main entry point
+
+## Live-Mode Sub-Modules
+
+Live-mode splits into focused files under `window.hunkyard.live.<name>`:
+
+| File | Namespace | Concern |
+|------|-----------|---------|
+| `live-mode.dispatch.js` | `.live.dispatch` | Message dispatch table |
+| `live-mode.toggle.js` | `.live.toggle` | Pin/Browse mode toggle |
+| `live-mode.composer.js` | `.live.composer` | Comment composition UI |
+| `live-mode.panel.js` | `.live.panel` | Side panel lifecycle |
+| `live-mode.panel-render.js` | `.live.panelRender` | Panel card rendering |
+| `live-mode.sse.js` | `.live.sse` | Live-mode SSE handlers |
+| `live-mode.size.js` | `.live.size` | Panel resize logic |
+| `live-mode.queue.js` | `.live.queue` | Batched pin push queue |
+| `live-mode.origin.js` | `.live.origin` | Origin/proxy URL resolution |
+| `live-mode.row.js` | `.live.row` | Per-route section rendering |
+
+## Adding a New Module
+
+1. Create the IIFE file with the dual-export pattern
+2. Add it to `liveDeps` or code-review script chain in `index.html`
+3. Create a matching `web/__tests__/<name>.test.js` using Node's `--test`
+4. Add the test file to `Makefile` `e2e-live-utils` target (if live-mode)
+5. Document dependencies in a header comment (which `window.hunkyard.*` namespaces it reads)

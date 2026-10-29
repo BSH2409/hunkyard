@@ -1,0 +1,59 @@
+package config
+
+import (
+	"fmt"
+	"os"
+)
+
+func RunConfig(args []string) error {
+	for _, arg := range args {
+		if arg == "--generate" || arg == "-g" {
+			fmt.Print(DefaultConfigString())
+			return nil
+		}
+	}
+	cfg, err := LoadCurrentConfig()
+	if err != nil {
+		return err
+	}
+	fmt.Print(cfg.String())
+	return nil
+}
+
+// PrintConfigHelp is the single help text for `hunkyard config`. The command
+// registry wires it as the command's helpFn, so `hunkyard config --help`,
+// `hunkyard config help`, and `hunkyard help config` all reach this one copy.
+func PrintConfigHelp() {
+	fmt.Fprint(os.Stderr, `Usage: hunkyard config [--generate|-g]
+
+Show the configuration merged from ~/.hunkyard.config.json and the project
+.hunkyard.config.json as JSON, or print a template with every key and its default
+using --generate. CLI flags and environment variables are not reflected in the
+resolved output.
+
+Keys worth knowing:
+  output <dir>
+      Hunkyard data root for reviews. Reviews live in <dir>/reviews/<key>/, keyed
+      per working directory and branch, the same layout as the default
+      ~/.hunkyard.
+
+  plan_approve_mode <mode>
+      Claude Code permission mode to switch to after a plan-hook approval, for
+      example "acceptEdits". Global-only, so a repository cannot weaken your
+      permission policy. Unset leaves Claude Code's behavior unchanged.
+
+  notify_on_round_ready <bool>
+      Send a desktop notification when a review round is ready for you.
+      Opt-in: defaults to false.
+
+  close_on_approve_after_ms <int>
+      Auto-close the review tab this many milliseconds after an Approve.
+      Global-only. Omit it, or use a negative value, to keep the tab open.
+
+  stale_review_days <int>
+      Delete reviews untouched for this many days in the background sweep
+      that runs when a review starts. Global-only. Defaults to 14.
+
+Run 'hunkyard config --generate' for the full key list with default values.
+`)
+}

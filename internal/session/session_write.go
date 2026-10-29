@@ -1,0 +1,703 @@
+package session
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"time"
+)
+
+// scheduleWrite debounces writes to disk.
+// scheduleWrite must be called with s.mu held.
+func (s *Session) scheduleWrite() {
+	s.pendingWrite = true
+	if s.writeTimer != nil {
+		s.writeTimer.Stop()
+	}
+	gen := s.writeGen
+	s.writeTimer = time.AfterFunc(200*time.Millisecond, func() {
+		// Serialize debounced writes with ClearAllComments so a stale
+		// in-flight write cannot recreate the review file after we've
+		// deleted it. ClearAllComments bumps writeGen under writeMu, so
+		// once we hold the mutex the gen check reflects the final state.
+		s.writeMu.Lock()
+		defer s.writeMu.Unlock()
+		s.mu.RLock()
+		if s.writeGen != gen {
+			s.mu.RUnlock()
+			return
+		}
+		s.mu.RUnlock()
+		s.WriteFiles()
+	})
+}
+
+// hunkyardJSONPath returns the review identity path. In v4 the identity is a
+// folder containing review.json and snapshots.json — see ReviewPathsFor.
+func (s *Session) hunkyardJSONPath() string {
+	if s.OutputDir != "" {
+		return filepath.Join(s.OutputDir, ".hunkyard")
+	}
+	if s.ReviewFilePath != "" {
+		return s.ReviewFilePath
+	}
+	if s.RepoRoot == "" {
+		// No review destination configured. Returning "" keeps writes out of
+		// the process working directory, which tests mutate with os.Chdir.
+		return ""
+	}
+	// Fallback for tests and backwards compat
+	return filepath.Join(s.RepoRoot, ".hunkyard")
+}
+
+// writeFilesSnapshot holds all session state needed to write the review file,
+// captured under lock so that disk I/O can happen without holding the lock.
+type writeFilesSnapshot struct {
+	hunkyardPath   string
+	lastMtime      time.Time
+	branch         string
+	baseRef        string
+	reviewRound    int
+	reviewComments []Comment
+	cliArgs        []string
+	cwd            string
+	// story is the session's in-memory narrative (nil if none). Carried into
+	// HunkyardJSON like the other daemon-managed fields above so `hunkyard story`'s
+	// daemon-side mutators (set via s.SetStory) are actually persisted —
+	// buildHunkyardJSON otherwise only preserves whatever was already on disk.
+	story                   *Story
+	pendingRemoteDeletes    []RemoteRef
+	lastLoadedRemoteDeletes map[RemoteRef]struct{}
+	deletedCommentIDs       map[string]map[string]struct{}
+	// Per-file data needed for the merge. We copy comments so the snapshot
+	// is independent of later in-memory mutations.
+	files []writeFileSnapshot
+}
+
+type writeFileSnapshot struct {
+	path     string
+	status   string
+	fileHash string
+	comments []Comment
+}
+
+// handleExternalDeletion checks if the review file was deleted externally and clears
+// in-memory comments if so. Returns true if the file was deleted.
+func (s *Session) handleExternalDeletion(hunkyardPath string) bool {
+	s.mu.RLock()
+	lastMtime := s.lastHunkyardJSONMtime
+	s.mu.RUnlock()
+
+	if lastMtime.IsZero() {
+		return false
+	}
+	if _, statErr := os.Stat(ReviewPathsFor(hunkyardPath).Review); !os.IsNotExist(statErr) {
+		return false
+	}
+
+	s.clearAllCommentData()
+	return true
+}
+
+// clearAllCommentData resets all in-memory comment state (file comments,
+// review comments, and ID counters) and notifies if any comments existed.
+// Caller must NOT hold s.mu.
+//
+// ReviewRound is also reset to 1: this function runs when the review file
+// is deleted out from under the daemon (`hunkyard cleanup`, manual `rm`). Without the reset, a long-lived daemon (idle
+// timeout 1h) keeps an in-memory ReviewRound from a prior life, and the
+// next pin authored after the disk wipe ships against that stale round —
+// surfaced in the UI as "Round #2 (or higher) on a brand-new review".
+func (s *Session) clearAllCommentData() {
+	s.mu.Lock()
+	s.lastHunkyardJSONMtime = time.Time{}
+	anyComments := false
+	for _, f := range s.Files {
+		if len(f.Comments) > 0 {
+			f.Comments = []Comment{}
+			anyComments = true
+		}
+	}
+	if len(s.reviewComments) > 0 {
+		anyComments = true
+	}
+	s.reviewComments = nil
+	s.deletedCommentIDs = nil
+	s.ReviewRound = 1
+	s.RoundSnapshots = nil
+	s.mu.Unlock()
+	if anyComments {
+		s.notify(SSEEvent{Type: "comments-changed"})
+	}
+}
+
+// buildHunkyardJSON loads the existing review file from disk, applies the snapshot metadata,
+// and merges per-file comments.
+func buildHunkyardJSON(snap writeFilesSnapshot) HunkyardJSON {
+	cj := HunkyardJSON{Files: make(map[string]HunkyardJSONFile)}
+	if data, err := ReadFileShared(ReviewPathsFor(snap.hunkyardPath).Review); err == nil {
+		if unmarshalErr := json.Unmarshal(data, &cj); unmarshalErr != nil {
+			fmt.Fprintf(os.Stderr, "Warning: corrupt review file, starting fresh: %v\n", unmarshalErr)
+		}
+		if cj.Files == nil {
+			cj.Files = make(map[string]HunkyardJSONFile)
+		}
+	}
+	cj.Branch = snap.branch
+	cj.BaseRef = snap.baseRef
+	cj.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	cj.ReviewRound = snap.reviewRound
+	cj.ReviewComments = snap.reviewComments
+	cj.CliArgs = snap.cliArgs
+	// Only daemon-built snapshots carry a cwd; an empty one must leave the
+	// recorded directory alone rather than erase a resumable review's only
+	// pointer back to its working tree.
+	if snap.cwd != "" {
+		cj.CWD = snap.cwd
+	}
+	cj.Story = snap.story
+	cj.PendingRemoteDeletes = reconcilePendingRemoteDeletes(
+		snap.pendingRemoteDeletes, cj.PendingRemoteDeletes, snap.lastLoadedRemoteDeletes,
+	)
+
+	for _, fs := range snap.files {
+		mergeFileSnapshotIntoHunkyardJSON(&cj, fs)
+	}
+	applyDeletedCommentIDs(&cj, snap.deletedCommentIDs)
+	return cj
+}
+
+// applyDeletedCommentIDs removes explicitly deleted comments even when their
+// paths no longer have a FileEntry (for example, after a base change or rename).
+// Tombstones are authoritative over both disk-only and in-memory copies.
+func applyDeletedCommentIDs(cj *HunkyardJSON, deletedByPath map[string]map[string]struct{}) {
+	for path, deletedIDs := range deletedByPath {
+		file, ok := cj.Files[path]
+		if !ok || len(deletedIDs) == 0 {
+			continue
+		}
+		comments := file.Comments[:0]
+		for _, c := range file.Comments {
+			if _, deleted := deletedIDs[c.ID]; !deleted {
+				comments = append(comments, c)
+			}
+		}
+		if len(comments) == 0 {
+			delete(cj.Files, path)
+			continue
+		}
+		file.Comments = comments
+		cj.Files[path] = file
+	}
+}
+
+func reconcilePendingRemoteDeletes(snap, disk []RemoteRef, lastLoaded map[RemoteRef]struct{}) []RemoteRef {
+	if len(snap) == 0 {
+		return nil
+	}
+	diskSet := make(map[RemoteRef]struct{}, len(disk))
+	for _, ref := range disk {
+		diskSet[ref] = struct{}{}
+	}
+	out := make([]RemoteRef, 0, len(snap))
+	seen := make(map[RemoteRef]struct{}, len(snap))
+	for _, ref := range snap {
+		if _, duplicate := seen[ref]; duplicate {
+			continue
+		}
+		_, onDisk := diskSet[ref]
+		_, wasLoaded := lastLoaded[ref]
+		if !onDisk && wasLoaded {
+			continue
+		}
+		out = append(out, ref)
+		seen[ref] = struct{}{}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// mergeFileSnapshotIntoHunkyardJSON merges a single file's comments from the snapshot
+// with any disk-only comments, and updates the HunkyardJSON.
+func mergeFileSnapshotIntoHunkyardJSON(cj *HunkyardJSON, fs writeFileSnapshot) {
+	diskFile, hasDisk := cj.Files[fs.path]
+
+	memIDs := make(map[string]struct{}, len(fs.comments))
+	for _, c := range fs.comments {
+		memIDs[c.ID] = struct{}{}
+	}
+
+	merged := fs.comments
+	if hasDisk {
+		for _, dc := range diskFile.Comments {
+			// Deleted IDs are dropped afterwards by applyDeletedCommentIDs.
+			if _, exists := memIDs[dc.ID]; exists {
+				continue
+			}
+			merged = append(merged, dc)
+		}
+	}
+
+	if len(merged) == 0 {
+		delete(cj.Files, fs.path)
+		return
+	}
+
+	cj.Files[fs.path] = HunkyardJSONFile{
+		Status:   fs.status,
+		FileHash: fs.fileHash,
+		Comments: merged,
+	}
+}
+
+func hunkyardJSONIsEmpty(cj HunkyardJSON) bool {
+	return len(cj.Files) == 0 && len(cj.ReviewComments) == 0 &&
+		cj.Story == nil && len(cj.PendingRemoteDeletes) == 0
+}
+
+// WriteFiles writes the review file to disk.
+//
+// The implementation snapshots all needed session state under RLock, then
+// releases the lock before doing any disk I/O (ReadFile, Stat, WriteFile).
+// This prevents a slow filesystem from blocking comment operations.
+//
+// Concurrency note: callers that need to guarantee the write is observable
+// before returning a path to a client (e.g. POST /api/finish) MUST use
+// SyncWriteFiles, which serializes against the debounce timer via writeMu
+// and surfaces write errors. Bare WriteFiles is for the timer callback and
+// best-effort flushes (focus change, shutdown).
+func (s *Session) WriteFiles() {
+	_ = s.writeFilesErr()
+}
+
+// SyncWriteFiles flushes pending state to disk synchronously, serialized
+// against the debounce timer and ClearAllComments. It cancels any pending
+// debounced write so the writeFilesErr call below is the authoritative
+// flush. Returns an error if the on-disk write failed; callers translate
+// that into a 5xx response rather than handing back a path to a missing
+// file.
+func (s *Session) SyncWriteFiles() error {
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
+
+	s.mu.Lock()
+	if s.writeTimer != nil {
+		s.writeTimer.Stop()
+	}
+	// Bump writeGen so any timer callback that already passed Stop() but
+	// has not yet acquired writeMu observes the gen change and bails.
+	s.writeGen++
+	s.mu.Unlock()
+
+	return s.writeFilesErr()
+}
+
+// writeFilesErr is the actual write implementation. Returns an error so
+// SyncWriteFiles can surface failures to HTTP callers; the timer callback
+// and best-effort callers via WriteFiles ignore the error (preserving the
+// pre-existing log-and-continue behaviour).
+func (s *Session) writeFilesErr() error {
+	hunkyardPath := s.hunkyardJSONPath()
+	if hunkyardPath == "" {
+		return nil
+	}
+
+	if s.handleExternalDeletion(hunkyardPath) {
+		return nil
+	}
+
+	snap := s.snapshotForWrite(hunkyardPath)
+	cj := buildHunkyardJSON(snap)
+
+	paths := ReviewPathsFor(snap.hunkyardPath)
+	if hunkyardJSONIsEmpty(cj) {
+		// B1: remove ONLY review.json. Snapshots are server-only state and
+		// may still be valid for the timeline; full-folder cleanup belongs to
+		// explicit cleanup paths (clearHunkyardJSON, ClearAllComments,
+		// deleteStaleReviews, cleanupOnApproval).
+		if err := os.Remove(paths.Review); err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("removing empty review file: %w", err)
+		}
+		s.mu.Lock()
+		s.lastHunkyardJSONMtime = time.Time{}
+		s.pendingWrite = false
+		s.clearWrittenDeletedCommentIDs(snap.deletedCommentIDs)
+		s.pendingRemoteDeletes = nil
+		s.lastLoadedPendingDeletes = nil
+		s.mu.Unlock()
+		return nil
+	}
+
+	data, err := json.MarshalIndent(cj, "", "  ")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error marshaling review file: %v\n", err)
+		return fmt.Errorf("marshaling review file: %w", err)
+	}
+	if err := AtomicWriteFile(paths.Review, data, 0644); err != nil {
+		fmt.Fprintf(os.Stderr, "Error writing review file: %v\n", err)
+		return fmt.Errorf("writing review file: %w", err)
+	}
+	if info, err := os.Stat(paths.Review); err == nil {
+		s.mu.Lock()
+		s.lastHunkyardJSONMtime = info.ModTime()
+		s.pendingWrite = false
+		s.clearWrittenDeletedCommentIDs(snap.deletedCommentIDs)
+		// Sync in-memory pending-delete state to what we just wrote, so the
+		// next snapshot does not re-include IDs that a concurrent
+		// `hunkyard push` already drained. See reconcilePendingRemoteDeletes.
+		s.pendingRemoteDeletes = append(s.pendingRemoteDeletes[:0:0], cj.PendingRemoteDeletes...)
+		s.lastLoadedPendingDeletes = make(map[RemoteRef]struct{}, len(cj.PendingRemoteDeletes))
+		for _, ref := range cj.PendingRemoteDeletes {
+			s.lastLoadedPendingDeletes[ref] = struct{}{}
+		}
+		s.mu.Unlock()
+	}
+	return nil
+}
+
+// clearWrittenDeletedCommentIDs acknowledges only tombstones included in a
+// completed write snapshot. Deletions recorded while that write was doing disk
+// I/O belong to a later write and must remain pending. Caller must hold s.mu.
+func (s *Session) clearWrittenDeletedCommentIDs(written map[string]map[string]struct{}) {
+	for path, ids := range written {
+		current := s.deletedCommentIDs[path]
+		for id := range ids {
+			delete(current, id)
+		}
+		if len(current) == 0 {
+			delete(s.deletedCommentIDs, path)
+		}
+	}
+	if len(s.deletedCommentIDs) == 0 {
+		s.deletedCommentIDs = nil
+	}
+}
+
+// snapshotForWrite captures all session state needed by WriteFiles under RLock.
+// The returned snapshot owns its own copies of comment slices, so it is safe
+// to use after the lock is released.
+func (s *Session) snapshotForWrite(hunkyardPath string) writeFilesSnapshot {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	rc := make([]Comment, len(s.reviewComments))
+	copy(rc, s.reviewComments)
+	pendDeletes := append([]RemoteRef(nil), s.pendingRemoteDeletes...)
+	lastLoaded := make(map[RemoteRef]struct{}, len(s.lastLoadedPendingDeletes))
+	for ref := range s.lastLoadedPendingDeletes {
+		lastLoaded[ref] = struct{}{}
+	}
+	deletedByPath := make(map[string]map[string]struct{}, len(s.deletedCommentIDs))
+	for path, ids := range s.deletedCommentIDs {
+		deletedByPath[path] = make(map[string]struct{}, len(ids))
+		for id := range ids {
+			deletedByPath[path][id] = struct{}{}
+		}
+	}
+	snap := writeFilesSnapshot{
+		hunkyardPath:            hunkyardPath,
+		lastMtime:               s.lastHunkyardJSONMtime,
+		branch:                  s.Branch,
+		baseRef:                 s.BaseRef,
+		reviewRound:             s.ReviewRound,
+		reviewComments:          rc,
+		cliArgs:                 s.CLIArgs,
+		cwd:                     s.CWD,
+		story:                   s.story,
+		pendingRemoteDeletes:    pendDeletes,
+		lastLoadedRemoteDeletes: lastLoaded,
+		deletedCommentIDs:       deletedByPath,
+		files:                   make([]writeFileSnapshot, len(s.Files)),
+	}
+	for i, f := range s.Files {
+		comments := make([]Comment, len(f.Comments))
+		copy(comments, f.Comments)
+		snap.files[i] = writeFileSnapshot{
+			path:     f.Path,
+			status:   f.Status,
+			fileHash: f.FileHash,
+			comments: comments,
+		}
+	}
+	return snap
+}
+
+// handleHunkyardJSONDeleted clears all in-memory comment state when the review file
+// has been deleted. Returns true unconditionally to signal the deletion.
+func (s *Session) handleHunkyardJSONDeleted() bool {
+	s.clearAllCommentData()
+	return true
+}
+
+func (s *Session) mergeFileCommentsFromDisk(f *FileEntry, diskFile HunkyardJSONFile) bool {
+	changed := false
+
+	memIDs := make(map[string]struct{}, len(f.Comments))
+	for _, c := range f.Comments {
+		memIDs[c.ID] = struct{}{}
+	}
+
+	for _, dc := range diskFile.Comments {
+		if _, exists := memIDs[dc.ID]; !exists {
+			f.Comments = append(f.Comments, dc)
+			changed = true
+		} else {
+			changed = s.mergeCommentRepliesAndState(f.Comments, dc) || changed
+		}
+	}
+
+	// Remove comments deleted on disk.
+	if len(diskFile.Comments) != len(f.Comments) {
+		changed = filterDeletedComments(f, diskFile.Comments) || changed
+	}
+
+	return changed
+}
+
+func (s *Session) mergeCommentRepliesAndState(comments []Comment, dc Comment) bool {
+	changed := false
+	for i, mc := range comments {
+		if mc.ID != dc.ID {
+			continue
+		}
+		memReplyIDs := make(map[string]struct{}, len(mc.Replies))
+		for _, r := range mc.Replies {
+			memReplyIDs[r.ID] = struct{}{}
+		}
+		for _, dr := range dc.Replies {
+			if _, exists := memReplyIDs[dr.ID]; !exists {
+				comments[i].Replies = append(comments[i].Replies, dr)
+				changed = true
+			}
+		}
+		if dc.Resolved != mc.Resolved {
+			comments[i].Resolved = dc.Resolved
+			changed = true
+		}
+		if dc.ResolvedRound != mc.ResolvedRound {
+			comments[i].ResolvedRound = dc.ResolvedRound
+			changed = true
+		}
+		break
+	}
+	return changed
+}
+
+func filterDeletedComments(f *FileEntry, diskComments []Comment) bool {
+	diskIDs := make(map[string]struct{}, len(diskComments))
+	for _, dc := range diskComments {
+		diskIDs[dc.ID] = struct{}{}
+	}
+	filtered := f.Comments[:0]
+	for _, c := range f.Comments {
+		if _, exists := diskIDs[c.ID]; exists {
+			filtered = append(filtered, c)
+		}
+	}
+	if len(filtered) != len(f.Comments) {
+		f.Comments = filtered
+		return true
+	}
+	return false
+}
+
+func (s *Session) mergeReviewCommentsFromDisk(diskComments []Comment) bool {
+	changed := false
+
+	memReviewIDs := make(map[string]struct{}, len(s.reviewComments))
+	for _, c := range s.reviewComments {
+		memReviewIDs[c.ID] = struct{}{}
+	}
+	for _, dc := range diskComments {
+		if _, exists := memReviewIDs[dc.ID]; !exists {
+			s.reviewComments = append(s.reviewComments, dc)
+			memReviewIDs[dc.ID] = struct{}{}
+			changed = true
+		} else {
+			changed = s.mergeReviewCommentRepliesAndState(dc) || changed
+		}
+	}
+
+	// Remove review comments deleted on disk.
+	changed = s.filterDeletedReviewComments(diskComments) || changed
+
+	return changed
+}
+
+func (s *Session) mergeReviewCommentRepliesAndState(dc Comment) bool {
+	changed := false
+	for i, mc := range s.reviewComments {
+		if mc.ID != dc.ID {
+			continue
+		}
+		if dc.Resolved != mc.Resolved {
+			s.reviewComments[i].Resolved = dc.Resolved
+			changed = true
+		}
+		if dc.ResolvedRound != mc.ResolvedRound {
+			s.reviewComments[i].ResolvedRound = dc.ResolvedRound
+			changed = true
+		}
+		memRIDs := make(map[string]struct{}, len(mc.Replies))
+		for _, r := range mc.Replies {
+			memRIDs[r.ID] = struct{}{}
+		}
+		for _, dr := range dc.Replies {
+			if _, exists := memRIDs[dr.ID]; !exists {
+				s.reviewComments[i].Replies = append(s.reviewComments[i].Replies, dr)
+				changed = true
+			}
+		}
+		break
+	}
+	return changed
+}
+
+func (s *Session) filterDeletedReviewComments(diskComments []Comment) bool {
+	diskRIDs := make(map[string]struct{}, len(diskComments))
+	for _, dc := range diskComments {
+		diskRIDs[dc.ID] = struct{}{}
+	}
+	filtered := s.reviewComments[:0]
+	for _, c := range s.reviewComments {
+		if _, exists := diskRIDs[c.ID]; exists {
+			filtered = append(filtered, c)
+		}
+	}
+	if len(filtered) != len(s.reviewComments) {
+		s.reviewComments = filtered
+		return true
+	}
+	return false
+}
+
+func (s *Session) mergeExternalHunkyardJSON() bool {
+	hunkyardPath := s.hunkyardJSONPath()
+
+	info, err := os.Stat(ReviewPathsFor(hunkyardPath).Review)
+
+	s.mu.RLock()
+	lastMtime := s.lastHunkyardJSONMtime
+	s.mu.RUnlock()
+
+	if err != nil {
+		if !lastMtime.IsZero() {
+			return s.handleHunkyardJSONDeleted()
+		}
+		return false
+	}
+
+	if !lastMtime.IsZero() && info.ModTime().Equal(lastMtime) {
+		return false
+	}
+
+	s.mu.RLock()
+	pending := s.pendingWrite
+	s.mu.RUnlock()
+	if pending {
+		return false
+	}
+
+	data, err := ReadFileShared(ReviewPathsFor(hunkyardPath).Review)
+	if err != nil {
+		return false
+	}
+	var cj HunkyardJSON
+	if err := json.Unmarshal(data, &cj); err != nil {
+		return false
+	}
+
+	s.mu.RLock()
+	memRound := s.ReviewRound
+	s.mu.RUnlock()
+	// Memory is ahead of an explicit on-disk round (round-complete remapped
+	// comments, write pending/failed, or a stale review.json raced in).
+	// Applying that disk file would replace carried-forward IDs with the
+	// prior round's comments and wipe drift bits — refuse until disk catches
+	// up. Disk review_round 0 means unset/legacy (tests and older files);
+	// never treat that as "stale prior round" or external merges stop applying.
+	if cj.ReviewRound > 0 && memRound > cj.ReviewRound {
+		s.mu.Lock()
+		s.lastHunkyardJSONMtime = info.ModTime()
+		s.mu.Unlock()
+		return false
+	}
+
+	s.mu.Lock()
+	s.lastHunkyardJSONMtime = info.ModTime()
+	// Disk is authoritative for external edits — clear deleted tracking
+	s.deletedCommentIDs = nil
+
+	changed := false
+
+	for _, f := range s.Files {
+		diskFile, hasDisk := cj.Files[f.Path]
+		if !hasDisk {
+			if len(f.Comments) > 0 {
+				f.Comments = []Comment{}
+				changed = true
+			}
+			continue
+		}
+		changed = s.mergeFileCommentsFromDisk(f, diskFile) || changed
+	}
+	changed = s.adoptExternalPinRoutes(&cj) || changed
+
+	changed = s.mergeReviewCommentsFromDisk(cj.ReviewComments) || changed
+	s.mu.Unlock()
+
+	if changed {
+		s.notify(SSEEvent{Type: "comments-changed"})
+	}
+
+	return changed
+}
+
+// adoptExternalPinRoutes adds live-route file entries for DOM pins written
+// by `hunkyard comment` while this session is running. The merge above only
+// updates paths the session already has, and the first pin on a page is
+// what creates that path. Must be called with s.mu held.
+func (s *Session) adoptExternalPinRoutes(cj *HunkyardJSON) bool {
+	if s.ReviewType != "live" && s.ReviewType != "preview" {
+		return false
+	}
+	known := make(map[string]struct{}, len(s.Files))
+	for _, f := range s.Files {
+		known[f.Path] = struct{}{}
+	}
+	changed := false
+	for path, diskFile := range cj.Files {
+		if _, ok := known[path]; ok {
+			continue
+		}
+		if !diskFileHasDOMPin(diskFile) {
+			continue
+		}
+		comments := make([]Comment, len(diskFile.Comments))
+		copy(comments, diskFile.Comments)
+		status := diskFile.Status
+		if status == "" {
+			status = "added"
+		}
+		s.Files = append(s.Files, &FileEntry{
+			Path:     path,
+			Status:   status,
+			FileType: "live-route",
+			Comments: comments,
+		})
+		changed = true
+	}
+	return changed
+}
+
+func diskFileHasDOMPin(f HunkyardJSONFile) bool {
+	for _, c := range f.Comments {
+		if c.DOMAnchor != nil {
+			return true
+		}
+	}
+	return false
+}

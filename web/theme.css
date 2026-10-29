@@ -1,0 +1,882 @@
+/* ===== Theme Variables =====
+   Migrated to hunkyard design system tokens (v2).
+   Brand tokens (--hunkyard-*) for header/chrome/CTAs.
+   Editor tokens (--hunkyard-editor-*) for the review content area.
+   Each theme defines the full set of CSS custom properties.
+   Review and live-mode palettes are derived from Shiki via scripts/hunkyard-theme-palette.mjs
+   and mapped to these semantic tokens by hunkyard-palette.css. Component class
+   names, geometry and typography are independent of palette selection.
+   These four blocks provide dark/light fallbacks before a palette is applied.
+*/
+
+/* ===== Default (dark) =====
+   These :root values are the fallback when prefers-color-scheme is unsupported. */
+:root {
+  /* ---- Brand surfaces (header, chrome, CTAs) ---- */
+  --hunkyard-bg-page:     #0e0f13;
+  --hunkyard-bg-card:     #171922;
+  --hunkyard-bg-elevated: #242835;
+
+  /* ---- Brand foreground ---- */
+  --hunkyard-fg-primary:   #e8ebf5;
+  /* Logo: fixed per mode, not per code theme (brand blue). */
+  --hunkyard-logo-fg:      #e8ebf5;
+  --hunkyard-logo-dot:     #7aa2f7;
+  --hunkyard-fg-secondary: #9ba3bf;
+  --hunkyard-fg-muted:     #646c85;
+  --hunkyard-fg-on-brand:  #ffffff;
+  --hunkyard-fg-on-cta: #ffffff;
+
+  /* ---- Brand colors ---- */
+  --hunkyard-brand:         #85aaf8;
+  --hunkyard-brand-hover:   #94bcfb;
+  --hunkyard-brand-subtle:  rgba(133, 170, 248, 0.10);
+  --hunkyard-brand-bg:      rgba(133, 170, 248, 0.15);
+  --hunkyard-line-focus-bg: rgba(133, 170, 248, 0.10);
+  --hunkyard-brand-cta:       #406fcc;
+  --hunkyard-brand-cta-hover: #4574cc;
+
+  /* ---- Header pill tokens (neutral chip palette) ---- */
+  --hunkyard-pill-bg:        #21262d;
+  --hunkyard-pill-bg-hover:  #2a3038;
+  --hunkyard-pill-fg:        #c9d1d9;
+  --hunkyard-pill-fg-muted:  #8b949e;
+  --hunkyard-pill-border:    #30363d;
+  /* ---- Segmented controls (scope / diff / viewport / mode) ----
+     Soft segment geometry. Dark active fg is editor periwinkle (not brand)
+     so 10px file-header pills clear WCAG AA (≥4.5:1) on washed active bg. */
+  --hunkyard-seg-track:      color-mix(in srgb, var(--hunkyard-brand) 8%, rgba(255, 255, 255, 0.03));
+  --hunkyard-seg-active:     var(--hunkyard-brand-subtle);
+  --hunkyard-seg-active-fg:  var(--hunkyard-editor-fg);
+  --hunkyard-rail-fg:        #7d8590;
+  --hunkyard-rail-arrow:     #6e7681;
+
+  /* ---- Editor surfaces (Tokyo Night) ---- */
+  --hunkyard-editor-bg:          #1a1b26;
+  --hunkyard-editor-bg-card:     #16171f;
+  --hunkyard-editor-bg-elevated: #262940;
+  --hunkyard-editor-bg-hover:    #2d3150;
+  --hunkyard-editor-code-bg:     #1e2030;
+  --hunkyard-editor-comment-bg:  #1a1f36;
+
+  /* ---- Editor foreground ---- */
+  --hunkyard-editor-fg:           #c0caf5;
+  --hunkyard-editor-fg-secondary: #a9b1d6;
+  --hunkyard-editor-fg-muted:     #9aa1c8;
+
+  /* ---- Editor scrollbar ---- */
+  --hunkyard-editor-scrollbar-bg:    #1a1b26;
+  --hunkyard-editor-scrollbar-thumb: #3b4261;
+
+  /* ---- Semantic colors ---- */
+  --hunkyard-green:  #56d364;
+  --hunkyard-red:    #f7768e;
+  --hunkyard-orange: #ff9e64;
+  --hunkyard-yellow: #e0af68;
+  --hunkyard-purple: #a371f7;
+  /* Visual line mode cursor accent. Distinct from --hunkyard-orange (modified
+     line indicator) and --hunkyard-yellow (warning / modified badges). */
+  --hunkyard-visual-accent: #e0af68;
+
+  /* ---- Borders ---- */
+  --hunkyard-border:         #232632;
+  --hunkyard-border-strong:  #2f3342;
+  --hunkyard-border-comment: #3d59a1;
+
+  /* ---- Radii ---- */
+  --hunkyard-r-sm: 4px;
+  --hunkyard-r-md: 6px;
+  --hunkyard-r-lg: 8px;
+  --hunkyard-r-xl: 12px;
+
+  /* ---- Shadow ---- */
+  --hunkyard-shadow: 0 2px 8px rgba(0,0,0,0.3);
+
+  /* ---- Motion ---- */
+  --hunkyard-dur-fast:   120ms;
+  --hunkyard-dur-base:   180ms;
+  --hunkyard-dur-slow:   280ms;
+  --hunkyard-ease:       cubic-bezier(0.2, 0.6, 0.2, 1);
+  --hunkyard-ease-in:    cubic-bezier(0.4, 0, 1, 1);
+  --hunkyard-ease-out:   cubic-bezier(0, 0, 0.2, 1);
+
+  /* ---- Focus ring ---- */
+  --hunkyard-focus: 0 0 0 2px var(--hunkyard-bg-page), 0 0 0 4px var(--hunkyard-brand);
+
+  /* ---- Fonts ---- */
+  --hunkyard-font-body: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --hunkyard-font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+  --hunkyard-font-code: var(--hunkyard-font-mono);
+  --hunkyard-diff-tint-mix: initial;
+
+  /* ---- Icons (SVG masks) ---- */
+  --hunkyard-icon-github: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='currentColor'%3E%3Cpath d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0016 8c0-4.42-3.58-8-8-8z'/%3E%3C/svg%3E");
+
+  /* ---- Editor-specific: diff highlights ---- */
+  --hunkyard-diff-add-bg:       rgba(86, 211, 100, 0.08);
+  --hunkyard-diff-add-line-bg:  rgba(86, 211, 100, 0.18);
+  --hunkyard-diff-del-bg:       rgba(247, 118, 142, 0.06);
+  --hunkyard-diff-del-line-bg:  rgba(247, 118, 142, 0.14);
+  --hunkyard-diff-word-add-bg:  rgba(63, 185, 80, 0.18);
+  --hunkyard-diff-word-del-bg:  rgba(248, 81, 73, 0.18);
+
+  /* ---- Editor-specific: comment range ---- */
+  --hunkyard-comment-range-bg: rgba(210, 153, 34, 0.13);
+
+  /* ---- Editor-specific: table ---- */
+  --hunkyard-table-stripe: rgba(133, 170, 248, 0.04);
+
+  /* ---- Editor-specific: blockquote ---- */
+  --hunkyard-blockquote-border: #3d59a1;
+  --hunkyard-alert-note: #58a6ff;
+  --hunkyard-alert-tip: #3fb950;
+  --hunkyard-alert-important: #bc8cff;
+  --hunkyard-alert-warning: #d29922;
+  --hunkyard-alert-caution: #ff7b72;
+  --hunkyard-blockquote-bg:     rgba(61, 89, 161, 0.08);
+
+  /* ---- Badge backgrounds ---- */
+  --hunkyard-badge-resolved-bg:  rgba(86, 211, 100, 0.12);
+  --hunkyard-badge-modified-bg:  rgba(224, 175, 104, 0.12);
+  --hunkyard-badge-deleted-bg:   rgba(247, 118, 142, 0.10);
+  --hunkyard-badge-removed-bg:   rgba(169, 177, 214, 0.12);
+  --hunkyard-badge-removed-color: var(--hunkyard-editor-fg-secondary);
+  --hunkyard-badge-removed-border: color-mix(in srgb, var(--hunkyard-editor-fg-secondary) 20%, transparent);
+  --hunkyard-live-badge-bg:      rgba(52, 211, 153, 0.1);
+
+  /* ---- Yellow states ---- */
+  --hunkyard-yellow-subtle: rgba(224, 175, 104, 0.08);
+  --hunkyard-yellow-bg:     rgba(224, 175, 104, 0.14);
+  --hunkyard-yellow-border: rgba(224, 175, 104, 0.2);
+
+  /* ---- Drifted comment ---- */
+  --hunkyard-drift-badge-fg:     #f0a030;
+  --hunkyard-drift-badge-bg:     rgba(240, 160, 48, 0.14);
+  --hunkyard-drift-badge-border: rgba(240, 160, 48, 0.30);
+
+  --hunkyard-drift-card-border:  rgba(240, 160, 48, 0.25);
+
+  /* ---- Green subtle ---- */
+  --hunkyard-green-subtle: rgba(86, 211, 100, 0.10);
+
+  /* ---- Finish/disconnected state ---- */
+  --hunkyard-finish-pill-bg:     rgba(86, 211, 100, 0.10);
+  --hunkyard-finish-pill-border: rgba(86, 211, 100, 0.20);
+  --hunkyard-finish-pill-fg:     #56d364;
+  --hunkyard-finish-body-fg:     #9ba3bf;
+
+  /* ---- UI states ---- */
+  --hunkyard-overlay-bg:       rgba(0,0,0,0.5);
+  --hunkyard-change-flash-bg:      rgba(255, 158, 100, 0.15);
+  --hunkyard-resolve-hover-bg:     rgba(86, 211, 100, 0.1);
+  --hunkyard-quote-highlight-bg:     rgba(250, 200, 60, 0.12);
+  --hunkyard-find-bg:                rgba(250, 200, 60, 0.30);
+  --hunkyard-find-current-bg:        #f0a020;
+  --hunkyard-find-current-fg:        #1a1b26;
+  --hunkyard-quote-highlight-border: rgba(250, 200, 60, 0.4);
+
+  /* ---- Comment reference chip ---- */
+  --hunkyard-comment-ref-color:       #85aaf8;
+  --hunkyard-comment-ref-color-hover: #94bcfb;
+  --hunkyard-comment-ref-underline:   rgba(133, 170, 248, 0.35);
+  --hunkyard-comment-ref-flash-bg:    rgba(187, 128, 9, 0.35);
+  --hunkyard-comment-ref-flash-ring:  rgba(187, 128, 9, 0.85);
+
+  --author-0-bg: rgba(110,160,230,0.15);
+  --author-0-border: rgba(110,160,230,0.35);
+  --author-0-fg: #7ab0f0;
+  --author-1-bg: rgba(225,95,95,0.15);
+  --author-1-border: rgba(225,95,95,0.35);
+  --author-1-fg: #e87070;
+  --author-2-bg: rgba(90,190,115,0.15);
+  --author-2-border: rgba(90,190,115,0.35);
+  --author-2-fg: #6cc880;
+  --author-3-bg: rgba(215,175,70,0.15);
+  --author-3-border: rgba(215,175,70,0.35);
+  --author-3-fg: #d9b458;
+  --author-4-bg: rgba(165,105,220,0.15);
+  --author-4-border: rgba(165,105,220,0.35);
+  --author-4-fg: #b580e0;
+  --author-5-bg: rgba(85,200,200,0.15);
+  --author-5-border: rgba(85,200,200,0.35);
+  --author-5-fg: #60d0d0;
+
+  /* ---- Live-mode chrome (R2: only iframe pane tokens; markers in Phase D) ---- */
+  --hunkyard-live-iframe-frame: #2f3342;
+  --hunkyard-live-iframe-bg:    #0e0f13;
+
+  /* ---- Phase C: composer, ancestor menu, mode toggle ---- */
+  --hunkyard-live-composer-border:       #2f3342;
+  --hunkyard-live-composer-error-fg:     #f85149;
+  --hunkyard-live-ancestor-menu-bg:      #1a1c23;
+  --hunkyard-live-ancestor-menu-fg:      #e6e8ed;
+  --hunkyard-live-ancestor-menu-hover-bg:#2f3342;
+
+  /* ---- Phase D: markers + drifted tray + re-anchor ---- */
+  --hunkyard-live-marker-bg:             #3b82f6;
+  --hunkyard-live-marker-fg:             #ffffff;
+  --hunkyard-live-marker-border:         rgba(255,255,255,0.18);
+  --hunkyard-live-marker-shadow:         0 1px 3px rgba(0,0,0,0.5);
+  --hunkyard-live-marker-focus-ring:     #fbbf24;
+  --hunkyard-live-reanchor-active-outline: #f59e0b;
+
+  /* ---- Phase E: drift-this-round, focus, tooltip, marker flash, menu hl ---- */
+  --hunkyard-live-focus-ring:             #fbbf24;
+  --hunkyard-live-tooltip-bg:             #1c1f29;
+  --hunkyard-live-tooltip-fg:             #e6e8ef;
+  --hunkyard-live-tooltip-border:         #2f3342;
+  --hunkyard-live-marker-flash-bg:        rgba(245, 158, 11, 0.7);
+  --hunkyard-live-menu-highlight-bg:      rgba(59, 130, 246, 0.18);
+  --hunkyard-live-menu-highlight-fg:      #e6e8ef;
+
+  /* ---- Option lists + focus ring ---- */
+  --hunkyard-option-hover:       rgba(133, 170, 248, 0.06);
+  --hunkyard-option-selected-bg: rgba(133, 170, 248, 0.08);
+  --hunkyard-focus-ring:         rgba(133, 170, 248, 0.5);
+
+  /* ---- Story mode (dark) ---- */
+  --hunkyard-story-accent:          var(--hunkyard-brand);
+  --hunkyard-story-num-bg:          var(--hunkyard-brand-bg);
+  --hunkyard-story-support-fg:      var(--hunkyard-fg-muted);
+  /* Linear-style opacity surfaces: tints of one neutral, layered by elevation. */
+  --hunkyard-l-surface:         rgba(255, 255, 255, 0.018);
+  --hunkyard-l-surface-2:       rgba(255, 255, 255, 0.035);
+  --hunkyard-l-hover:           rgba(255, 255, 255, 0.05);
+  --hunkyard-l-active:          rgba(133, 170, 248, 0.10);
+  --hunkyard-l-hairline:        rgba(255, 255, 255, 0.06);
+  --hunkyard-l-hairline-strong: rgba(255, 255, 255, 0.10);
+}
+
+/* ===== System preference: light ===== */
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) {
+    --hunkyard-font-code: var(--hunkyard-font-mono);
+    --hunkyard-diff-tint-mix: initial;
+
+    /* ---- Brand surfaces ---- */
+    --hunkyard-bg-page:     #ffffff;
+    --hunkyard-bg-card:     #f6f8fa;
+    --hunkyard-bg-elevated: #eff2f5;
+
+    /* ---- Brand foreground ---- */
+    --hunkyard-fg-primary:   #1a1d23;
+    /* Logo: fixed per mode, not per code theme (brand blue). */
+    --hunkyard-logo-fg:      #1a1d23;
+    --hunkyard-logo-dot:     #2960bc;
+    --hunkyard-fg-secondary: #57606a;
+    --hunkyard-fg-muted:     #8892a6;
+    --hunkyard-fg-on-brand:  #ffffff;
+    --hunkyard-fg-on-cta: #ffffff;
+
+    /* ---- Brand colors ---- */
+    --hunkyard-brand:         #2960bc;
+    --hunkyard-brand-hover:   #396ec6;
+    --hunkyard-brand-subtle:  rgba(41,96,188,0.08);
+    --hunkyard-brand-bg:      rgba(41,96,188,0.12);
+    --hunkyard-line-focus-bg: rgba(41,96,188,0.10);
+    --hunkyard-brand-cta:       #3a72d4;
+    --hunkyard-brand-cta-hover: #3568c8;
+
+    /* ---- Header pill tokens (neutral chip palette) ---- */
+    --hunkyard-pill-bg:        #f6f8fa;
+    --hunkyard-pill-bg-hover:  #eef1f4;
+    --hunkyard-pill-fg:        #1f2328;
+    --hunkyard-pill-fg-muted:  #59636e;
+    --hunkyard-pill-border:    #d0d7de;
+    /* ---- Segmented controls (scope / diff / viewport / mode) ----
+       Soft segment lift, tinted with brand so actives sit in the same
+       blue family as the rest of the chrome. */
+    --hunkyard-seg-track:      color-mix(in srgb, var(--hunkyard-brand) 6%, rgba(0, 0, 0, 0.03));
+    --hunkyard-seg-active:     color-mix(in srgb, var(--hunkyard-brand) 12%, #ffffff);
+    --hunkyard-seg-active-fg:  var(--hunkyard-brand);
+    --hunkyard-rail-fg:        #59636e;
+    --hunkyard-rail-arrow:     #8b949e;
+
+    /* ---- Editor surfaces (light) ---- */
+    --hunkyard-editor-bg:          #ffffff;
+    --hunkyard-editor-bg-card:     #f6f8fa;
+    --hunkyard-editor-bg-elevated: #eff2f5;
+    --hunkyard-editor-bg-hover:    #eff2f5;
+    --hunkyard-editor-code-bg:     #eff1f3;
+    --hunkyard-editor-comment-bg:  #ddf4ff;
+
+    /* ---- Editor foreground (light) ---- */
+    --hunkyard-editor-fg:           #1f2328;
+    --hunkyard-editor-fg-secondary: #59636e;
+    --hunkyard-editor-fg-muted:     #59636e;
+
+    /* ---- Editor scrollbar (light) ---- */
+    --hunkyard-editor-scrollbar-bg:    #ffffff;
+    --hunkyard-editor-scrollbar-thumb: #d1d9e0;
+
+    /* ---- Semantic colors ---- */
+    --hunkyard-green:  #166f30;
+    --hunkyard-red:    #c41f2a;
+    --hunkyard-orange: #bc4c00;
+    --hunkyard-yellow: #7a5800;
+    --hunkyard-purple: #8250df;
+    /* Visual line mode cursor accent. Saturated amber tuned to read on
+       light backgrounds (the muddy --hunkyard-yellow #7a5800 looks olive at 3px). */
+    --hunkyard-visual-accent: #b8860b;
+
+    /* ---- Borders ---- */
+    --hunkyard-border:         #d8dee4;
+    --hunkyard-border-strong:  #bac3cf;
+    --hunkyard-border-comment: #0969da;
+
+    --hunkyard-shadow: 0 2px 8px rgba(0,0,0,0.08);
+
+    /* ---- Diff highlights (light) ---- */
+    --hunkyard-diff-add-bg:       #dafbe1;
+    --hunkyard-diff-add-line-bg:  #dafbe1;
+    --hunkyard-diff-del-bg:       #ffebe9;
+    --hunkyard-diff-del-line-bg:  #ffebe9;
+    --hunkyard-diff-word-add-bg:  #aceebb;
+    --hunkyard-diff-word-del-bg:  #ffcecb;
+
+    --hunkyard-comment-range-bg: rgba(210, 153, 34, 0.15);
+    --hunkyard-table-stripe: rgba(0, 0, 0, 0.02);
+    --hunkyard-blockquote-border: #0969da;
+    --hunkyard-alert-note: #0550ae;
+    --hunkyard-alert-tip: #116329;
+    --hunkyard-alert-important: #6639ba;
+    --hunkyard-alert-warning: #7d4e00;
+    --hunkyard-alert-caution: #a40e26;
+    --hunkyard-blockquote-bg:     rgba(9, 105, 218, 0.04);
+
+    --hunkyard-badge-resolved-bg:  rgba(22, 111, 48, 0.1);
+    --hunkyard-badge-modified-bg:  rgba(122, 88, 0, 0.08);
+    --hunkyard-badge-deleted-bg:   rgba(196, 31, 42, 0.05);
+    --hunkyard-badge-removed-bg:   rgba(100, 100, 100, 0.08);
+    --hunkyard-badge-removed-color: var(--hunkyard-editor-fg-secondary);
+    --hunkyard-badge-removed-border: color-mix(in srgb, var(--hunkyard-editor-fg-secondary) 15%, transparent);
+    --hunkyard-live-badge-bg:      rgba(22, 111, 48, 0.08);
+
+    --hunkyard-yellow-subtle: rgba(122, 88, 0, 0.06);
+    --hunkyard-yellow-bg:     rgba(122, 88, 0, 0.1);
+    --hunkyard-yellow-border: rgba(122, 88, 0, 0.16);
+
+    /* ---- Drifted comment ---- */
+    --hunkyard-drift-badge-fg:     #8a5200;
+    --hunkyard-drift-badge-bg:     rgba(138, 82, 0, 0.09);
+    --hunkyard-drift-badge-border: rgba(138, 82, 0, 0.22);
+
+    --hunkyard-drift-card-border:  rgba(138, 82, 0, 0.20);
+
+    /* ---- Green subtle ---- */
+    --hunkyard-green-subtle: rgba(22, 111, 48, 0.08);
+
+    /* ---- Finish/disconnected state ---- */
+    --hunkyard-finish-pill-bg:     rgba(22, 127, 48, 0.08);
+    --hunkyard-finish-pill-border: rgba(22, 127, 48, 0.18);
+    --hunkyard-finish-pill-fg:     #167f30;
+    --hunkyard-finish-body-fg:     #5a6275;
+
+    --hunkyard-overlay-bg:       rgba(0,0,0,0.5);
+    --hunkyard-change-flash-bg:      rgba(188, 76, 0, 0.12);
+    --hunkyard-resolve-hover-bg:     rgba(22, 111, 48, 0.08);
+    --hunkyard-quote-highlight-bg:     rgba(250, 200, 60, 0.18);
+    --hunkyard-find-bg:                rgba(250, 190, 40, 0.40);
+    --hunkyard-find-current-bg:        #f59e0b;
+    --hunkyard-find-current-fg:        #1f2328;
+    --hunkyard-quote-highlight-border: rgba(200, 160, 30, 0.45);
+
+    /* ---- Comment reference chip ---- */
+    --hunkyard-comment-ref-color:       #0550ae;
+    --hunkyard-comment-ref-color-hover: #033d8b;
+    --hunkyard-comment-ref-underline:   rgba(5, 80, 174, 0.50);
+    --hunkyard-comment-ref-flash-bg:    rgba(255, 212, 59, 0.55);
+    --hunkyard-comment-ref-flash-ring:  rgba(154, 103, 0, 0.70);
+
+    --author-0-bg: rgba(26,95,160,0.10);
+    --author-0-border: rgba(26,95,160,0.25);
+    --author-0-fg: #1a5fa0;
+    --author-1-bg: rgba(179,46,46,0.10);
+    --author-1-border: rgba(179,46,46,0.25);
+    --author-1-fg: #b32e2e;
+    --author-2-bg: rgba(26,117,53,0.10);
+    --author-2-border: rgba(26,117,53,0.25);
+    --author-2-fg: #1a7535;
+    --author-3-bg: rgba(138,93,0,0.10);
+    --author-3-border: rgba(138,93,0,0.25);
+    --author-3-fg: #8a5d00;
+    --author-4-bg: rgba(112,48,165,0.10);
+    --author-4-border: rgba(112,48,165,0.25);
+    --author-4-fg: #7030a5;
+    --author-5-bg: rgba(14,110,110,0.10);
+    --author-5-border: rgba(14,110,110,0.25);
+    --author-5-fg: #0e6e6e;
+
+    /* ---- Live-mode chrome (R2: only iframe pane tokens; markers in Phase D) ---- */
+    --hunkyard-live-iframe-frame: #d0d7de;
+    --hunkyard-live-iframe-bg:    #f6f8fa;
+
+    /* ---- Phase C: composer, ancestor menu, mode toggle ---- */
+    --hunkyard-live-composer-border:       #d0d7de;
+    --hunkyard-live-composer-error-fg:     #cf222e;
+    --hunkyard-live-ancestor-menu-bg:      #ffffff;
+    --hunkyard-live-ancestor-menu-fg:      #1f2328;
+    --hunkyard-live-ancestor-menu-hover-bg:#eef2f7;
+
+    /* ---- Phase D: markers + drifted tray + re-anchor ---- */
+    --hunkyard-live-marker-bg:             #2563eb;
+    --hunkyard-live-marker-fg:             #ffffff;
+    --hunkyard-live-marker-border:         rgba(0,0,0,0.15);
+    --hunkyard-live-marker-shadow:         0 1px 2px rgba(0,0,0,0.25);
+    --hunkyard-live-marker-focus-ring:     #b45309;
+    --hunkyard-live-reanchor-active-outline: #d97706;
+
+    /* ---- Phase E ---- */
+    --hunkyard-live-focus-ring:             #b45309;
+    --hunkyard-live-tooltip-bg:             #1a1d23;
+    --hunkyard-live-tooltip-fg:             #ffffff;
+    --hunkyard-live-tooltip-border:         rgba(0,0,0,0.15);
+    --hunkyard-live-marker-flash-bg:        rgba(217, 119, 6, 0.6);
+    --hunkyard-live-menu-highlight-bg:      #e0e7ff;
+    --hunkyard-live-menu-highlight-fg:      #1a1d23;
+
+    /* ---- Option lists + focus ring ---- */
+    --hunkyard-option-hover:       rgba(61, 106, 224, 0.04);
+    --hunkyard-option-selected-bg: rgba(61, 106, 224, 0.06);
+    --hunkyard-focus-ring:         rgba(61, 106, 224, 0.4);
+
+    /* ---- Story mode (light) ---- */
+    --hunkyard-story-accent:          var(--hunkyard-brand);
+    --hunkyard-story-num-bg:          var(--hunkyard-brand-bg);
+    --hunkyard-story-support-fg:      var(--hunkyard-fg-muted);
+    --hunkyard-l-surface:         rgba(0, 0, 0, 0.015);
+    --hunkyard-l-surface-2:       rgba(0, 0, 0, 0.03);
+    --hunkyard-l-hover:           rgba(0, 0, 0, 0.045);
+    --hunkyard-l-active:          rgba(41, 96, 188, 0.08);
+    --hunkyard-l-hairline:        rgba(0, 0, 0, 0.07);
+    --hunkyard-l-hairline-strong: rgba(0, 0, 0, 0.12);
+
+    /* ---- Icons (SVG masks) ---- */
+    --hunkyard-icon-github: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='currentColor'%3E%3Cpath d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0016 8c0-4.42-3.58-8-8-8z'/%3E%3C/svg%3E");
+  }
+}
+
+/* ===== Dark (explicit) ===== */
+[data-theme="dark"] {
+  --hunkyard-font-code: var(--hunkyard-font-mono);
+  --hunkyard-diff-tint-mix: initial;
+
+  /* ---- Brand surfaces ---- */
+  --hunkyard-bg-page:     #0e0f13;
+  --hunkyard-bg-card:     #171922;
+  --hunkyard-bg-elevated: #242835;
+
+  /* ---- Brand foreground ---- */
+  --hunkyard-fg-primary:   #e8ebf5;
+  /* Logo: fixed per mode, not per code theme (brand blue). */
+  --hunkyard-logo-fg:      #e8ebf5;
+  --hunkyard-logo-dot:     #7aa2f7;
+  --hunkyard-fg-secondary: #9ba3bf;
+  --hunkyard-fg-muted:     #646c85;
+  --hunkyard-fg-on-brand:  #ffffff;
+  --hunkyard-fg-on-cta: #ffffff;
+
+  /* ---- Brand colors ---- */
+  --hunkyard-brand:         #85aaf8;
+  --hunkyard-brand-hover:   #94bcfb;
+  --hunkyard-brand-subtle:  rgba(133, 170, 248, 0.10);
+  --hunkyard-brand-bg:      rgba(133, 170, 248, 0.15);
+  --hunkyard-line-focus-bg: rgba(133, 170, 248, 0.10);
+  --hunkyard-brand-cta:       #406fcc;
+  --hunkyard-brand-cta-hover: #4574cc;
+
+  /* ---- Header pill tokens (neutral chip palette) ---- */
+  --hunkyard-pill-bg:        #21262d;
+  --hunkyard-pill-bg-hover:  #2a3038;
+  --hunkyard-pill-fg:        #c9d1d9;
+  --hunkyard-pill-fg-muted:  #8b949e;
+  --hunkyard-pill-border:    #30363d;
+  /* ---- Segmented controls (scope / diff / viewport / mode) ----
+     Soft segment geometry. Dark active fg is editor periwinkle (not brand)
+     so 10px file-header pills clear WCAG AA (≥4.5:1) on washed active bg. */
+  --hunkyard-seg-track:      color-mix(in srgb, var(--hunkyard-brand) 8%, rgba(255, 255, 255, 0.03));
+  --hunkyard-seg-active:     var(--hunkyard-brand-subtle);
+  --hunkyard-seg-active-fg:  var(--hunkyard-editor-fg);
+  --hunkyard-rail-fg:        #7d8590;
+  --hunkyard-rail-arrow:     #6e7681;
+
+  /* ---- Editor surfaces (Tokyo Night) ---- */
+  --hunkyard-editor-bg:          #1a1b26;
+  --hunkyard-editor-bg-card:     #16171f;
+  --hunkyard-editor-bg-elevated: #262940;
+  --hunkyard-editor-bg-hover:    #2d3150;
+  --hunkyard-editor-code-bg:     #1e2030;
+  --hunkyard-editor-comment-bg:  #1a1f36;
+
+  /* ---- Editor foreground ---- */
+  --hunkyard-editor-fg:           #c0caf5;
+  --hunkyard-editor-fg-secondary: #a9b1d6;
+  --hunkyard-editor-fg-muted:     #9aa1c8;
+
+  /* ---- Editor scrollbar ---- */
+  --hunkyard-editor-scrollbar-bg:    #1a1b26;
+  --hunkyard-editor-scrollbar-thumb: #3b4261;
+
+  /* ---- Semantic colors ---- */
+  --hunkyard-green:  #56d364;
+  --hunkyard-red:    #f7768e;
+  --hunkyard-orange: #ff9e64;
+  --hunkyard-yellow: #e0af68;
+  --hunkyard-purple: #a371f7;
+  /* Visual line mode cursor accent. Distinct from --hunkyard-orange (modified
+     line indicator) and --hunkyard-yellow (warning / modified badges). */
+  --hunkyard-visual-accent: #e0af68;
+
+  /* ---- Borders ---- */
+  --hunkyard-border:         #232632;
+  --hunkyard-border-strong:  #2f3342;
+  --hunkyard-border-comment: #3d59a1;
+
+  --hunkyard-shadow: 0 2px 8px rgba(0,0,0,0.3);
+
+  /* ---- Diff highlights ---- */
+  --hunkyard-diff-add-bg:       rgba(86, 211, 100, 0.08);
+  --hunkyard-diff-add-line-bg:  rgba(86, 211, 100, 0.18);
+  --hunkyard-diff-del-bg:       rgba(247, 118, 142, 0.06);
+  --hunkyard-diff-del-line-bg:  rgba(247, 118, 142, 0.14);
+  --hunkyard-diff-word-add-bg:  rgba(63, 185, 80, 0.18);
+  --hunkyard-diff-word-del-bg:  rgba(248, 81, 73, 0.18);
+
+  --hunkyard-comment-range-bg: rgba(210, 153, 34, 0.13);
+  --hunkyard-table-stripe: rgba(133, 170, 248, 0.04);
+  --hunkyard-blockquote-border: #3d59a1;
+  --hunkyard-alert-note: #58a6ff;
+  --hunkyard-alert-tip: #3fb950;
+  --hunkyard-alert-important: #bc8cff;
+  --hunkyard-alert-warning: #d29922;
+  --hunkyard-alert-caution: #ff7b72;
+  --hunkyard-blockquote-bg:     rgba(61, 89, 161, 0.08);
+
+  --hunkyard-badge-resolved-bg:  rgba(86, 211, 100, 0.12);
+  --hunkyard-badge-modified-bg:  rgba(224, 175, 104, 0.12);
+  --hunkyard-badge-deleted-bg:   rgba(247, 118, 142, 0.10);
+  --hunkyard-badge-removed-bg:   rgba(169, 177, 214, 0.12);
+  --hunkyard-badge-removed-color: var(--hunkyard-editor-fg-secondary);
+  --hunkyard-badge-removed-border: color-mix(in srgb, var(--hunkyard-editor-fg-secondary) 20%, transparent);
+  --hunkyard-live-badge-bg:      rgba(52, 211, 153, 0.1);
+
+  --hunkyard-yellow-subtle: rgba(224, 175, 104, 0.08);
+  --hunkyard-yellow-bg:     rgba(224, 175, 104, 0.14);
+  --hunkyard-yellow-border: rgba(224, 175, 104, 0.2);
+
+  /* ---- Drifted comment ---- */
+  --hunkyard-drift-badge-fg:     #f0a030;
+  --hunkyard-drift-badge-bg:     rgba(240, 160, 48, 0.14);
+  --hunkyard-drift-badge-border: rgba(240, 160, 48, 0.30);
+
+  --hunkyard-drift-card-border:  rgba(240, 160, 48, 0.25);
+
+  /* ---- Green subtle ---- */
+  --hunkyard-green-subtle: rgba(86, 211, 100, 0.10);
+
+  /* ---- Finish/disconnected state ---- */
+  --hunkyard-finish-pill-bg:     rgba(86, 211, 100, 0.10);
+  --hunkyard-finish-pill-border: rgba(86, 211, 100, 0.20);
+  --hunkyard-finish-pill-fg:     #56d364;
+  --hunkyard-finish-body-fg:     #9ba3bf;
+
+  --hunkyard-overlay-bg:       rgba(0,0,0,0.5);
+  --hunkyard-change-flash-bg:      rgba(255, 158, 100, 0.15);
+  --hunkyard-resolve-hover-bg:     rgba(86, 211, 100, 0.1);
+  --hunkyard-quote-highlight-bg:     rgba(250, 200, 60, 0.12);
+  --hunkyard-find-bg:                rgba(250, 200, 60, 0.30);
+  --hunkyard-find-current-bg:        #f0a020;
+  --hunkyard-find-current-fg:        #1a1b26;
+  --hunkyard-quote-highlight-border: rgba(250, 200, 60, 0.4);
+
+  /* ---- Comment reference chip ---- */
+  --hunkyard-comment-ref-color:       #85aaf8;
+  --hunkyard-comment-ref-color-hover: #94bcfb;
+  --hunkyard-comment-ref-underline:   rgba(133, 170, 248, 0.35);
+  --hunkyard-comment-ref-flash-bg:    rgba(187, 128, 9, 0.35);
+  --hunkyard-comment-ref-flash-ring:  rgba(187, 128, 9, 0.85);
+
+  --author-0-bg: rgba(110,160,230,0.15);
+  --author-0-border: rgba(110,160,230,0.35);
+  --author-0-fg: #7ab0f0;
+  --author-1-bg: rgba(225,95,95,0.15);
+  --author-1-border: rgba(225,95,95,0.35);
+  --author-1-fg: #e87070;
+  --author-2-bg: rgba(90,190,115,0.15);
+  --author-2-border: rgba(90,190,115,0.35);
+  --author-2-fg: #6cc880;
+  --author-3-bg: rgba(215,175,70,0.15);
+  --author-3-border: rgba(215,175,70,0.35);
+  --author-3-fg: #d9b458;
+  --author-4-bg: rgba(165,105,220,0.15);
+  --author-4-border: rgba(165,105,220,0.35);
+  --author-4-fg: #b580e0;
+  --author-5-bg: rgba(85,200,200,0.15);
+  --author-5-border: rgba(85,200,200,0.35);
+  --author-5-fg: #60d0d0;
+
+  /* ---- Live-mode chrome (R2: only iframe pane tokens; markers in Phase D) ---- */
+  --hunkyard-live-iframe-frame: #2f3342;
+  --hunkyard-live-iframe-bg:    #0e0f13;
+
+  /* ---- Phase C: composer, ancestor menu, mode toggle ---- */
+  --hunkyard-live-composer-border:       #2f3342;
+  --hunkyard-live-composer-error-fg:     #f85149;
+  --hunkyard-live-ancestor-menu-bg:      #1a1c23;
+  --hunkyard-live-ancestor-menu-fg:      #e6e8ed;
+  --hunkyard-live-ancestor-menu-hover-bg:#2f3342;
+
+  /* ---- Phase D: markers + drifted tray + re-anchor ---- */
+  --hunkyard-live-marker-bg:             #3b82f6;
+  --hunkyard-live-marker-fg:             #ffffff;
+  --hunkyard-live-marker-border:         rgba(255,255,255,0.18);
+  --hunkyard-live-marker-shadow:         0 1px 3px rgba(0,0,0,0.5);
+  --hunkyard-live-marker-focus-ring:     #fbbf24;
+  --hunkyard-live-reanchor-active-outline: #f59e0b;
+
+  /* ---- Phase E ---- */
+  --hunkyard-live-focus-ring:             #fbbf24;
+  --hunkyard-live-tooltip-bg:             #1c1f29;
+  --hunkyard-live-tooltip-fg:             #e6e8ef;
+  --hunkyard-live-tooltip-border:         #2f3342;
+  --hunkyard-live-marker-flash-bg:        rgba(245, 158, 11, 0.7);
+  --hunkyard-live-menu-highlight-bg:      rgba(59, 130, 246, 0.18);
+  --hunkyard-live-menu-highlight-fg:      #e6e8ef;
+
+  /* ---- Option lists + focus ring ---- */
+  --hunkyard-option-hover:       rgba(133, 170, 248, 0.06);
+  --hunkyard-option-selected-bg: rgba(133, 170, 248, 0.08);
+  --hunkyard-focus-ring:         rgba(133, 170, 248, 0.5);
+
+  /* ---- Story mode (dark) ---- */
+  --hunkyard-story-accent:          var(--hunkyard-brand);
+  --hunkyard-story-num-bg:          var(--hunkyard-brand-bg);
+  --hunkyard-story-support-fg:      var(--hunkyard-fg-muted);
+  --hunkyard-l-surface:         rgba(255, 255, 255, 0.018);
+  --hunkyard-l-surface-2:       rgba(255, 255, 255, 0.035);
+  --hunkyard-l-hover:           rgba(255, 255, 255, 0.05);
+  --hunkyard-l-active:          rgba(133, 170, 248, 0.10);
+  --hunkyard-l-hairline:        rgba(255, 255, 255, 0.06);
+  --hunkyard-l-hairline-strong: rgba(255, 255, 255, 0.10);
+
+  /* ---- Icons (SVG masks) ---- */
+  --hunkyard-icon-github: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='currentColor'%3E%3Cpath d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0016 8c0-4.42-3.58-8-8-8z'/%3E%3C/svg%3E");
+}
+
+/* ===== Light (explicit) ===== */
+[data-theme="light"] {
+  --hunkyard-font-code: var(--hunkyard-font-mono);
+  --hunkyard-diff-tint-mix: initial;
+
+  /* ---- Brand surfaces ---- */
+  --hunkyard-bg-page:     #ffffff;
+  --hunkyard-bg-card:     #f6f8fa;
+  --hunkyard-bg-elevated: #eff2f5;
+
+  /* ---- Brand foreground ---- */
+  --hunkyard-fg-primary:   #1a1d23;
+  /* Logo: fixed per mode, not per code theme (brand blue). */
+  --hunkyard-logo-fg:      #1a1d23;
+  --hunkyard-logo-dot:     #2960bc;
+  --hunkyard-fg-secondary: #57606a;
+  --hunkyard-fg-muted:     #8892a6;
+  --hunkyard-fg-on-brand:  #ffffff;
+  --hunkyard-fg-on-cta: #ffffff;
+
+  /* ---- Brand colors ---- */
+  --hunkyard-brand:         #2960bc;
+  --hunkyard-brand-hover:   #396ec6;
+  --hunkyard-brand-subtle:  rgba(41,96,188,0.08);
+  --hunkyard-brand-bg:      rgba(41,96,188,0.12);
+  --hunkyard-line-focus-bg: rgba(41,96,188,0.10);
+  --hunkyard-brand-cta:       #3a72d4;
+  --hunkyard-brand-cta-hover: #3568c8;
+
+  /* ---- Header pill tokens (neutral chip palette) ---- */
+  --hunkyard-pill-bg:        #f6f8fa;
+  --hunkyard-pill-bg-hover:  #eef1f4;
+  --hunkyard-pill-fg:        #1f2328;
+  --hunkyard-pill-fg-muted:  #59636e;
+  --hunkyard-pill-border:    #d0d7de;
+  /* ---- Segmented controls (scope / diff / viewport / mode) ----
+     Soft segment lift, tinted with brand so actives sit in the same
+     blue family as the rest of the chrome. */
+  --hunkyard-seg-track:      color-mix(in srgb, var(--hunkyard-brand) 6%, rgba(0, 0, 0, 0.03));
+  --hunkyard-seg-active:     color-mix(in srgb, var(--hunkyard-brand) 12%, #ffffff);
+  --hunkyard-seg-active-fg:  var(--hunkyard-brand);
+  --hunkyard-rail-fg:        #59636e;
+  --hunkyard-rail-arrow:     #8b949e;
+
+  /* ---- Editor surfaces (light) ---- */
+  --hunkyard-editor-bg:          #ffffff;
+  --hunkyard-editor-bg-card:     #f6f8fa;
+  --hunkyard-editor-bg-elevated: #eff2f5;
+  --hunkyard-editor-bg-hover:    #eff2f5;
+  --hunkyard-editor-code-bg:     #eff1f3;
+  --hunkyard-editor-comment-bg:  #ddf4ff;
+
+  /* ---- Editor foreground (light) ---- */
+  --hunkyard-editor-fg:           #1f2328;
+  --hunkyard-editor-fg-secondary: #59636e;
+  --hunkyard-editor-fg-muted:     #59636e;
+
+  /* ---- Editor scrollbar (light) ---- */
+  --hunkyard-editor-scrollbar-bg:    #ffffff;
+  --hunkyard-editor-scrollbar-thumb: #d1d9e0;
+
+  /* ---- Semantic colors ---- */
+  --hunkyard-green:  #166f30;
+  --hunkyard-red:    #c41f2a;
+  --hunkyard-orange: #bc4c00;
+  --hunkyard-yellow: #7a5800;
+  --hunkyard-purple: #8250df;
+  /* Visual line mode cursor accent. Saturated amber tuned to read on
+     light backgrounds (the muddy --hunkyard-yellow #7a5800 looks olive at 3px). */
+  --hunkyard-visual-accent: #b8860b;
+
+  /* ---- Borders ---- */
+  --hunkyard-border:         #d8dee4;
+  --hunkyard-border-strong:  #bac3cf;
+  --hunkyard-border-comment: #0969da;
+
+  --hunkyard-shadow: 0 2px 8px rgba(0,0,0,0.08);
+
+  /* ---- Diff highlights (light) ---- */
+  --hunkyard-diff-add-bg:       #dafbe1;
+  --hunkyard-diff-add-line-bg:  #dafbe1;
+  --hunkyard-diff-del-bg:       #ffebe9;
+  --hunkyard-diff-del-line-bg:  #ffebe9;
+  --hunkyard-diff-word-add-bg:  #aceebb;
+  --hunkyard-diff-word-del-bg:  #ffcecb;
+
+  --hunkyard-comment-range-bg: rgba(210, 153, 34, 0.15);
+  --hunkyard-table-stripe: rgba(0, 0, 0, 0.02);
+  --hunkyard-blockquote-border: #0969da;
+  --hunkyard-alert-note: #0550ae;
+  --hunkyard-alert-tip: #116329;
+  --hunkyard-alert-important: #6639ba;
+  --hunkyard-alert-warning: #7d4e00;
+  --hunkyard-alert-caution: #a40e26;
+  --hunkyard-blockquote-bg:     rgba(9, 105, 218, 0.04);
+
+  --hunkyard-badge-resolved-bg:  rgba(22, 111, 48, 0.1);
+  --hunkyard-badge-modified-bg:  rgba(122, 88, 0, 0.08);
+  --hunkyard-badge-deleted-bg:   rgba(196, 31, 42, 0.05);
+  --hunkyard-badge-removed-bg:   rgba(100, 100, 100, 0.08);
+  --hunkyard-badge-removed-color: var(--hunkyard-editor-fg-secondary);
+  --hunkyard-badge-removed-border: color-mix(in srgb, var(--hunkyard-editor-fg-secondary) 15%, transparent);
+  --hunkyard-live-badge-bg:      rgba(22, 111, 48, 0.08);
+
+  --hunkyard-yellow-subtle: rgba(122, 88, 0, 0.06);
+  --hunkyard-yellow-bg:     rgba(122, 88, 0, 0.1);
+  --hunkyard-yellow-border: rgba(122, 88, 0, 0.16);
+
+  /* ---- Drifted comment ---- */
+  --hunkyard-drift-badge-fg:     #8a5200;
+  --hunkyard-drift-badge-bg:     rgba(138, 82, 0, 0.09);
+  --hunkyard-drift-badge-border: rgba(138, 82, 0, 0.22);
+  --hunkyard-drift-card-border:  rgba(138, 82, 0, 0.20);
+
+  /* ---- Green subtle ---- */
+  --hunkyard-green-subtle: rgba(22, 111, 48, 0.08);
+
+  /* ---- Finish/disconnected state ---- */
+  --hunkyard-finish-pill-bg:     rgba(22, 127, 48, 0.08);
+  --hunkyard-finish-pill-border: rgba(22, 127, 48, 0.18);
+  --hunkyard-finish-pill-fg:     #167f30;
+  --hunkyard-finish-body-fg:     #5a6275;
+
+  --hunkyard-overlay-bg:       rgba(0,0,0,0.5);
+  --hunkyard-change-flash-bg:      rgba(188, 76, 0, 0.12);
+  --hunkyard-resolve-hover-bg:     rgba(22, 111, 48, 0.08);
+  --hunkyard-quote-highlight-bg:     rgba(250, 200, 60, 0.18);
+  --hunkyard-find-bg:                rgba(250, 190, 40, 0.40);
+  --hunkyard-find-current-bg:        #f59e0b;
+  --hunkyard-find-current-fg:        #1f2328;
+  --hunkyard-quote-highlight-border: rgba(200, 160, 30, 0.45);
+
+  /* ---- Comment reference chip ---- */
+  --hunkyard-comment-ref-color:       #0550ae;
+  --hunkyard-comment-ref-color-hover: #033d8b;
+  --hunkyard-comment-ref-underline:   rgba(5, 80, 174, 0.50);
+  --hunkyard-comment-ref-flash-bg:    rgba(255, 212, 59, 0.55);
+  --hunkyard-comment-ref-flash-ring:  rgba(154, 103, 0, 0.70);
+
+  --author-0-bg: rgba(26,95,160,0.10);
+  --author-0-border: rgba(26,95,160,0.25);
+  --author-0-fg: #1a5fa0;
+  --author-1-bg: rgba(179,46,46,0.10);
+  --author-1-border: rgba(179,46,46,0.25);
+  --author-1-fg: #b32e2e;
+  --author-2-bg: rgba(26,117,53,0.10);
+  --author-2-border: rgba(26,117,53,0.25);
+  --author-2-fg: #1a7535;
+  --author-3-bg: rgba(138,93,0,0.10);
+  --author-3-border: rgba(138,93,0,0.25);
+  --author-3-fg: #8a5d00;
+  --author-4-bg: rgba(112,48,165,0.10);
+  --author-4-border: rgba(112,48,165,0.25);
+  --author-4-fg: #7030a5;
+  --author-5-bg: rgba(14,110,110,0.10);
+  --author-5-border: rgba(14,110,110,0.25);
+  --author-5-fg: #0e6e6e;
+
+  /* ---- Live-mode chrome (R2: only iframe pane tokens; markers in Phase D) ---- */
+  --hunkyard-live-iframe-frame: #d0d7de;
+  --hunkyard-live-iframe-bg:    #f6f8fa;
+
+  /* ---- Phase C: composer, ancestor menu, mode toggle ---- */
+  --hunkyard-live-composer-border:       #d0d7de;
+  --hunkyard-live-composer-error-fg:     #cf222e;
+  --hunkyard-live-ancestor-menu-bg:      #ffffff;
+  --hunkyard-live-ancestor-menu-fg:      #1f2328;
+  --hunkyard-live-ancestor-menu-hover-bg:#eef2f7;
+
+  /* ---- Phase D: markers + drifted tray + re-anchor ---- */
+  --hunkyard-live-marker-bg:             #2563eb;
+  --hunkyard-live-marker-fg:             #ffffff;
+  --hunkyard-live-marker-border:         rgba(0,0,0,0.15);
+  --hunkyard-live-marker-shadow:         0 1px 2px rgba(0,0,0,0.25);
+  --hunkyard-live-marker-focus-ring:     #b45309;
+  --hunkyard-live-reanchor-active-outline: #d97706;
+
+  /* ---- Phase E ---- */
+  --hunkyard-live-focus-ring:             #b45309;
+  --hunkyard-live-tooltip-bg:             #1a1d23;
+  --hunkyard-live-tooltip-fg:             #ffffff;
+  --hunkyard-live-tooltip-border:         rgba(0,0,0,0.15);
+  --hunkyard-live-marker-flash-bg:        rgba(217, 119, 6, 0.6);
+  --hunkyard-live-menu-highlight-bg:      #e0e7ff;
+  --hunkyard-live-menu-highlight-fg:      #1a1d23;
+
+  /* ---- Option lists + focus ring ---- */
+  --hunkyard-option-hover:       rgba(61, 106, 224, 0.04);
+  --hunkyard-option-selected-bg: rgba(61, 106, 224, 0.06);
+  --hunkyard-focus-ring:         rgba(61, 106, 224, 0.4);
+
+  /* ---- Story mode (light) ---- */
+  --hunkyard-story-accent:          var(--hunkyard-brand);
+  --hunkyard-story-num-bg:          var(--hunkyard-brand-bg);
+  --hunkyard-story-support-fg:      var(--hunkyard-fg-muted);
+  --hunkyard-l-surface:         rgba(0, 0, 0, 0.015);
+  --hunkyard-l-surface-2:       rgba(0, 0, 0, 0.03);
+  --hunkyard-l-hover:           rgba(0, 0, 0, 0.045);
+  --hunkyard-l-active:          rgba(41, 96, 188, 0.08);
+  --hunkyard-l-hairline:        rgba(0, 0, 0, 0.07);
+  --hunkyard-l-hairline-strong: rgba(0, 0, 0, 0.12);
+
+  /* ---- Icons (SVG masks) ---- */
+  --hunkyard-icon-github: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='currentColor'%3E%3Cpath d='M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.012 8.012 0 0016 8c0-4.42-3.58-8-8-8z'/%3E%3C/svg%3E");
+}
+
+/* ===== Code tokens (Shiki, via Pierre) =====
+   Fenced code in comments and rendered documents (.hunkyard-code) carries the
+   same per-token --diffs-token-light / --diffs-token-dark properties as
+   Pierre's diffs; the themes are the light/dark palette pair from settings.
+   Dark is the default (also for data-theme="dark"), like the variables
+   above. */
+.hunkyard-code span[style] { color: var(--diffs-token-dark); }
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) .hunkyard-code span[style] { color: var(--diffs-token-light); }
+}
+[data-theme="light"] .hunkyard-code span[style] { color: var(--diffs-token-light); }

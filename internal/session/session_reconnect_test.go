@@ -1,0 +1,671 @@
+package session
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+
+	"github.com/BSH2409/hunkyard/internal/daemon"
+	"github.com/BSH2409/hunkyard/internal/testutil"
+)
+
+func daemonFlagValue(args []string, flag string) (string, bool) {
+	for i := 0; i+1 < len(args); i++ {
+		if args[i] == flag {
+			return args[i+1], true
+		}
+	}
+	return "", false
+}
+
+func assertDaemonFlag(t *testing.T, args []string, flag, want string) {
+	t.Helper()
+	got, ok := daemonFlagValue(args, flag)
+	if !ok {
+		t.Fatalf("args %v missing flag %q", args, flag)
+	}
+	switch flag {
+	case "--output", "--plan-dir":
+		if filepath.Clean(got) != filepath.Clean(want) {
+			t.Fatalf("flag %q = %q, want %q", flag, got, want)
+		}
+	default:
+		if got != want {
+			t.Fatalf("flag %q = %q, want %q", flag, got, want)
+		}
+	}
+}
+
+func TestReconnectDeadSession_MissingReview(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+
+	_, err := reconnectDeadSession("839f3b4cd5d6", daemon.SessionEntry{}, false)
+	if err == nil {
+		t.Fatal("expected error for missing review")
+	}
+	if !strings.Contains(err.Error(), "no review found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReconnectDeadSession_InvalidJSON(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	key := "839f3b4cd5d6"
+
+	revDir, err := daemon.ReviewFilePath(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hunkyardPath := ReviewPathsFor(revDir).Review
+	if err := ensureReviewFolder(hunkyardPath); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, hunkyardPath, "not json")
+
+	_, err = reconnectDeadSession(key, daemon.SessionEntry{}, false)
+	if err == nil {
+		t.Fatal("expected parse error")
+	}
+	if !strings.Contains(err.Error(), "parsing review") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReconnectDeadSession_RestartsDaemon(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	key := "839f3b4cd5d6"
+
+	revDir, err := daemon.ReviewFilePath(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cj := HunkyardJSON{CliArgs: []string{"a.md"}}
+	if err := SaveHunkyardJSON(revDir, cj); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := startDaemonForReconnect
+	startDaemonForReconnect = func(gotKey string, args []string, _ string) (daemon.SessionEntry, error) {
+		if gotKey != key {
+			t.Fatalf("key = %q, want %q", gotKey, key)
+		}
+		want := []string{"--session-key", key, "--quiet", "a.md"}
+		if len(args) != len(want) {
+			t.Fatalf("args = %v, want %v", args, want)
+		}
+		for i := range want {
+			if args[i] != want[i] {
+				t.Fatalf("args = %v, want %v", args, want)
+			}
+		}
+		return daemon.SessionEntry{PID: 42, Port: 3001}, nil
+	}
+	t.Cleanup(func() { startDaemonForReconnect = orig })
+
+	stderr := captureStderr(t, func() {
+		entry, err := reconnectDeadSession(key, daemon.SessionEntry{}, false)
+		if err != nil {
+			t.Fatalf("reconnectDeadSession: %v", err)
+		}
+		if entry.Port != 3001 {
+			t.Fatalf("port = %d, want 3001", entry.Port)
+		}
+	})
+	if !strings.Contains(stderr, "Restarted hunkyard daemon") {
+		t.Fatalf("stderr = %q, want restart message", stderr)
+	}
+}
+
+func TestRunReview_SessionByID_ReconnectsDeadDaemon(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	key := "839f3b4cd5d6"
+
+	revDir, err := daemon.ReviewFilePath(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveHunkyardJSON(revDir, HunkyardJSON{CliArgs: nil}); err != nil {
+		t.Fatal(err)
+	}
+	if err := daemon.WriteSessionFile(key, daemon.SessionEntry{Host: "0.0.0.0", ReviewPath: revDir}); err != nil {
+		t.Fatal(err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/health":
+			json.NewEncoder(w).Encode(map[string]any{"status": "ok", "browser_clients": true})
+		case "/api/session":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]string{"mode": "git"})
+		case "/api/review-cycle":
+			w.WriteHeader(http.StatusOK)
+			json.NewEncoder(w).Encode(map[string]any{"approved": false})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer ts.Close()
+	port, _ := strconv.Atoi(ts.URL[strings.LastIndex(ts.URL, ":")+1:])
+
+	origStart := startDaemonForReconnect
+	startDaemonForReconnect = func(_ string, args []string, _ string) (daemon.SessionEntry, error) {
+		assertDaemonFlag(t, args, "--host", "127.0.0.1")
+		if strings.Contains(strings.Join(args, " "), "--allow-unauthenticated-network") {
+			t.Fatalf("reconnect restored stale network permission: %v", args)
+		}
+		return daemon.SessionEntry{PID: os.Getpid(), Port: port}, nil
+	}
+	t.Cleanup(func() { startDaemonForReconnect = origStart })
+
+	orig := ResolveServerConfigFn
+	t.Cleanup(func() { ResolveServerConfigFn = orig })
+	ResolveServerConfigFn = func(_ []string) (*CLIReviewConfig, error) {
+		return &CLIReviewConfig{SessionID: key, Host: "127.0.0.1", NoOpen: true}, nil
+	}
+
+	if err := RunReview(nil); err != nil {
+		t.Fatalf("RunReview: %v", err)
+	}
+}
+
+func TestReconnectDeadSession_OutputReviewPath(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	key := "839f3b4cd5d6"
+
+	outputDir := filepath.Join(t.TempDir(), "out")
+	revDir := filepath.Join(outputDir, "reviews", key)
+	cj := HunkyardJSON{CliArgs: []string{"a.md"}}
+	if err := SaveHunkyardJSON(revDir, cj); err != nil {
+		t.Fatal(err)
+	}
+
+	stale := daemon.SessionEntry{ReviewPath: revDir}
+	orig := startDaemonForReconnect
+	startDaemonForReconnect = func(gotKey string, args []string, _ string) (daemon.SessionEntry, error) {
+		if gotKey != key {
+			t.Fatalf("key = %q, want %q", gotKey, key)
+		}
+		want := []string{"--session-key", key, "--quiet", "a.md", "--output", outputDir}
+		if len(args) != len(want) {
+			t.Fatalf("args = %v, want %v", args, want)
+		}
+		for i := range want {
+			if want[i] == outputDir {
+				if filepath.Clean(args[i]) != filepath.Clean(outputDir) {
+					t.Fatalf("args = %v, want %v", args, want)
+				}
+				continue
+			}
+			if args[i] != want[i] {
+				t.Fatalf("args = %v, want %v", args, want)
+			}
+		}
+		return daemon.SessionEntry{PID: 42, Port: 3001}, nil
+	}
+	t.Cleanup(func() { startDaemonForReconnect = orig })
+
+	if _, err := reconnectDeadSession(key, stale, false); err != nil {
+		t.Fatalf("reconnectDeadSession: %v", err)
+	}
+}
+
+func TestDaemonArgsForReconnect_OutputAndPublicURL(t *testing.T) {
+	key := "839f3b4cd5d6"
+	outputDir := filepath.Join(os.TempDir(), "review-out")
+	revDir := filepath.Join(outputDir, "reviews", key)
+	stale := daemon.SessionEntry{
+		ReviewPath: revDir,
+		PublicURL:  "https://hunkyard.example.com",
+	}
+	args := daemonArgsForReconnect(key, []string{"doc.md"}, stale, revDir)
+	assertDaemonFlag(t, args, "--output", outputDir)
+	assertDaemonFlag(t, args, "--public-url", "https://hunkyard.example.com")
+	if !containsArg(args, "doc.md") {
+		t.Fatalf("args %v missing doc.md", args)
+	}
+}
+
+func containsArg(args []string, want string) bool {
+	for _, a := range args {
+		if a == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestResolveReconnectReviewDir_MissingStaleReview(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), ".hunkyard")
+	_, err := resolveReconnectReviewDir("839f3b4cd5d6", daemon.SessionEntry{ReviewPath: missing})
+	if err == nil {
+		t.Fatal("expected error for missing stale review_path")
+	}
+	if !strings.Contains(err.Error(), "no review found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestResolveReconnectReviewDir_UsesStalePath(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	outputDir := filepath.Join(t.TempDir(), "out")
+	revDir := filepath.Join(outputDir, ".hunkyard")
+	if err := SaveHunkyardJSON(revDir, HunkyardJSON{}); err != nil {
+		t.Fatal(err)
+	}
+	got, err := resolveReconnectReviewDir("839f3b4cd5d6", daemon.SessionEntry{ReviewPath: revDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Clean(got) != filepath.Clean(revDir) {
+		t.Fatalf("got %q, want %q", got, revDir)
+	}
+}
+
+func TestAppendReconnectPathFlags_PlanDir(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	key := "839f3b4cd5d6"
+	planStorage := filepath.Join(home, ".hunkyard", "plans", "auth-flow")
+	reviewDir := filepath.Join(planStorage, ".hunkyard")
+	args := appendReconnectPathFlags(key, []string{"--session-key", key}, reviewDir)
+	assertDaemonFlag(t, args, "--plan-dir", planStorage)
+	assertDaemonFlag(t, args, "--name", "auth-flow")
+}
+
+func TestAppendReconnectPathFlags_DefaultLayout(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	key := "839f3b4cd5d6"
+	defaultDir, err := daemon.ReviewFilePath(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := appendReconnectPathFlags(key, []string{"--session-key", key}, defaultDir)
+	if _, ok := daemonFlagValue(args, "--output"); ok {
+		t.Fatalf("default layout should not add --output: %v", args)
+	}
+	if _, ok := daemonFlagValue(args, "--plan-dir"); ok {
+		t.Fatalf("default layout should not add --plan-dir: %v", args)
+	}
+}
+
+func TestMigrateLegacyOutputReconnect_MovesToKeyedReview(t *testing.T) {
+	key := "839f3b4cd5d6"
+	root := t.TempDir()
+	legacy := filepath.Join(root, ".hunkyard")
+	if err := SaveHunkyardJSON(legacy, HunkyardJSON{CliArgs: []string{"a.md"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var args []string
+	stderr := captureStderr(t, func() {
+		args = migrateLegacyOutputReconnect(key, legacy)
+	})
+	assertDaemonFlag(t, args, "--output", root)
+	dest := filepath.Join(root, "reviews", key)
+	if _, err := os.Stat(filepath.Join(dest, "review.json")); err != nil {
+		t.Fatalf("migrated review missing: %v", err)
+	}
+	if _, err := os.Stat(legacy); !os.IsNotExist(err) {
+		t.Fatalf("legacy path should be gone, err=%v", err)
+	}
+	if !strings.Contains(stderr, "migrated legacy review") {
+		t.Fatalf("stderr = %q, want migrate notice", stderr)
+	}
+}
+
+func TestMigrateLegacyOutputReconnect_DestExists(t *testing.T) {
+	key := "839f3b4cd5d6"
+	root := t.TempDir()
+	legacy := filepath.Join(root, ".hunkyard")
+	if err := SaveHunkyardJSON(legacy, HunkyardJSON{}); err != nil {
+		t.Fatal(err)
+	}
+	dest := filepath.Join(root, "reviews", key)
+	if err := SaveHunkyardJSON(dest, HunkyardJSON{CliArgs: []string{"keep.md"}}); err != nil {
+		t.Fatal(err)
+	}
+
+	var args []string
+	stderr := captureStderr(t, func() {
+		args = migrateLegacyOutputReconnect(key, legacy)
+	})
+	assertDaemonFlag(t, args, "--output", root)
+	if !strings.Contains(stderr, "ignored") {
+		t.Fatalf("stderr = %q, want ignore warning", stderr)
+	}
+	// Existing keyed review must be preserved; legacy folder left in place.
+	if _, err := os.Stat(filepath.Join(dest, "review.json")); err != nil {
+		t.Fatalf("existing review missing: %v", err)
+	}
+	if _, err := os.Stat(legacy); err != nil {
+		t.Fatalf("legacy path should remain when dest exists: %v", err)
+	}
+}
+
+func TestMigrateLegacyOutputReconnect_NotLegacy(t *testing.T) {
+	if args := migrateLegacyOutputReconnect("839f3b4cd5d6", filepath.Join(t.TempDir(), "reviews", "839f3b4cd5d6")); args != nil {
+		t.Fatalf("non-legacy path returned %v", args)
+	}
+}
+
+func TestAppendReconnectPathFlags_MigratesLegacyOutput(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	key := "839f3b4cd5d6"
+	root := t.TempDir()
+	legacy := filepath.Join(root, ".hunkyard")
+	if err := SaveHunkyardJSON(legacy, HunkyardJSON{}); err != nil {
+		t.Fatal(err)
+	}
+
+	var args []string
+	captureStderr(t, func() {
+		args = appendReconnectPathFlags(key, []string{"--session-key", key}, legacy)
+	})
+	assertDaemonFlag(t, args, "--output", root)
+	if _, err := os.Stat(filepath.Join(root, "reviews", key, "review.json")); err != nil {
+		t.Fatalf("expected migration via appendReconnectPathFlags: %v", err)
+	}
+}
+
+func TestMigrateLegacyOutputReconnect_MkdirError(t *testing.T) {
+	key := "839f3b4cd5d6"
+	root := t.TempDir()
+	legacy := filepath.Join(root, ".hunkyard")
+	if err := SaveHunkyardJSON(legacy, HunkyardJSON{}); err != nil {
+		t.Fatal(err)
+	}
+	orig := migrateMkdirAll
+	migrateMkdirAll = func(string, os.FileMode) error {
+		return errors.New("mkdir failed")
+	}
+	t.Cleanup(func() { migrateMkdirAll = orig })
+
+	var args []string
+	stderr := captureStderr(t, func() {
+		args = migrateLegacyOutputReconnect(key, legacy)
+	})
+	if args != nil {
+		t.Fatalf("expected nil args on mkdir failure, got %v", args)
+	}
+	if !strings.Contains(stderr, "could not migrate") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestMigrateLegacyOutputReconnect_RenameError(t *testing.T) {
+	key := "839f3b4cd5d6"
+	root := t.TempDir()
+	legacy := filepath.Join(root, ".hunkyard")
+	if err := SaveHunkyardJSON(legacy, HunkyardJSON{}); err != nil {
+		t.Fatal(err)
+	}
+	orig := migrateRename
+	migrateRename = func(string, string) error {
+		return errors.New("rename failed")
+	}
+	t.Cleanup(func() { migrateRename = orig })
+
+	var args []string
+	stderr := captureStderr(t, func() {
+		args = migrateLegacyOutputReconnect(key, legacy)
+	})
+	if args != nil {
+		t.Fatalf("expected nil args on rename failure, got %v", args)
+	}
+	if !strings.Contains(stderr, "could not migrate") {
+		t.Fatalf("stderr = %q", stderr)
+	}
+}
+
+func TestPlanReconnectFlags_HomeError(t *testing.T) {
+	orig := userHomeDir
+	userHomeDir = func() (string, error) {
+		return "", errors.New("no home")
+	}
+	t.Cleanup(func() { userHomeDir = orig })
+	if args := planReconnectFlags(filepath.Join(t.TempDir(), ".hunkyard")); args != nil {
+		t.Fatalf("expected nil when home fails, got %v", args)
+	}
+}
+
+func TestDaemonArgsForReconnect_Host(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	key := "839f3b4cd5d6"
+	defaultDir, err := daemon.ReviewFilePath(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stale := daemon.SessionEntry{Host: "0.0.0.0"}
+	args := daemonArgsForReconnect(key, nil, stale, defaultDir)
+	assertDaemonFlag(t, args, "--host", "0.0.0.0")
+	foundAllow := false
+	for _, a := range args {
+		if a == "--allow-unauthenticated-network" {
+			foundAllow = true
+			break
+		}
+	}
+	if !foundAllow {
+		t.Fatalf("args %v missing --allow-unauthenticated-network", args)
+	}
+}
+
+func TestReconnectDeadSession_StalePathMissing(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	key := "839f3b4cd5d6"
+	missing := filepath.Join(t.TempDir(), ".hunkyard")
+	_, err := reconnectDeadSession(key, daemon.SessionEntry{ReviewPath: missing}, false)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "no review found") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestReconnectDir(t *testing.T) {
+	dir := t.TempDir()
+
+	t.Run("prefers the review file's directory", func(t *testing.T) {
+		got, err := reconnectDir(HunkyardJSON{CWD: dir}, daemon.SessionEntry{CWD: t.TempDir()})
+		if err != nil || got != dir {
+			t.Fatalf("reconnectDir = %q, %v; want %q", got, err, dir)
+		}
+	})
+
+	t.Run("falls back to the stale session entry", func(t *testing.T) {
+		got, err := reconnectDir(HunkyardJSON{}, daemon.SessionEntry{CWD: dir})
+		if err != nil || got != dir {
+			t.Fatalf("reconnectDir = %q, %v; want %q", got, err, dir)
+		}
+	})
+
+	t.Run("inherits ours when nothing is recorded", func(t *testing.T) {
+		got, err := reconnectDir(HunkyardJSON{}, daemon.SessionEntry{})
+		if err != nil || got != "" {
+			t.Fatalf("reconnectDir = %q, %v; want an empty directory", got, err)
+		}
+	})
+
+	t.Run("fails when the directory is gone", func(t *testing.T) {
+		_, err := reconnectDir(HunkyardJSON{CWD: filepath.Join(dir, "deleted")}, daemon.SessionEntry{})
+		if err == nil {
+			t.Fatal("expected an error for a missing directory")
+		}
+	})
+
+	t.Run("fails when the path is not a directory", func(t *testing.T) {
+		file := filepath.Join(dir, "file")
+		writeFile(t, file, "")
+		if _, err := reconnectDir(HunkyardJSON{CWD: file}, daemon.SessionEntry{}); err == nil {
+			t.Fatal("expected an error for a non-directory path")
+		}
+	})
+}
+
+// A resumed session must restart its daemon in the directory the review came
+// from, not wherever the user happens to be standing.
+func TestReconnectDeadSession_StartsDaemonInRecordedDirectory(t *testing.T) {
+	testutil.SetHome(t, t.TempDir())
+	key := "839f3b4cd5d6"
+	workdir := t.TempDir()
+
+	revDir, err := daemon.ReviewFilePath(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveHunkyardJSON(revDir, HunkyardJSON{CWD: workdir}); err != nil {
+		t.Fatal(err)
+	}
+
+	var gotDir string
+	orig := startDaemonForReconnect
+	startDaemonForReconnect = func(_ string, _ []string, dir string) (daemon.SessionEntry, error) {
+		gotDir = dir
+		return daemon.SessionEntry{PID: 42, Port: 3001}, nil
+	}
+	t.Cleanup(func() { startDaemonForReconnect = orig })
+
+	captureStderr(t, func() {
+		if _, err := reconnectDeadSession(key, daemon.SessionEntry{}, false); err != nil {
+			t.Fatalf("reconnectDeadSession: %v", err)
+		}
+	})
+	if gotDir != workdir {
+		t.Errorf("daemon started in %q, want %q", gotDir, workdir)
+	}
+}
+
+func TestReconnectDeadSession_MissingDirectoryFails(t *testing.T) {
+	testutil.SetHome(t, t.TempDir())
+	key := "839f3b4cd5d6"
+
+	revDir, err := daemon.ReviewFilePath(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveHunkyardJSON(revDir, HunkyardJSON{CWD: filepath.Join(t.TempDir(), "deleted")}); err != nil {
+		t.Fatal(err)
+	}
+
+	orig := startDaemonForReconnect
+	startDaemonForReconnect = func(string, []string, string) (daemon.SessionEntry, error) {
+		t.Fatal("daemon must not start when the review's directory is gone")
+		return daemon.SessionEntry{}, nil
+	}
+	t.Cleanup(func() { startDaemonForReconnect = orig })
+
+	if _, err := reconnectDeadSession(key, daemon.SessionEntry{}, false); err == nil {
+		t.Fatal("expected an error for a missing review directory")
+	}
+}
+
+func TestReconnectCommand(t *testing.T) {
+	tests := []struct {
+		key  string
+		want string
+	}{
+		{"839f3b4cd5d6", "hunkyard --session 839f3b4cd5d6"},
+		{"", "hunkyard"},
+	}
+	for _, tc := range tests {
+		if got := ReconnectCommand(tc.key); got != tc.want {
+			t.Errorf("ReconnectCommand(%q) = %q, want %q", tc.key, got, tc.want)
+		}
+	}
+}
+
+func TestPlanReconnectCommand(t *testing.T) {
+	if got := PlanReconnectCommand("auth-flow"); got != "hunkyard plan --name auth-flow" {
+		t.Errorf("PlanReconnectCommand() = %q", got)
+	}
+	if got := PlanReconnectCommand(""); got != "hunkyard plan" {
+		t.Errorf("PlanReconnectCommand(empty) = %q", got)
+	}
+}
+
+func TestNextRoundCommand(t *testing.T) {
+	plan := &Session{Mode: "plan", PlanDir: "/home/user/.hunkyard/plans/auth-flow", SessionKey: "abc123def456"}
+	if got := NextRoundCommand(plan); got != "hunkyard plan --name auth-flow" {
+		t.Errorf("plan NextRoundCommand() = %q", got)
+	}
+	file := &Session{Mode: "files", SessionKey: "839f3b4cd5d6"}
+	if got := NextRoundCommand(file); got != "hunkyard --session 839f3b4cd5d6" {
+		t.Errorf("file NextRoundCommand() = %q", got)
+	}
+	if got := NextRoundCommand(nil); got != "hunkyard" {
+		t.Errorf("nil NextRoundCommand() = %q", got)
+	}
+	planNoSlug := &Session{Mode: "plan", PlanDir: ".", SessionKey: "abc123def456"}
+	if got := NextRoundCommand(planNoSlug); got != "hunkyard --session abc123def456" {
+		t.Errorf("plan without slug NextRoundCommand() = %q", got)
+	}
+	plan.SetPlanHook("plan_mode")
+	if got := NextRoundCommand(plan); got != "" {
+		t.Errorf("plan with waiting hook NextRoundCommand() = %q, want empty", got)
+	}
+}
+
+func TestValidSessionKey(t *testing.T) {
+	tests := []struct {
+		key  string
+		want bool
+	}{
+		{"839f3b4cd5d6", true},
+		{"ABCDEF123456", false},
+		{"839f3b4cd5d", false},
+		{"839f3b4cd5d6x", false},
+		{"", false},
+	}
+	for _, tc := range tests {
+		if got := daemon.ValidSessionKey(tc.key); got != tc.want {
+			t.Errorf("ValidSessionKey(%q) = %v, want %v", tc.key, got, tc.want)
+		}
+	}
+}
+
+func TestDaemonArgsFromCliArgs(t *testing.T) {
+	key := "839f3b4cd5d6"
+	tests := []struct {
+		name    string
+		cliArgs []string
+		want    []string
+	}{
+		{"git mode", nil, []string{"--session-key", key, "--quiet"}},
+		{"files", []string{"a.md", "b.md"}, []string{"--session-key", key, "--quiet", "a.md", "b.md"}},
+		{"pr", []string{"pr:42"}, []string{"--session-key", key, "--quiet", "--pr", "42"}},
+		{"range", []string{"range:abc..def"}, []string{"--session-key", key, "--quiet", "--range", "abc..def"}},
+		{"live", []string{"live", "http://localhost:3000"}, []string{"--session-key", key, "--quiet", "live", "http://localhost:3000"}},
+		{"preview", []string{"preview", "/tmp/x.html"}, []string{"--session-key", key, "--quiet", "preview", "/tmp/x.html"}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := daemonArgsFromCliArgs(key, tc.cliArgs)
+			if len(got) != len(tc.want) {
+				t.Fatalf("got %v, want %v", got, tc.want)
+			}
+			for i := range got {
+				if got[i] != tc.want[i] {
+					t.Fatalf("got %v, want %v", got, tc.want)
+				}
+			}
+		})
+	}
+}

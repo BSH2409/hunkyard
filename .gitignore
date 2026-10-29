@@ -1,0 +1,22 @@
+# Compiled binary
+/hunkyard
+/hunkyard.exe
+*.test
+
+# Review session files (generated at runtime)
+*.comments.json
+*.review.md
+.hunkyard/
+
+# Dependencies
+node_modules/
+.worktrees/
+
+# Playwright test artifacts
+test-results/
+
+# Agents: Codex, Claude etc
+.codex
+.agents
+.mcp.json
+.design-exploration/

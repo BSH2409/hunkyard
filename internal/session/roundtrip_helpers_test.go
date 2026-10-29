@@ -1,0 +1,479 @@
+//go:build e2e_github
+
+package session
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+)
+
+// init runs before TestMain swaps HOME for a temp dir (testutil.RunWithTempHome).
+// gh reads its hosts and keychain token via the real HOME, so capture the
+// token now and pass it on as GH_TOKEN to gh and the hunkyard binary.
+func init() {
+	if os.Getenv("GH_TOKEN") != "" || os.Getenv("GITHUB_TOKEN") != "" {
+		return
+	}
+	out, err := exec.Command("gh", "auth", "token").Output()
+	if err != nil {
+		return
+	}
+	if token := strings.TrimSpace(string(out)); token != "" {
+		os.Setenv("GH_TOKEN", token)
+	}
+}
+
+// roundtripEnv holds the per-scenario state.
+type roundtripEnv struct {
+	t              *testing.T
+	repoSlug       string // e.g. "hunkyard-md/hunkyard-roundtrip-sandbox"
+	branch         string // unique per scenario
+	prNumber       int
+	workDir        string // temp clone dir
+	hunkyardBinary string
+}
+
+// newRoundtripEnv clones the sandbox into a temp dir, creates a unique
+// branch with a tiny diff against main, opens a PR, and registers cleanup
+// to close the PR + delete the branch. Skips when prerequisites are missing.
+func newRoundtripEnv(t *testing.T) *roundtripEnv {
+	t.Helper()
+	if _, err := exec.LookPath("gh"); err != nil {
+		t.Skip("gh not installed")
+	}
+	if err := exec.Command("gh", "auth", "status").Run(); err != nil {
+		t.Skip("gh not authenticated")
+	}
+	repo := os.Getenv("HUNKYARD_ROUNDTRIP_REPO")
+	if repo == "" {
+		t.Skip("HUNKYARD_ROUNDTRIP_REPO not set")
+	}
+	bin := os.Getenv("HUNKYARD_BINARY")
+	if bin == "" {
+		t.Skip("HUNKYARD_BINARY not set")
+	}
+
+	dir := t.TempDir()
+	branch := fmt.Sprintf("rt-%s-%d", sanitizeName(t.Name()), time.Now().UnixNano())
+
+	cloneURL := fmt.Sprintf("git@github.com:%s.git", repo)
+	if u := os.Getenv("HUNKYARD_ROUNDTRIP_CLONE_URL"); u != "" {
+		cloneURL = u
+	}
+	mustRun(t, dir, "git", "clone", "--depth", "1", cloneURL, ".")
+	mustRun(t, dir, "git", "config", "user.email", "reviewer@example.com")
+	mustRun(t, dir, "git", "config", "user.name", "hunkyard-roundtrip-bot")
+	mustRun(t, dir, "git", "checkout", "-b", branch)
+
+	if err := appendLine(filepath.Join(dir, "sample.go"), "\nfunc Mod(a, b int) int { return a % b }\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := appendLine(filepath.Join(dir, "sample.md"), "\n## Section D\nFirst paragraph in section D.\n"); err != nil {
+		t.Fatal(err)
+	}
+	mustRun(t, dir, "git", "commit", "-am", "add Mod and section D")
+	mustRun(t, dir, "git", "push", "-u", "origin", branch)
+
+	prURL := mustOutput(t, dir, "gh", "pr", "create",
+		"--repo", repo,
+		"--title", "roundtrip: "+t.Name(),
+		"--body", "automated test PR",
+		"--head", branch,
+		"--base", "main")
+	prNum := mustParsePRNumber(t, prURL)
+
+	env := &roundtripEnv{
+		t: t, repoSlug: repo, branch: branch, prNumber: prNum,
+		workDir: dir, hunkyardBinary: bin,
+	}
+
+	t.Cleanup(func() {
+		_ = exec.Command("gh", "pr", "close",
+			"--repo", repo, fmt.Sprint(prNum), "--delete-branch").Run()
+	})
+	return env
+}
+
+// runHunkyard runs the hunkyard binary inside the env workdir with the given args
+// and returns combined stdout+stderr. Fails the test on non-zero exit.
+func (e *roundtripEnv) runHunkyard(args ...string) string {
+	e.t.Helper()
+	cmd := exec.Command(e.hunkyardBinary, args...)
+	cmd.Dir = e.workDir
+	cmd.Env = append(os.Environ(), "GH_NO_UPDATE_NOTIFIER=1")
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		e.t.Fatalf("hunkyard %v failed: %v\noutput:\n%s",
+			args, err, out.String())
+	}
+	return out.String()
+}
+
+func (e *roundtripEnv) runHunkyardExpectExit(args ...string) (string, int) {
+	e.t.Helper()
+	cmd := exec.Command(e.hunkyardBinary, args...)
+	cmd.Dir = e.workDir
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	err := cmd.Run()
+	code := 0
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		code = exitErr.ExitCode()
+	} else if err != nil {
+		e.t.Fatalf("hunkyard %v: %v", args, err)
+	}
+	return out.String(), code
+}
+
+// reviewFile reads and unmarshals the review file hunkyard wrote for this branch
+// via `hunkyard status --json`.
+func (e *roundtripEnv) reviewFile() HunkyardJSON {
+	e.t.Helper()
+	out := e.runHunkyard("status", "--json")
+	var status struct {
+		ReviewPath string `json:"review_path"`
+		ReviewFile string `json:"review_file"`
+	}
+	if err := json.Unmarshal([]byte(out), &status); err != nil {
+		e.t.Fatalf("parse status JSON: %v\noutput:\n%s", err, out)
+	}
+	path := status.ReviewPath
+	if path == "" {
+		path = status.ReviewFile
+	}
+	if path == "" {
+		e.t.Fatalf("status JSON had no review_path/review_file:\n%s", out)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		e.t.Fatalf("read review file %s: %v", path, err)
+	}
+	var cj HunkyardJSON
+	if err := json.Unmarshal(data, &cj); err != nil {
+		e.t.Fatalf("parse review file: %v", err)
+	}
+	return cj
+}
+
+// editReviewFile loads the review file, applies mutate, and saves it.
+// Use to simulate what the daemon API would do for body edits / resolved flips.
+func (e *roundtripEnv) editReviewFile(mutate func(cj *HunkyardJSON)) {
+	e.t.Helper()
+	out := e.runHunkyard("status", "--json")
+	var status struct {
+		ReviewPath string `json:"review_path"`
+		ReviewFile string `json:"review_file"`
+	}
+	if err := json.Unmarshal([]byte(out), &status); err != nil {
+		e.t.Fatalf("parse status JSON: %v\noutput:\n%s", err, out)
+	}
+	path := status.ReviewPath
+	if path == "" {
+		path = status.ReviewFile
+	}
+	if path == "" {
+		e.t.Fatalf("status JSON had neither review_path nor review_file:\n%s", out)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		e.t.Fatalf("read review file: %v", err)
+	}
+	var cj HunkyardJSON
+	if err := json.Unmarshal(data, &cj); err != nil {
+		e.t.Fatalf("parse review file: %v", err)
+	}
+	mutate(&cj)
+	out2, err := json.MarshalIndent(&cj, "", "  ")
+	if err != nil {
+		e.t.Fatalf("marshal review file: %v", err)
+	}
+	if err := os.WriteFile(path, out2, 0644); err != nil {
+		e.t.Fatalf("write review file: %v", err)
+	}
+}
+
+// localComment is a flat (file, comment) view of the review file.
+type localComment struct {
+	Path    string
+	Comment Comment
+}
+
+func (e *roundtripEnv) allLocalComments() []localComment {
+	cj := e.reviewFile()
+	var out []localComment
+	for path, f := range cj.Files {
+		for _, c := range f.Comments {
+			out = append(out, localComment{Path: path, Comment: c})
+		}
+	}
+	return out
+}
+
+// remoteComment is a slim view of the GitHub review-comment API payload.
+type remoteComment struct {
+	ID        int64  `json:"id"`
+	InReplyTo int64  `json:"in_reply_to_id"`
+	Path      string `json:"path"`
+	Line      int    `json:"line"`
+	StartLine int    `json:"start_line"`
+	Body      string `json:"body"`
+	UserLogin string `json:"-"`
+	RawUser   struct {
+		Login string `json:"login"`
+	} `json:"user"`
+}
+
+func (e *roundtripEnv) listRemoteComments() []remoteComment {
+	e.t.Helper()
+	out := mustOutput(e.t, e.workDir, "gh", "api",
+		fmt.Sprintf("repos/%s/pulls/%d/comments?per_page=100", e.repoSlug, e.prNumber))
+	var raw []remoteComment
+	if err := json.Unmarshal([]byte(out), &raw); err != nil {
+		e.t.Fatalf("parse remote comments: %v\n%s", err, out)
+	}
+	for i := range raw {
+		raw[i].UserLogin = raw[i].RawUser.Login
+	}
+	return raw
+}
+
+func (e *roundtripEnv) postRemoteComment(path string, line int, body string) int64 {
+	e.t.Helper()
+	headSHA := strings.TrimSpace(mustOutput(e.t, e.workDir,
+		"git", "rev-parse", "HEAD"))
+	payload := map[string]any{
+		"body":      body,
+		"commit_id": headSHA,
+		"path":      path,
+		"line":      line,
+		"side":      "RIGHT",
+	}
+	buf, _ := json.Marshal(payload)
+	cmd := exec.Command("gh", "api",
+		fmt.Sprintf("repos/%s/pulls/%d/comments", e.repoSlug, e.prNumber),
+		"--method", "POST", "--input", "-")
+	cmd.Stdin = bytes.NewReader(buf)
+	cmd.Dir = e.workDir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		e.t.Fatalf("post remote comment: %v\n%s", err, out)
+	}
+	var resp struct {
+		ID int64 `json:"id"`
+	}
+	if err := json.Unmarshal(out, &resp); err != nil {
+		e.t.Fatalf("parse remote-comment response: %v\n%s", err, out)
+	}
+	return resp.ID
+}
+
+// postRemoteReply posts a reply on GitHub. The gh call has flaked with an
+// empty body ("unexpected end of JSON input"), so it is retried. A failed
+// call may still have created the reply, so before each retry it looks the
+// reply up first instead of posting a duplicate.
+func (e *roundtripEnv) postRemoteReply(parentID int64, body string) int64 {
+	e.t.Helper()
+	payload := map[string]any{"body": body, "in_reply_to": parentID}
+	buf, _ := json.Marshal(payload)
+	const attempts = 3
+	var lastErr error
+	var lastOut []byte
+	for attempt := 1; attempt <= attempts; attempt++ {
+		if attempt > 1 {
+			time.Sleep(time.Duration(attempt-1) * time.Second)
+			if id := e.findRemoteReply(parentID, body); id != 0 {
+				return id
+			}
+		}
+		cmd := exec.Command("gh", "api",
+			fmt.Sprintf("repos/%s/pulls/%d/comments", e.repoSlug, e.prNumber),
+			"--method", "POST", "--input", "-")
+		cmd.Stdin = bytes.NewReader(buf)
+		cmd.Dir = e.workDir
+		out, err := cmd.CombinedOutput()
+		lastOut = out
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		var resp struct {
+			ID int64 `json:"id"`
+		}
+		if err := json.Unmarshal(out, &resp); err != nil {
+			lastErr = err
+			continue
+		}
+		if resp.ID != 0 {
+			return resp.ID
+		}
+		lastErr = fmt.Errorf("response has no id")
+	}
+	e.t.Fatalf("post remote reply after %d attempts: %v\n%s", attempts, lastErr, lastOut)
+	return 0
+}
+
+// findRemoteReply returns the id of the reply to parentID with this body,
+// or 0 when there is none or the lookup fails.
+func (e *roundtripEnv) findRemoteReply(parentID int64, body string) int64 {
+	cmd := exec.Command("gh", "api", "--paginate",
+		fmt.Sprintf("repos/%s/pulls/%d/comments", e.repoSlug, e.prNumber),
+		"--jq", ".[] | {id, in_reply_to_id, body}")
+	cmd.Dir = e.workDir
+	out, err := cmd.Output()
+	if err != nil {
+		return 0
+	}
+	dec := json.NewDecoder(bytes.NewReader(out))
+	for dec.More() {
+		var c struct {
+			ID          int64  `json:"id"`
+			InReplyToID int64  `json:"in_reply_to_id"`
+			Body        string `json:"body"`
+		}
+		if err := dec.Decode(&c); err != nil {
+			return 0
+		}
+		if c.InReplyToID == parentID && c.Body == body {
+			return c.ID
+		}
+	}
+	return 0
+}
+
+// --- low-level helpers ---
+
+func mustRun(t *testing.T, dir, name string, args ...string) {
+	t.Helper()
+	cmd := exec.CommandContext(context.Background(), name, args...)
+	cmd.Dir = dir
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("%s %v failed in %s: %v\n%s", name, args, dir, err, out)
+	}
+}
+
+func mustOutput(t *testing.T, dir, name string, args ...string) string {
+	t.Helper()
+	cmd := exec.Command(name, args...)
+	cmd.Dir = dir
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("%s %v failed in %s: %v\n%s", name, args, dir, err, out)
+	}
+	return string(out)
+}
+
+func appendLine(path, text string) error {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0644)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	_, err = f.WriteString(text)
+	return err
+}
+
+func mustParsePRNumber(t *testing.T, prURL string) int {
+	t.Helper()
+	prURL = strings.TrimSpace(prURL)
+	idx := strings.LastIndex(prURL, "/")
+	if idx < 0 {
+		t.Fatalf("cannot parse PR number from %q", prURL)
+	}
+	n, err := strconv.Atoi(prURL[idx+1:])
+	if err != nil {
+		t.Fatalf("cannot parse PR number from %q: %v", prURL, err)
+	}
+	return n
+}
+
+// freshClone makes another clone of the same PR's branch in a new tempdir,
+// independent of the original env's workdir/review-file state. Use to
+// simulate "user B" picking up a PR.
+func (e *roundtripEnv) freshClone() *roundtripEnv {
+	e.t.Helper()
+	dir := e.t.TempDir()
+	cloneURL := fmt.Sprintf("git@github.com:%s.git", e.repoSlug)
+	if v := os.Getenv("HUNKYARD_ROUNDTRIP_CLONE_URL"); v != "" {
+		cloneURL = v
+	}
+	mustRun(e.t, dir, "git", "clone", "--depth", "1", "--branch", e.branch,
+		cloneURL, ".")
+	mustRun(e.t, dir, "git", "config", "user.email", "userb@example.com")
+	mustRun(e.t, dir, "git", "config", "user.name", "user-b")
+	return &roundtripEnv{
+		t: e.t, repoSlug: e.repoSlug, branch: e.branch, prNumber: e.prNumber,
+		workDir: dir, hunkyardBinary: e.hunkyardBinary,
+	}
+}
+
+// gitPush runs `git push` with args in the env workdir, then waits until
+// GitHub reports the pushed commit as the PR head. Use this for every push
+// to the PR branch after the PR exists.
+//
+// GitHub processes a push to a PR branch asynchronously. Until it does, the
+// PR head and diff still point at the old commit, and a review that comments
+// on a line only the new commit has is rejected with HTTP 422
+// {"errors":["Line could not be resolved"]}. Waiting for
+// head.sha is enough: once it matches, reviews on the new lines post. Do not
+// wait on "mergeable" as well; GitHub computes it lazily and it can stay
+// null for over a minute.
+func (e *roundtripEnv) gitPush(args ...string) {
+	e.t.Helper()
+	mustRun(e.t, e.workDir, "git", append([]string{"push"}, args...)...)
+	e.waitForPRHeadSHA(mustOutput(e.t, e.workDir, "git", "rev-parse", "HEAD"))
+}
+
+// waitForPRHeadSHA polls the PR's head.sha until it matches expected, or
+// fails the test after a timeout. See gitPush for why.
+func (e *roundtripEnv) waitForPRHeadSHA(expected string) {
+	e.t.Helper()
+	expected = strings.TrimSpace(expected)
+	deadline := time.Now().Add(60 * time.Second)
+	var lastSHA string
+	for time.Now().Before(deadline) {
+		out := mustOutput(e.t, e.workDir, "gh", "api",
+			fmt.Sprintf("repos/%s/pulls/%d", e.repoSlug, e.prNumber))
+		var resp struct {
+			Head struct {
+				SHA string `json:"sha"`
+			} `json:"head"`
+		}
+		if err := json.Unmarshal([]byte(out), &resp); err == nil {
+			lastSHA = resp.Head.SHA
+			if lastSHA == expected {
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	e.t.Fatalf("PR head sha did not converge to %s within timeout (last seen: %s)",
+		expected, lastSHA)
+}
+
+func sanitizeName(s string) string {
+	s = strings.ReplaceAll(s, "/", "-")
+	s = strings.ReplaceAll(s, " ", "-")
+	if len(s) > 30 {
+		s = s[:30]
+	}
+	return s
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "…"
+}

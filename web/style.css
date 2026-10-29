@@ -1,0 +1,6583 @@
+/* ===== CSS Reset ===== */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+/* Layout variables */
+:root {
+  --content-width: 1040px;
+}
+[data-width="compact"] { --content-width: 840px; }
+[data-width="default"] { --content-width: 1040px; }
+[data-width="wide"]    { --content-width: 1280px; }
+
+/* ===== Base ===== */
+html {
+  font-size: 16px;
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: var(--hunkyard-font-body);
+  background: var(--hunkyard-editor-bg);
+  color: var(--hunkyard-editor-fg);
+  line-height: 1.7;
+  /* Pierre diffs/files default to 2-column tabs; keep the browser's 8 that
+     Hunkyard's code views (and GitHub) have always used. */
+  --diffs-tab-size: 8;
+  --diffs-font-size: 12px;
+  --diffs-line-height: 20px;
+  /* Pierre code (review list, story chapters, theme preview) uses the
+     code font setting. */
+  --diffs-font-family: var(--hunkyard-font-code, var(--hunkyard-font-mono));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ===== Scrollbar ===== */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--hunkyard-editor-scrollbar-bg); }
+::-webkit-scrollbar-thumb { background: var(--hunkyard-editor-scrollbar-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--hunkyard-editor-fg-muted); }
+
+/* ===== Header ===== */
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  background: var(--hunkyard-bg-card);
+  border-bottom: 1px solid var(--hunkyard-border);
+  padding: 12px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.header-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.header-title {
+  display: flex;
+  align-items: center;
+  color: var(--hunkyard-logo-fg);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.header-title .header-logo-dot {
+  color: var(--hunkyard-logo-dot);
+}
+
+/* Compare rail — wraps base picker, arrow, branch chip, stack chip, resume pill.
+   In working-tree mode the rail reads "base ← head" (compare-bar idiom).
+   In stack mode the rail's branch chip + stack chip merge into a single
+   segmented composite via .compare-rail.is-stack adjacent-sibling rules. */
+.compare-rail {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.header-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+  color: var(--hunkyard-brand);
+  background: var(--hunkyard-brand-subtle);
+  border: 1px solid var(--hunkyard-brand-bg);
+  padding: 3px 10px;
+  border-radius: 6px;
+  height: 24px;
+  line-height: 1;
+  white-space: nowrap;
+  min-width: 0;
+}
+/* Brand-tint variant — used by the active branch (head) chip. */
+.header-chip.header-context {
+  color: var(--hunkyard-brand);
+  background: var(--hunkyard-brand-subtle);
+  border-color: var(--hunkyard-brand-bg);
+}
+.header-chip.header-context .branch-icon { opacity: 1; }
+.header-chip.header-context #branchName {
+  max-width: 38ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.branch-icon {
+  display: flex;
+  align-items: center;
+  opacity: 0.85;
+}
+.branch-icon svg { width: 14px; height: 14px; }
+
+/* Base branch picker (header-left, before branch name) */
+.base-branch-picker {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+/* Compare arrow ← between base and head. */
+.compare-rail-arrow {
+  color: var(--hunkyard-rail-arrow);
+  flex-shrink: 0;
+}
+.base-branch-btn {
+  gap: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  line-height: 1.4;
+  transition: background 0.1s, border-color 0.1s;
+}
+.compare-target-prefix {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--hunkyard-editor-fg-muted);
+  flex-shrink: 0;
+}
+.compare-target-tabs {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+.compare-target-tab {
+  flex: 1;
+  padding: 4px 6px;
+  font-size: 11px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+}
+.compare-target-tab:hover { background: var(--hunkyard-editor-bg-hover); }
+.compare-target-tab.active {
+  background: var(--hunkyard-editor-bg-hover);
+  color: var(--hunkyard-editor-fg);
+  font-weight: 500;
+}
+.compare-target-use-custom {
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+.compare-target-use-custom button {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  text-align: left;
+  font-size: 12px;
+  border: none;
+  background: transparent;
+  color: var(--hunkyard-editor-fg);
+  cursor: pointer;
+}
+.compare-target-use-custom button:hover { background: var(--hunkyard-editor-bg-hover); }
+.compare-target-group-label {
+  padding: 6px 10px 2px;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.compare-target-detected {
+  font-size: 10px;
+  color: var(--hunkyard-editor-fg-muted);
+  margin-left: 6px;
+}
+.base-branch-btn:hover {
+  background: var(--hunkyard-pill-bg-hover);
+  border-color: var(--hunkyard-border-strong);
+}
+.base-branch-label {
+  max-width: 160px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.base-branch-chevron {
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.base-branch-picker.open .base-branch-chevron { transform: rotate(180deg); }
+.base-branch-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  min-width: 260px;
+  max-width: 320px;
+  max-height: 320px;
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 200;
+  overflow: hidden;
+}
+.base-branch-picker.open .base-branch-menu { display: block; }
+.base-branch-search {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  font-size: 12px;
+  font-family: var(--hunkyard-font-mono);
+  border: none;
+  border-bottom: 1px solid var(--hunkyard-border);
+  background: var(--hunkyard-editor-bg-elevated);
+  color: var(--hunkyard-editor-fg);
+  outline: none;
+}
+.base-branch-search::placeholder { color: var(--hunkyard-editor-fg-muted); }
+.base-branch-list {
+  overflow-y: auto;
+  max-height: 260px;
+  padding: 4px;
+}
+.base-branch-item {
+  padding: 5px 8px;
+  font-size: 12px;
+  font-family: var(--hunkyard-font-mono);
+  color: var(--hunkyard-editor-fg);
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.base-branch-item:hover, .base-branch-item.highlighted { background: var(--hunkyard-editor-bg-hover); }
+.base-branch-item.active {
+  background: var(--hunkyard-brand-subtle);
+  color: var(--hunkyard-brand);
+  font-weight: 600;
+}
+.base-branch-item.active.highlighted { background: var(--hunkyard-brand-bg); }
+
+@media print {
+  .pr-toggle-btn { display: none; }
+}
+
+/* PR overview toggle button (header-right) */
+.pr-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 3px 10px;
+  cursor: pointer;
+  color: var(--hunkyard-brand);
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+  transition: background 0.15s;
+}
+.pr-toggle-btn:hover {
+  background: var(--hunkyard-brand-subtle);
+}
+.pr-toggle-icon {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+.pr-toggle-number {
+  font-weight: 500;
+}
+.pr-toggle-btn.pr-toggle-draft {
+  color: var(--hunkyard-yellow);
+}
+.pr-toggle-btn.pr-toggle-draft:hover {
+  background: var(--hunkyard-yellow-subtle);
+}
+
+.header-notify {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--hunkyard-green);
+}
+
+/* ===== Update Button ===== */
+.update-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  color: var(--hunkyard-green);
+  font-size: 13px;
+  padding: 5px 6px;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.update-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  flex-shrink: 0;
+}
+.update-btn:hover {
+  color: var(--hunkyard-green);
+}
+.update-btn-label {
+  font-size: 12px;
+  font-weight: 500;
+}
+@media (max-width: 860px) {
+  .update-btn-label { display: none; }
+  .update-btn { padding: 5px; }
+}
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.viewed-count {
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+  font-weight: 500;
+}
+.viewed-count.all-viewed {
+  color: var(--hunkyard-green);
+}
+
+.comment-count-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--hunkyard-brand);
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+}
+.comment-count-btn:hover { background: var(--hunkyard-brand-subtle); }
+.comment-count-btn:focus-visible { outline: 2px solid var(--hunkyard-brand); outline-offset: 1px; }
+.comment-count-resolved { color: var(--hunkyard-editor-fg-muted); opacity: 0.45; }
+.comment-count-resolved:hover { opacity: 1; background: var(--hunkyard-editor-bg-elevated); }
+.comment-count-icon { width: 16px; height: 16px; display: block; }
+.comment-count-number { font-size: 12px; font-weight: 600; margin-left: 2px; line-height: 1; }
+
+.comment-nav-group { display: flex; align-items: center; }
+.comment-nav-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-muted);
+  border-radius: 4px;
+  transition: color 0.15s, background 0.15s;
+  line-height: 0;
+}
+.comment-nav-btn:hover { color: var(--hunkyard-editor-fg); background: var(--hunkyard-editor-bg-hover); }
+.comment-nav-btn:focus-visible { outline: 2px solid var(--hunkyard-brand); outline-offset: 1px; }
+.comment-nav-btn svg { width: 14px; height: 14px; display: block; }
+.comment-nav-group.has-comments .comment-nav-btn { display: flex; }
+.comment-nav-highlight {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 3px;
+  border-radius: 6px;
+  transition: outline-color 1s ease;
+}
+
+.btn {
+  font-family: var(--hunkyard-font-body);
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: var(--hunkyard-r-md);
+  cursor: pointer;
+  background: var(--hunkyard-bg-elevated);
+  color: var(--hunkyard-fg-primary);
+  transition: all var(--hunkyard-dur-fast) var(--hunkyard-ease);
+}
+.btn:hover { background: var(--hunkyard-editor-bg-hover); }
+.btn:focus-visible { box-shadow: var(--hunkyard-focus); }
+
+.btn-primary {
+  background: var(--hunkyard-brand-cta);
+  color: var(--hunkyard-fg-on-cta);
+  border-color: var(--hunkyard-brand-cta);
+  border-radius: var(--hunkyard-r-lg);
+  font-weight: 700;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.15);
+  transition: all var(--hunkyard-dur-fast) var(--hunkyard-ease);
+}
+.btn-primary:hover {
+  background: var(--hunkyard-brand-cta-hover);
+  box-shadow: 0 2px 6px rgba(0,0,0,0.2);
+}
+
+
+.btn-sm {
+  font-size: 12px;
+  padding: 3px 10px;
+}
+
+.theme-toggle,
+.ft-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 7px;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-muted);
+  transition: all 0.15s;
+}
+.theme-toggle svg,
+.ft-toggle svg { width: 16px; height: 16px; display: block; }
+.theme-toggle:hover,
+.ft-toggle:hover { color: var(--hunkyard-editor-fg); background: var(--hunkyard-editor-bg-hover); }
+
+/* ===== Project-prompt trust dialog ===== */
+.ppt-overlay {
+  display: flex;
+  position: fixed;
+  inset: 0;
+  background: var(--hunkyard-overlay-bg);
+  z-index: 400;
+  align-items: center;
+  justify-content: center;
+}
+.ppt-dialog {
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 14px;
+  width: 100%;
+  max-width: 560px;
+  box-shadow: var(--hunkyard-shadow);
+  overflow: hidden;
+  padding: 28px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.ppt-headline {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -0.015em;
+  color: var(--hunkyard-green);
+  margin: 0;
+  line-height: 1.2;
+}
+.ppt-sub {
+  font-size: 13px;
+  line-height: 1.55;
+  color: var(--hunkyard-fg-secondary);
+  margin: 0;
+}
+.ppt-sub a {
+  color: var(--hunkyard-brand);
+  text-decoration: none;
+}
+.ppt-sub a:hover { text-decoration: underline; }
+.ppt-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-evenly;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 4px;
+}
+.ppt-link-btn {
+  background: transparent;
+  border: 0;
+  color: var(--hunkyard-fg-secondary);
+  font: inherit;
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: color 120ms, background 120ms;
+}
+.ppt-link-btn:hover { color: var(--hunkyard-fg-primary); background: var(--hunkyard-bg-elevated); }
+.ppt-primary-btn { background: var(--hunkyard-brand-cta); border: 1px solid transparent; color: var(--hunkyard-fg-on-brand); font: inherit; font-size: 12px; font-weight: 600; padding: 7px 16px; border-radius: 6px; cursor: pointer; transition: background 100ms; line-height: 1; white-space: nowrap; }
+.ppt-primary-btn:hover { background: var(--hunkyard-brand-cta-hover); }
+.ppt-primary-btn:disabled { opacity: 0.5; cursor: default; }
+.ppt-primary-btn:focus-visible { outline: 2px solid var(--hunkyard-focus-ring); outline-offset: -2px; }
+.ppt-sources { margin: 0; padding-left: 1.2rem; font-size: 12px; color: var(--hunkyard-fg-muted); }
+.ppt-preview {
+  max-height: 220px;
+  overflow: auto;
+  margin: 0;
+  padding: 12px;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  background: var(--hunkyard-bg-elevated);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+}
+
+/* ===== Document Container ===== */
+.document-wrapper {
+  max-width: var(--content-width);
+  margin: 0 auto;
+  padding: 32px 0 120px 0;
+}
+
+/* ===== Line Blocks ===== */
+.line-block {
+  position: relative;
+  display: flex;
+}
+
+.line-block:hover { background: var(--hunkyard-brand-subtle); }
+
+.line-block.has-comment {
+  background: var(--hunkyard-comment-range-bg);
+}
+
+.line-block.selected,
+.line-block.form-selected {
+  background: var(--hunkyard-brand-subtle);
+}
+
+.line-block.focused {
+  background: var(--hunkyard-line-focus-bg);
+  box-shadow: inset 2px 0 0 var(--hunkyard-brand);
+}
+.line-block.focused .line-gutter { background: var(--hunkyard-line-focus-bg); }
+
+/* Visual line mode (Shift+V) in a rendered document: recolor the focused
+   block's left accent so it's clearly distinct from the default j/k cursor,
+   signalling that j/k now extends the selection. Uses a dedicated
+   --hunkyard-visual-accent so we don't conflate it with --hunkyard-orange
+   (modified-line indicator) or --hunkyard-yellow (modified-file badges). Diffs
+   show the visual range with Pierre's line selection. */
+body.visual-mode .line-block.focused {
+  box-shadow: inset 3px 0 0 var(--hunkyard-visual-accent);
+}
+
+.line-block.line-block-added {
+  box-shadow: inset 2px 0 0 var(--hunkyard-green);
+}
+.line-block.line-block-modified {
+  box-shadow: inset 2px 0 0 var(--hunkyard-orange);
+}
+
+.deletion-marker {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 0 12px;
+  height: 22px;
+  color: var(--hunkyard-red);
+  font-size: 11px;
+  font-family: var(--hunkyard-font-mono);
+  opacity: 0.7;
+  user-select: none;
+}
+.deletion-marker::before {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--hunkyard-red);
+  opacity: 0.4;
+}
+
+@keyframes change-flash {
+  0%, 15% { background-color: var(--hunkyard-change-flash-bg); }
+  100% { background-color: transparent; }
+}
+.line-block.change-flash {
+  animation: change-flash 1s ease-out;
+}
+.deletion-marker.change-flash {
+  animation: change-flash 1s ease-out;
+}
+.native-table-annotation.change-flash .deletion-marker {
+  animation: change-flash 1s ease-out;
+}
+
+/* ===== Gutter ===== */
+.line-gutter {
+  min-width: 44px;
+  padding: 0 4px 0 8px;
+  text-align: right;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+  line-height: inherit;
+  color: var(--hunkyard-editor-fg-muted);
+  user-select: none;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: flex-end;
+}
+/* Document view: overlay comment button on line gutter instead of separate column */
+.document-wrapper .line-comment-gutter {
+  position: absolute;
+  right: -10px;
+  top: 0;
+  bottom: 0;
+  width: 20px;
+  margin: 0;
+  padding-top: 1px;
+}
+.document-wrapper .line-gutter {
+  position: relative;
+  padding-top: 1px;
+}
+
+/* Comment gutter — separate column between line numbers and content */
+.line-comment-gutter {
+  position: relative;
+  width: 24px;
+  margin-left: -12px;
+  margin-right: -12px;
+  z-index: 5;
+  flex-shrink: 0;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 1px;
+  cursor: pointer;
+}
+
+/* During drag */
+body.dragging { user-select: none; cursor: grabbing; }
+
+/* Desktop only: reveal the blue + button on hover or while dragging.
+   These rules live inside @media (pointer: fine) because the touch
+   affordance is the ::before `+` prefix on .line-num (F3), and the
+   blue button must NOT render at all on touch (see the .line-add base
+   rule below — display:none by default, display:flex only on desktop).
+   Without this guard, touch tap can briefly flash the blue button while
+   .drag-endpoint is set during the pointerdown -> form-render gap. */
+@media (pointer: fine) {
+  .line-comment-gutter:hover .line-add { opacity: 1; pointer-events: auto; }
+  body.dragging .line-comment-gutter.drag-endpoint .line-add { opacity: 1; pointer-events: none; }
+  body.dragging .line-comment-gutter:not(.drag-endpoint) .line-add { opacity: 0; pointer-events: none; }
+}
+
+.line-num {
+  padding-top: 1px;
+  line-height: inherit;
+}
+/* "Line numbers: Off" hides rendered-markdown gutter numbers too. The gutter
+   keeps its width, its "+" and its click target; on touch the "+" cue
+   (.line-num::before) stays visible. */
+[data-line-numbers="off"] .line-num { visibility: hidden; }
+[data-line-numbers="off"] .line-num::before { visibility: visible; }
+
+/* Blue + button in the document comment gutter. display:none by default
+   so it never renders on touch (the touch affordance is the F3 ::before
+   `+` prefix). Desktop unhides it via @media (pointer: fine) below. */
+.line-add {
+  display: none;
+}
+@media (pointer: fine) {
+  .line-add {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    border-radius: 4px;
+    background: var(--hunkyard-brand);
+    color: var(--hunkyard-fg-on-brand);
+    font-size: 14px;
+    font-weight: 700;
+    line-height: 1;
+    opacity: 0;
+    pointer-events: none;
+  }
+}
+
+/* ===== Line Content (rendered markdown) ===== */
+.line-content {
+  flex: 1;
+  min-width: 0;
+  padding: 0 24px 0 12px;
+  overflow-wrap: break-word;
+}
+
+/* ===== Markdown Styles ===== */
+/* Heading/paragraph top spacing lives on the .line-block row (see the
+   .line-block:has(...) rules below), NOT as margin-top on the heading itself.
+   A margin-top here would push the rendered text down inside the flex row
+   while the gutter line-number stays pinned at the row top (align-items:
+   flex-start), misaligning the number with its text. Putting the
+   spacing on the row moves number and text down together, keeping them
+   aligned while preserving the breathing room above the block. */
+.line-content h1,
+.line-content h2,
+.line-content h3,
+.line-content h4,
+.line-content h5 {
+  color: var(--hunkyard-editor-fg);
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 0;
+}
+.line-content h6 {
+  font-weight: 600;
+  line-height: 1.3;
+  margin-top: 0;
+  font-size: 0.9rem;
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+/* Re-express the removed top spacing as row padding so the gutter number and
+   the heading text share the same top edge. */
+.line-block:has(> .line-content > h1),
+.line-block:has(> .line-content > h2),
+.line-block:has(> .line-content > h3),
+.line-block:has(> .line-content > h4),
+.line-block:has(> .line-content > h5),
+.line-block:has(> .line-content > h6) {
+  padding-top: 8px;
+}
+
+.line-content h1 { font-size: 1.8rem; padding-bottom: 8px; border-bottom: 1px solid var(--hunkyard-border); margin-bottom: 4px; }
+.line-content h2 { font-size: 1.45rem; padding-bottom: 6px; border-bottom: 1px solid var(--hunkyard-border); margin-bottom: 4px; }
+.line-content h3 { font-size: 1.2rem; }
+.line-content h4 { font-size: 1.05rem; }
+.line-content h5 { font-size: 0.95rem; color: var(--hunkyard-editor-fg-secondary); }
+
+.line-content h1,
+.line-content h2,
+.line-content h3,
+.line-content h4,
+.line-content h5,
+.line-content h6 { position: relative; }
+
+.line-content .heading-anchor {
+  opacity: 0;
+  margin-left: 6px;
+  color: var(--hunkyard-editor-fg-secondary);
+  text-decoration: none;
+  border: none;
+  border-bottom: none;
+  transition: opacity 0.15s;
+}
+.line-content .heading-anchor:hover { color: var(--hunkyard-brand); }
+.line-content .heading-anchor:focus-visible {
+  opacity: 1;
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 1px;
+}
+.line-content h1:hover .heading-anchor,
+.line-content h2:hover .heading-anchor,
+.line-content h3:hover .heading-anchor,
+.line-content h4:hover .heading-anchor,
+.line-content h5:hover .heading-anchor,
+.line-content h6:hover .heading-anchor { opacity: 1; }
+
+.heading-anchor-icon { display: inline-block; fill: currentColor; }
+.heading-anchor-copied { opacity: 1; color: var(--hunkyard-green); }
+
+.line-content p {
+  margin: 4px 0;
+}
+/* For a top-level paragraph (the block's own content element) move the top
+   spacing onto the row so the gutter number lines up with the first text line; keep the bottom margin for rhythm. Nested paragraphs (in lists,
+   blockquotes) keep the descendant margin above and are unaffected. */
+.line-content > p {
+  margin-top: 0;
+}
+.line-block:has(> .line-content > p) {
+  padding-top: 4px;
+}
+
+.line-content a {
+  color: var(--hunkyard-brand);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+  transition: border-color 0.15s;
+}
+.line-content a:hover { border-bottom-color: var(--hunkyard-brand); }
+
+.line-content code {
+  font-family: var(--hunkyard-font-code);
+  font-size: 0.88em;
+  background: var(--hunkyard-editor-code-bg);
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid var(--hunkyard-border);
+}
+
+.line-content pre {
+  margin: 6px 0;
+  padding: 16px;
+  background: var(--hunkyard-editor-code-bg);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  overflow-x: auto;
+  line-height: 1.5;
+}
+
+.line-content pre code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: 0.875rem;
+}
+
+/* === Per-line code blocks === */
+.line-content.code-line {
+  background: var(--hunkyard-editor-code-bg);
+  font-family: var(--hunkyard-font-code);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  padding-left: 16px;
+  padding-right: 16px;
+  border-left: 1px solid var(--hunkyard-border);
+  border-right: 1px solid var(--hunkyard-border);
+  overflow-x: auto;
+  white-space: pre;
+  scrollbar-width: none;
+}
+.line-content.code-line code {
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+}
+/* Wrap long code lines in document view (file-mode code files, markdown
+   fences) when the reader chose "Long code lines: Wrap" (Pierre applies the
+   same setting to diffs and code files; hunkyard-shared.js applyDisplayAttributes). */
+[data-code-overflow="wrap"] .document-wrapper .line-content.code-line {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin-left: 4px;
+}
+/* Full-file code document view — no borders */
+.document-wrapper.code-document .line-content.code-line {
+  border-left: none;
+  border-right: none;
+}
+.line-content.code-first {
+  border-top: 1px solid var(--hunkyard-border);
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  padding-top: 8px;
+  margin-top: 6px;
+}
+.line-content.code-last {
+  border-bottom: 1px solid var(--hunkyard-border);
+  border-bottom-left-radius: 8px;
+  border-bottom-right-radius: 8px;
+  padding-bottom: 8px;
+  margin-bottom: 6px;
+}
+/* The ``` / --- delimiter lines keep their rows (line number, gutter, comments)
+   but not their text: like GitHub, the reader sees only the code box, and
+   its first and last rows read as the box's top and bottom edge.
+   visibility (not display) keeps the row height and hides the backticks
+   from screen readers too. */
+.fence-marker {
+  visibility: hidden;
+  font-size: 0.8rem;
+}
+
+/* ===== Pluggable renderers (mermaid, user renderers) ===== */
+.line-content.render-block {
+  background: var(--hunkyard-editor-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  padding: 16px;
+  margin: 6px 0;
+  text-align: center;
+  min-height: 60px;
+}
+.hunkyard-render {
+  position: relative;
+}
+.hunkyard-render-output svg {
+  max-width: 100%;
+  height: auto;
+}
+.hunkyard-render-source {
+  text-align: left;
+}
+.hunkyard-render-error {
+  margin-bottom: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  text-align: left;
+  color: var(--hunkyard-red);
+  border: 1px dashed var(--hunkyard-red);
+  border-radius: 6px;
+}
+/* Diagram parts the renderer maps to source lines take a click to comment. */
+.hunkyard-render[data-hunkyard-anchorable] .hunkyard-render-output :is(g.node, g.cluster, .edgeLabel, .actor, .messageText, .statediagram-state, .classGroup) {
+  cursor: pointer;
+}
+
+/* Expand affordance on rendered diagrams. Always rendered (so keyboard
+   users can Tab to it) but transparent and non-interactive until the
+   diagram is hovered or the button itself takes focus; touch gets an
+   always-visible 44px target. Absolute positioning keeps it out of the
+   document flow, so showing it never shifts diagram layout. */
+.hunkyard-render-expand {
+  display: flex;
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+  line-height: 1;
+  color: var(--hunkyard-editor-fg-secondary);
+  background: var(--hunkyard-editor-bg-elevated);
+  border: 1px solid var(--hunkyard-border-strong);
+  border-radius: 6px;
+  cursor: pointer;
+  z-index: 2;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--hunkyard-dur-fast) var(--hunkyard-ease);
+}
+.hunkyard-render-expand:hover {
+  color: var(--hunkyard-editor-fg);
+  background: var(--hunkyard-editor-bg-hover);
+}
+.hunkyard-render-expand:focus-visible { box-shadow: var(--hunkyard-focus); }
+.line-content.render-block:hover .hunkyard-render-expand,
+.hunkyard-render:hover .hunkyard-render-expand,
+.hunkyard-render-expand:focus,
+.hunkyard-render-expand:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+@media (pointer: coarse) {
+  .hunkyard-render-expand {
+    opacity: 1;
+    pointer-events: auto;
+    min-width: 44px;
+    min-height: 44px;
+  }
+}
+
+/* ===== Diagram fullscreen overlay (GitHub-style pan/zoom, hunkyard-diagram-overlay.js) ===== */
+.diagram-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--hunkyard-overlay-bg);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  padding: 16px;
+}
+.diagram-overlay.active { display: flex; }
+.diagram-overlay-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  box-shadow: var(--hunkyard-shadow);
+}
+.diagram-overlay-zoom {
+  min-width: 52px;
+  text-align: center;
+  font-size: 13px;
+  color: var(--hunkyard-fg-secondary);
+  font-variant-numeric: tabular-nums;
+}
+.diagram-overlay-viewport {
+  flex: 1;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  background: var(--hunkyard-editor-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  cursor: grab;
+  touch-action: none;
+}
+.diagram-overlay-viewport.panning { cursor: grabbing; }
+/* Focused from script on pointerdown (keeps focus in the modal); never by Tab. */
+.diagram-overlay-viewport:focus { outline: none; }
+.diagram-overlay-canvas {
+  transform-origin: 0 0;
+  will-change: transform;
+  width: max-content;
+}
+.diagram-overlay-canvas svg {
+  display: block;
+  max-width: none;
+  height: auto;
+}
+@media (max-width: 768px) {
+  .diagram-overlay { padding: 8px; }
+  .diagram-overlay-toolbar { flex-wrap: wrap; justify-content: center; }
+}
+
+/* ===== Images ===== */
+.line-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 4px 0;
+}
+
+/* === Native rendered tables === */
+.native-table-wrapper {
+  width: 100%;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.native-table {
+  width: 100%;
+  max-width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  table-layout: auto;
+  font-size: 0.925rem;
+  margin: 0;
+}
+.native-table .line-block {
+  display: table-row;
+}
+.native-table-gutter {
+  position: relative;
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  vertical-align: top;
+}
+.native-table-gutter > .line-gutter {
+  position: absolute;
+  inset: 0;
+  box-sizing: border-box;
+  width: 44px;
+}
+.native-table th.line-content,
+.native-table td.line-content {
+  overflow-wrap: break-word;
+}
+.native-table th.line-content {
+  text-align: left;
+  font-weight: 600;
+  padding: 10px 14px;
+  color: var(--hunkyard-editor-fg-secondary);
+  border-bottom: 2px solid var(--hunkyard-border);
+}
+.native-table td.line-content {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+.native-table .line-content code {
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+}
+.native-table tbody tr.table-even td.line-content {
+  background: var(--hunkyard-table-stripe);
+}
+.native-table .line-block.has-comment > .line-content {
+  background: var(--hunkyard-comment-range-bg);
+}
+.native-table .line-block:hover > .line-content,
+.native-table .line-block.selected > .line-content,
+.native-table .line-block.form-selected > .line-content {
+  background: var(--hunkyard-brand-subtle);
+}
+.native-table .line-block.focused > .line-content {
+  background: var(--hunkyard-line-focus-bg);
+}
+.native-table .line-block.change-flash > .line-content {
+  animation: change-flash 1s ease-out;
+}
+.native-table .table-last td {
+  border-bottom: none;
+}
+.native-table-separator {
+  display: none !important;
+}
+.native-table-annotation > td {
+  padding: 0 24px 0 56px;
+}
+
+/* Rendered round diffs cannot group rows across the two diff sides, so their
+   per-row fallback tables share renderer-generated column widths. */
+.line-content.table-row table.split-table {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+  font-size: 0.925rem;
+  margin: 0;
+}
+.line-content.table-even td { background: var(--hunkyard-table-stripe); }
+.line-content.table-last td { border-bottom: none; }
+.line-content.table-separator { height: 0; padding: 0; overflow: hidden; }
+.line-block:has(.table-separator) { height: 0; overflow: hidden; min-height: 0; }
+
+.line-content blockquote {
+  margin: 6px 0;
+  padding: 8px 16px;
+  border-left: 3px solid var(--hunkyard-blockquote-border);
+  background: var(--hunkyard-blockquote-bg);
+  border-radius: 0 6px 6px 0;
+  color: var(--hunkyard-editor-fg-secondary);
+}
+
+.line-content blockquote p {
+  margin: 2px 0;
+}
+
+/* GitHub alerts (> [!NOTE] ...), in documents and comments. In documents
+   each source block is its own line block, so the pieces carry no vertical
+   margin and their borders join up. The Octicon is a CSS mask, which
+   sanitized comment HTML (no <svg>) keeps too. */
+:is(.line-content, .comment-body, .reply-body) .markdown-alert {
+  --hunkyard-alert-color: var(--hunkyard-alert-note);
+  --hunkyard-alert-icon: var(--hunkyard-alert-icon-note);
+  padding: 4px 16px;
+  border-left: 3px solid var(--hunkyard-alert-color);
+}
+:is(.line-content, .comment-body, .reply-body) .markdown-alert-tip { --hunkyard-alert-color: var(--hunkyard-alert-tip); --hunkyard-alert-icon: var(--hunkyard-alert-icon-tip); }
+:is(.line-content, .comment-body, .reply-body) .markdown-alert-important { --hunkyard-alert-color: var(--hunkyard-alert-important); --hunkyard-alert-icon: var(--hunkyard-alert-icon-important); }
+:is(.line-content, .comment-body, .reply-body) .markdown-alert-warning { --hunkyard-alert-color: var(--hunkyard-alert-warning); --hunkyard-alert-icon: var(--hunkyard-alert-icon-warning); }
+:is(.line-content, .comment-body, .reply-body) .markdown-alert-caution { --hunkyard-alert-color: var(--hunkyard-alert-caution); --hunkyard-alert-icon: var(--hunkyard-alert-icon-caution); }
+:is(.line-content, .comment-body, .reply-body) .markdown-alert p { margin: 2px 0; }
+:is(.line-content, .comment-body, .reply-body) .markdown-alert .markdown-alert-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 500;
+  color: var(--hunkyard-alert-color);
+}
+:is(.line-content, .comment-body, .reply-body) .markdown-alert .markdown-alert-title::before {
+  content: "";
+  flex: none;
+  width: 16px;
+  height: 16px;
+  background-color: currentcolor;
+  mask: var(--hunkyard-alert-icon) center / contain no-repeat;
+}
+.markdown-alert {
+  --hunkyard-alert-icon-note: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M0 8a8 8 0 1 1 16 0A8 8 0 0 1 0 8Zm8-6.5a6.5 6.5 0 1 0 0 13 6.5 6.5 0 0 0 0-13ZM6.5 7.75A.75.75 0 0 1 7.25 7h1a.75.75 0 0 1 .75.75v2.75h.25a.75.75 0 0 1 0 1.5h-2a.75.75 0 0 1 0-1.5h.25v-2h-.25a.75.75 0 0 1-.75-.75ZM8 6a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z'/%3E%3C/svg%3E");
+  --hunkyard-alert-icon-tip: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z'/%3E%3C/svg%3E");
+  --hunkyard-alert-icon-important: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v9.5A1.75 1.75 0 0 1 14.25 13H8.06l-2.573 2.573A1.458 1.458 0 0 1 3 14.543V13H1.75A1.75 1.75 0 0 1 0 11.25Zm1.75-.25a.25.25 0 0 0-.25.25v9.5c0 .138.112.25.25.25h2a.75.75 0 0 1 .75.75v2.19l2.72-2.72a.749.749 0 0 1 .53-.22h6.5a.25.25 0 0 0 .25-.25v-9.5a.25.25 0 0 0-.25-.25Zm7 2.25v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 9a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z'/%3E%3C/svg%3E");
+  --hunkyard-alert-icon-warning: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M6.457 1.047c.659-1.234 2.427-1.234 3.086 0l6.082 11.378A1.75 1.75 0 0 1 14.082 15H1.918a1.75 1.75 0 0 1-1.543-2.575Zm1.763.707a.25.25 0 0 0-.44 0L1.698 13.132a.25.25 0 0 0 .22.368h12.164a.25.25 0 0 0 .22-.368Zm.53 3.996v2.5a.75.75 0 0 1-1.5 0v-2.5a.75.75 0 0 1 1.5 0ZM9 11a1 1 0 1 1-2 0 1 1 0 0 1 2 0Z'/%3E%3C/svg%3E");
+  --hunkyard-alert-icon-caution: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M4.47.22A.749.749 0 0 1 5 0h6c.199 0 .389.079.53.22l4.25 4.25c.141.14.22.331.22.53v6a.749.749 0 0 1-.22.53l-4.25 4.25A.749.749 0 0 1 11 16H5a.749.749 0 0 1-.53-.22L.22 11.53A.749.749 0 0 1 0 11V5c0-.199.079-.389.22-.53Zm.84 1.28L1.5 5.31v5.38l3.81 3.81h5.38l3.81-3.81V5.31L10.69 1.5ZM8 4a.75.75 0 0 1 .75.75v3.5a.75.75 0 0 1-1.5 0v-3.5A.75.75 0 0 1 8 4Zm0 8a1 1 0 1 1 0-2 1 1 0 0 1 0 2Z'/%3E%3C/svg%3E");
+}
+
+/* Task lists: GitHub's disabled checkboxes, in documents and comments. Each
+   item's text is the <label> of its checkbox. */
+:is(.line-content, .comment-body, .reply-body) .task-list-item-label { cursor: text; }
+:is(.line-content, .comment-body, .reply-body) .contains-task-list { padding-left: 0; }
+:is(.comment-body, .reply-body) .task-list-item { list-style: none; }
+:is(.comment-body, .reply-body) .task-list-item-checkbox {
+  margin: 0 6px 0 0;
+  vertical-align: middle;
+  accent-color: var(--hunkyard-brand);
+}
+
+/* Math (KaTeX via hunkyard-math.js). Display formulas scroll sideways rather
+   than overflow; placeholders show the TeX source until KaTeX renders. */
+:is(.line-content, .comment-body, .reply-body) .math-block { margin: 8px 0; }
+:is(.line-content, .comment-body, .reply-body) .math-display { display: block; overflow: auto hidden; text-align: center; }
+:is(.line-content, .comment-body, .reply-body) .katex-display { margin: 0; }
+:is(.line-content, .comment-body, .reply-body) code.math-inline,
+:is(.line-content, .comment-body, .reply-body) code.math-display { white-space: pre-wrap; }
+:is(.line-content, .comment-body, .reply-body) code.math-display { text-align: left; }
+:is(.line-content, .comment-body, .reply-body) .katex-error { color: var(--hunkyard-alert-caution); }
+
+/* Footnotes render where they are defined, numbered by first reference. */
+.line-content .footnote-ref { font-size: 0.75em; line-height: 0; }
+.line-content .footnote {
+  display: flex;
+  gap: 8px;
+  font-size: 0.875em;
+  color: var(--hunkyard-editor-fg-secondary);
+}
+.line-content .footnote-number { flex: none; }
+.line-content .footnote-body { min-width: 0; }
+.line-content .footnote-body p { margin: 0; }
+.line-content .footnote-backref { flex: none; text-decoration: none; }
+.line-content :is(.footnote-ref a, .footnote-backref):focus-visible {
+  outline: 2px solid var(--hunkyard-focus-ring);
+  outline-offset: 2px;
+  border-radius: 2px;
+}
+
+.line-content ul,
+.line-content ol {
+  padding-left: 24px;
+  margin: 0;
+}
+
+.line-content li {
+  margin: 0;
+}
+
+.line-content li::marker {
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+.line-content ul li {
+  list-style-type: '  \2022  ';
+}
+
+/* Outer wrappers added when a nested list item is split into its own line block.
+   They preserve semantic nesting (so CSS indentation works) without rendering
+   their own bullet/marker. */
+.line-content ul.hunkyard-list-wrapper,
+.line-content ol.hunkyard-list-wrapper {
+  padding-left: 24px;
+  margin: 0;
+}
+.line-content li.hunkyard-list-wrapper {
+  list-style: none;
+}
+.line-content ul.hunkyard-list-wrapper > li.hunkyard-list-wrapper {
+  list-style-type: none;
+}
+
+.line-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.925rem;
+}
+
+.line-content th {
+  text-align: left;
+  font-weight: 600;
+  padding: 10px 14px;
+  border-bottom: 2px solid var(--hunkyard-border);
+  color: var(--hunkyard-editor-fg-secondary);
+}
+
+.line-content td {
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+
+.line-content tr:nth-child(even) td {
+  background: var(--hunkyard-table-stripe);
+}
+
+.line-content hr {
+  border: none;
+  height: 1px;
+  background: var(--hunkyard-border);
+  margin: 24px 0;
+}
+
+/* Task lists */
+.line-content .task-list-item {
+  list-style: none;
+  margin-left: -24px;
+  padding-left: 4px;
+}
+
+.line-content .task-list-item input[type="checkbox"] {
+  margin-right: 8px;
+  accent-color: var(--hunkyard-brand);
+  transform: scale(1.1);
+  pointer-events: none;
+}
+
+.line-content strong { font-weight: 600; }
+.line-content em { font-style: italic; color: var(--hunkyard-editor-fg-secondary); }
+
+/* Empty lines */
+.line-content.empty-line {
+  min-height: 1.7em;
+}
+
+/* ===== Comment Inline Box (displayed after submission) ===== */
+.comment-block {
+  padding: 0 0 0 56px;
+}
+.document-wrapper .comment-block {
+  padding-left: 0;
+}
+
+.comment-card {
+  margin: 6px 0;
+  border: 1px solid var(--hunkyard-border-comment);
+  border-radius: var(--hunkyard-r-md);
+  background: var(--hunkyard-editor-comment-bg);
+  overflow: hidden;
+  font-family: var(--hunkyard-font-body);
+}
+
+.comment-round-badge {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--hunkyard-editor-fg-muted);
+  font-family: var(--hunkyard-font-mono);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.comment-round-badge.round-current,
+.comment-round-badge.round-latest {
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+.comment-collapse-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-muted);
+  display: flex;
+  align-items: center;
+  transition: transform 0.15s ease;
+  flex-shrink: 0;
+}
+
+.comment-collapse-btn:hover {
+  color: var(--hunkyard-editor-fg);
+}
+
+.comment-card.collapsed .comment-collapse-btn {
+  transform: rotate(-90deg);
+}
+
+.comment-card.collapsed .comment-body,
+.comment-card.collapsed .comment-replies,
+.comment-card.collapsed .reply-form {
+  display: none;
+}
+
+.comment-card.collapsed .comment-header {
+  border-bottom: none;
+}
+
+.comment-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 14px;
+  background: var(--hunkyard-brand-subtle);
+  border-bottom: 1px solid var(--hunkyard-border);
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+.comment-header-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.comment-author-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px;
+  border-radius: 10px;
+  border: 1px solid;
+  white-space: nowrap;
+}
+
+/* Author colors — use CSS variables from theme.css */
+.author-color-0 { background: var(--author-0-bg); border-color: var(--author-0-border); color: var(--author-0-fg); }
+.author-color-1 { background: var(--author-1-bg); border-color: var(--author-1-border); color: var(--author-1-fg); }
+.author-color-2 { background: var(--author-2-bg); border-color: var(--author-2-border); color: var(--author-2-fg); }
+.author-color-3 { background: var(--author-3-bg); border-color: var(--author-3-border); color: var(--author-3-fg); }
+.author-color-4 { background: var(--author-4-bg); border-color: var(--author-4-border); color: var(--author-4-fg); }
+.author-color-5 { background: var(--author-5-bg); border-color: var(--author-5-border); color: var(--author-5-fg); }
+
+.comment-line-ref {
+  font-weight: 600;
+  color: var(--hunkyard-brand);
+  font-family: var(--hunkyard-font-mono);
+}
+
+.comment-actions {
+  display: flex;
+  gap: 2px;
+}
+
+.comment-actions button {
+  background: none;
+  border: none;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.comment-actions button svg { width: 13px; height: 13px; stroke-width: 1.5; opacity: 0.5; }
+.comment-actions button:hover svg { opacity: 1; }
+.comment-actions button:hover { color: var(--hunkyard-editor-fg); }
+.comment-actions .delete-btn:hover { color: var(--hunkyard-red); }
+.comment-actions .resolve-btn {
+  gap: 3px;
+  font-size: 11px;
+  padding: 1px 7px 1px 4px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+}
+.comment-actions .resolve-btn span { line-height: 1; }
+.comment-actions .resolve-btn svg { width: 12px; height: 12px; opacity: 0.7; flex-shrink: 0; }
+.comment-actions .resolve-btn:hover { color: var(--hunkyard-green); background: var(--hunkyard-resolve-hover-bg); }
+.comment-actions .resolve-btn:hover svg { opacity: 1; }
+.comment-actions .resolve-btn--active { border-color: var(--hunkyard-green); color: var(--hunkyard-green); opacity: 0.65; }
+.comment-actions .resolve-btn--active svg { opacity: 1; }
+.comment-actions .resolve-btn--active:hover { opacity: 1; }
+
+.quote-highlight {
+  color: inherit;
+  background: var(--hunkyard-quote-highlight-bg);
+  border-bottom: 1.5px solid var(--hunkyard-quote-highlight-border);
+  border-radius: 1px;
+  padding: 1px 0;
+}
+.comment-body {
+  padding: 10px 14px;
+  color: var(--hunkyard-editor-fg);
+  font-family: var(--hunkyard-font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  word-break: break-word;
+  overflow-x: auto;
+}
+.comment-body p { margin: 0 0 0.5em 0; }
+.comment-body p:last-child { margin-bottom: 0; }
+.comment-body code {
+  font-family: var(--hunkyard-font-code);
+  background: var(--hunkyard-editor-bg-elevated);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 0.9em;
+}
+.comment-body pre {
+  background: var(--hunkyard-editor-bg-elevated);
+  padding: 8px 10px;
+  border-radius: 4px;
+  overflow-x: auto;
+  margin: 0.5em 0;
+}
+.comment-body pre code { background: none; padding: 0; }
+.comment-body img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+  border: 1px solid var(--hunkyard-border);
+  margin: 4px 0;
+  display: block;
+}
+
+/* Suggestion diff inside comments */
+.suggestion-diff {
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  overflow: hidden;
+  margin: 8px 0;
+  font-family: var(--hunkyard-font-code);
+  font-size: 12px;
+  line-height: 20px;
+}
+.suggestion-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 12px;
+  background: var(--hunkyard-brand-subtle);
+  border-bottom: 1px solid var(--hunkyard-border);
+  font-family: var(--hunkyard-font-body);
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.suggestion-line {
+  display: flex;
+  padding: 0 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.suggestion-line-del {
+  background: var(--hunkyard-diff-del-line-bg);
+}
+.suggestion-line-add {
+  background: var(--hunkyard-diff-add-line-bg);
+}
+.suggestion-line-sign {
+  display: inline-block;
+  width: 20px;
+  flex-shrink: 0;
+  user-select: none;
+  text-align: center;
+}
+.suggestion-line-del .suggestion-line-sign { color: var(--hunkyard-red); }
+.suggestion-line-add .suggestion-line-sign { color: var(--hunkyard-green); }
+.suggestion-line-content {
+  flex: 1;
+  min-width: 0;
+}
+.comment-body ul, .comment-body ol { margin: 0.3em 0; padding-left: 1.5em; }
+.comment-body a {
+  color: var(--hunkyard-brand);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hunkyard-brand-subtle);
+  transition: color 0.15s, border-color 0.15s;
+}
+.comment-body a:hover {
+  color: var(--hunkyard-brand-hover);
+  border-bottom-color: var(--hunkyard-brand-hover);
+}
+.comment-body blockquote {
+  margin: 6px 0;
+  padding: 8px 16px;
+  border-left: 3px solid var(--hunkyard-blockquote-border);
+  background: var(--hunkyard-blockquote-bg);
+  border-radius: 0 6px 6px 0;
+  color: var(--hunkyard-editor-fg-secondary);
+}
+
+.comment-body blockquote p {
+  margin: 2px 0;
+}
+
+.comment-body hr,
+.reply-body hr {
+  border: none;
+  height: 1px;
+  background: var(--hunkyard-border);
+  margin: 24px 0;
+}
+
+/* Sanitized comment markdown keeps no classes, so key off the elements.
+   A comment card is narrow: cells take a full border, not row rules alone. */
+.comment-body table,
+.reply-body table {
+  border-collapse: collapse;
+  margin: 0.5em 0;
+  font-size: 0.95em;
+}
+
+.comment-body th,
+.comment-body td,
+.reply-body th,
+.reply-body td {
+  border: 1px solid var(--hunkyard-border);
+  padding: 4px 10px;
+  text-align: left;
+}
+
+.comment-body th,
+.reply-body th {
+  font-weight: 600;
+  background: var(--hunkyard-editor-bg-elevated);
+}
+
+.comment-body tbody tr:nth-child(even) td,
+.reply-body tbody tr:nth-child(even) td {
+  background: var(--hunkyard-table-stripe);
+}
+
+.comment-time {
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+/* ===== Thread Replies ===== */
+.comment-replies {
+  margin: 0;
+  border-top: 1px solid var(--hunkyard-border);
+  padding: 0;
+}
+
+
+.comment-reply {
+  padding: 6px 14px;
+}
+
+.comment-reply + .comment-reply {
+  border-top: 1px solid var(--hunkyard-border);
+}
+
+.reply-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+  font-size: 12px;
+}
+
+.reply-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.reply-time {
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 11px;
+}
+
+.reply-body {
+  font-family: var(--hunkyard-font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  overflow-x: auto;
+}
+
+.reply-body ul, .reply-body ol {
+  padding-left: 1.5em;
+  margin: 0.3em 0;
+}
+
+.reply-body blockquote {
+  margin: 6px 0;
+  padding: 8px 16px;
+  border-left: 3px solid var(--hunkyard-blockquote-border);
+  background: var(--hunkyard-blockquote-bg);
+  border-radius: 0 6px 6px 0;
+  color: var(--hunkyard-editor-fg-secondary);
+}
+
+.reply-body blockquote p {
+  margin: 2px 0;
+}
+
+.reply-body p {
+  margin: 0 0 0.3em 0;
+}
+
+.reply-body p:last-child {
+  margin-bottom: 0;
+}
+
+.reply-body code {
+  background: var(--hunkyard-editor-bg-elevated);
+  padding: 1px 5px;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+.reply-body pre {
+  background: var(--hunkyard-editor-bg-elevated);
+  padding: 6px 8px;
+  border-radius: 4px;
+  overflow-x: auto;
+  font-size: 12px;
+}
+
+.reply-body pre code {
+  background: none;
+  padding: 0;
+}
+
+.reply-body a {
+  color: var(--hunkyard-brand);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hunkyard-brand-subtle);
+  transition: color 0.15s, border-color 0.15s;
+}
+.reply-body a:hover {
+  color: var(--hunkyard-brand-hover);
+  border-bottom-color: var(--hunkyard-brand-hover);
+}
+
+.reply-actions {
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.comment-reply:hover .reply-actions {
+  opacity: 1;
+}
+
+.reply-actions button {
+  background: none;
+  border: none;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+}
+
+.reply-actions button svg {
+  width: 12px;
+  height: 12px;
+  stroke-width: 1.5;
+  opacity: 0.5;
+}
+
+.reply-actions button:hover svg {
+  opacity: 1;
+}
+
+.reply-actions button:hover {
+  color: var(--hunkyard-editor-fg);
+}
+
+.reply-actions .delete-btn:hover {
+  color: var(--hunkyard-red);
+}
+
+.reply-edit-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.reply-form {
+  margin: 0;
+  padding: 8px 14px 10px;
+  border-top: 1px solid var(--hunkyard-border);
+}
+
+.reply-input {
+  width: 100%;
+  padding: 6px 10px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  background: var(--hunkyard-editor-bg-elevated);
+  color: var(--hunkyard-editor-fg);
+  font-family: var(--hunkyard-font-body);
+  font-size: 14px;
+  cursor: text;
+}
+
+.reply-input::placeholder {
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+.reply-input:focus {
+  outline: none;
+  border-color: var(--hunkyard-brand);
+}
+
+.reply-form.expanded {
+  padding: 0;
+  border-top: none;
+  margin: 0;
+}
+
+.reply-form.expanded .reply-textarea {
+  display: block;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 14px;
+  border: none;
+  border-top: 1px solid var(--hunkyard-border);
+  border-radius: 0;
+  background: var(--hunkyard-editor-comment-bg);
+  color: var(--hunkyard-editor-fg);
+  font-family: var(--hunkyard-font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.reply-textarea:focus {
+  outline: none;
+}
+
+.reply-form-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--hunkyard-border);
+}
+
+/* Compact (unfocused): only the input shows; Cancel/Reply appear on expand. */
+.reply-form:not(.expanded) .reply-form-buttons {
+  display: none;
+}
+
+.comment-textarea {
+  width: 100%;
+  background: var(--hunkyard-editor-bg);
+  color: var(--hunkyard-editor-fg);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-family: var(--hunkyard-font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+/* ===== Comment Input Form ===== */
+.comment-form-wrapper {
+  padding: 0 0 0 56px;
+}
+.document-wrapper .comment-form-wrapper {
+  padding-left: 0;
+}
+
+.comment-form {
+  position: relative;
+  margin: 6px 0;
+  border: 1px solid var(--hunkyard-brand);
+  border-radius: var(--hunkyard-r-md);
+  background: var(--hunkyard-editor-comment-bg);
+  overflow: hidden;
+  box-shadow: 0 0 0 2px var(--hunkyard-brand-subtle);
+}
+
+.comment-form-header {
+  padding: 8px 14px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hunkyard-brand);
+  font-family: var(--hunkyard-font-mono);
+  background: var(--hunkyard-brand-subtle);
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+
+.comment-form textarea {
+  display: block;
+  width: 100%;
+  min-height: 80px;
+  padding: 10px 14px;
+  border: none;
+  background: var(--hunkyard-editor-comment-bg);
+  color: var(--hunkyard-editor-fg);
+  font-family: var(--hunkyard-font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  field-sizing: content;
+  outline: none;
+}
+
+.comment-form textarea::placeholder {
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+/* Highlight a textarea when an image file is being dragged over it.
+   Applied/removed by attachImageDragDrop in app.js. */
+textarea.drag-active {
+  outline: 2px dashed var(--hunkyard-brand);
+  outline-offset: -2px;
+  background: var(--hunkyard-brand-subtle);
+}
+
+.comment-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--hunkyard-border);
+}
+
+.comment-form-actions-left {
+  display: flex;
+  gap: 8px;
+  margin-right: auto;
+}
+
+.comment-template-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--hunkyard-border);
+  background: var(--hunkyard-editor-bg-card);
+}
+
+.template-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 2px 8px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 12px;
+  background: var(--hunkyard-editor-bg);
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  font-family: var(--hunkyard-font-body);
+  line-height: 1.4;
+  max-width: 220px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.template-chip-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.template-chip-delete {
+  display: inline;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--hunkyard-editor-fg-muted);
+  flex-shrink: 0;
+  line-height: 1;
+}
+.template-chip-delete:hover { color: var(--hunkyard-red); }
+
+.template-chip:hover {
+  border-color: var(--hunkyard-brand);
+  color: var(--hunkyard-brand);
+}
+
+/* ===== File Picker Dropdown ===== */
+.file-picker-dropdown {
+  position: fixed;
+  z-index: 1000;
+  max-height: 240px;
+  overflow-y: auto;
+  background: var(--hunkyard-editor-bg);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  box-shadow: var(--hunkyard-shadow);
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+}
+
+.file-picker-item {
+  padding: 6px 10px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--hunkyard-editor-fg);
+}
+
+.file-picker-item.active {
+  background: var(--hunkyard-brand-subtle);
+  color: var(--hunkyard-brand);
+}
+
+.file-picker-item:hover:not(.active) {
+  background: var(--hunkyard-editor-bg-hover);
+}
+
+.file-picker-dir {
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+/* ===== File Reference in Comments ===== */
+.file-ref {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 0.88em;
+  background: var(--hunkyard-editor-bg-elevated);
+  color: var(--hunkyard-brand);
+  padding: 1px 5px;
+  border-radius: 3px;
+  white-space: nowrap;
+}
+
+/* ===== Comment Reference Chip ===== */
+.comment-ref {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 0.92em;
+  color: var(--hunkyard-comment-ref-color);
+  text-decoration: none;
+  cursor: pointer;
+  border-radius: 3px;
+  padding: 0 1px;
+  margin: 0 -1px;
+  transition:
+    color var(--hunkyard-dur-fast) var(--hunkyard-ease),
+    background-color 1.6s var(--hunkyard-ease),
+    box-shadow 1.6s var(--hunkyard-ease);
+}
+.comment-ref:hover {
+  color: var(--hunkyard-comment-ref-color-hover);
+  text-decoration: underline;
+  text-decoration-color: var(--hunkyard-comment-ref-underline);
+  text-underline-offset: 2px;
+  text-decoration-thickness: 1px;
+}
+.comment-ref:focus-visible {
+  outline: 2px solid var(--hunkyard-comment-ref-color);
+  outline-offset: 2px;
+  text-decoration: none;
+}
+.comment-ref-flash {
+  animation: comment-ref-flash 1.6s var(--hunkyard-ease);
+}
+@keyframes comment-ref-flash {
+  0%   { background-color: var(--hunkyard-comment-ref-flash-bg); box-shadow: 0 0 0 2px var(--hunkyard-comment-ref-flash-ring); }
+  15%  { background-color: var(--hunkyard-comment-ref-flash-bg); box-shadow: 0 0 0 2px var(--hunkyard-comment-ref-flash-ring); }
+  100% { background-color: transparent; box-shadow: 0 0 0 2px transparent; }
+}
+
+/* ===== Save Template Dialog ===== */
+.save-template-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--hunkyard-overlay-bg);
+  z-index: 500;
+  align-items: center;
+  justify-content: center;
+}
+.save-template-overlay.active { display: flex; }
+
+.save-template-dialog {
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 12px;
+  padding: 24px;
+  max-width: 480px;
+  width: 90vw;
+  box-shadow: var(--hunkyard-shadow);
+}
+.save-template-dialog h3 {
+  margin: 0 0 8px;
+  font-size: 16px;
+  color: var(--hunkyard-editor-fg);
+}
+.save-template-dialog p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--hunkyard-editor-fg-secondary);
+}
+.save-template-input {
+  width: 100%;
+  padding: 8px 10px;
+  font-family: var(--hunkyard-font-body);
+  font-size: 13px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  background: var(--hunkyard-editor-bg);
+  color: var(--hunkyard-editor-fg);
+  resize: vertical;
+}
+.save-template-input:focus {
+  outline: none;
+  border-color: var(--hunkyard-brand);
+}
+.save-template-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+
+/* ===== Disconnected Banner ===== */
+.disconnected-banner {
+  position: sticky;
+  top: var(--hunkyard-header-height, 0px);
+  z-index: 99;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 24px;
+  background: var(--hunkyard-bg-card);
+  border-bottom: 1px solid var(--hunkyard-border);
+  animation: disconnected-banner-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+@keyframes disconnected-banner-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.disconnected-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 10px 3px 7px;
+  background: var(--hunkyard-finish-pill-bg);
+  border: 1px solid var(--hunkyard-finish-pill-border);
+  border-radius: 100px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  color: var(--hunkyard-finish-pill-fg);
+  flex-shrink: 0;
+}
+.disconnected-pill svg {
+  flex-shrink: 0;
+  animation: disconnected-check-pop 0.45s cubic-bezier(0.34, 1.56, 0.64, 1) 0.25s both;
+}
+@keyframes disconnected-check-pop {
+  from { transform: scale(0.5); opacity: 0; }
+  to { transform: scale(1); opacity: 1; }
+}
+.disconnected-text {
+  font-size: 13px;
+  color: var(--hunkyard-finish-body-fg);
+}
+
+/* ===== Waiting Overlay ===== */
+.waiting-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--hunkyard-overlay-bg);
+  z-index: 300;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+}
+.waiting-overlay.active { display: flex; }
+
+.waiting-dialog {
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 12px;
+  max-width: 480px;
+  width: 90vw;
+  box-shadow: var(--hunkyard-shadow);
+  overflow: hidden;
+}
+.waiting-dialog h3 { font-size: 20px; color: var(--hunkyard-green); margin-bottom: 12px; }
+.waiting-dialog p { font-size: 14px; color: var(--hunkyard-editor-fg-secondary); margin-bottom: 8px; }
+
+/* -- Header section -- */
+.waiting-header {
+  padding: 24px 24px 0;
+  text-align: center;
+}
+
+.success-mark {
+  display: none;
+  width: 56px;
+  height: 56px;
+  margin-bottom: 16px;
+  overflow: visible;
+}
+.success-mark-ring {
+  fill: none;
+  stroke: var(--hunkyard-green);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+  stroke-dasharray: 176;
+  stroke-dashoffset: 176;
+  transform-origin: 32px 32px;
+  transform: rotate(-90deg);
+  animation: success-ring-draw 0.55s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+.success-mark-check {
+  fill: none;
+  stroke: var(--hunkyard-green);
+  stroke-width: 4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: success-check-draw 0.35s cubic-bezier(0.4, 0, 0.2, 1) 0.4s forwards;
+}
+.waiting-dialog.approved .prompt-copy-row,
+.waiting-dialog.approved .waiting-footer { display: none; }
+.waiting-dialog.approved .success-mark {
+  display: inline-block;
+  filter: drop-shadow(0 0 0 transparent);
+  animation: success-glow 1.6s ease-out 0.7s 1;
+}
+@keyframes success-ring-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes success-check-draw {
+  to { stroke-dashoffset: 0; }
+}
+@keyframes success-glow {
+  0%   { filter: drop-shadow(0 0 0 transparent); }
+  35%  { filter: drop-shadow(0 0 18px color-mix(in srgb, var(--hunkyard-green) 55%, transparent)); }
+  100% { filter: drop-shadow(0 0 0 transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .success-mark-ring,
+  .success-mark-check {
+    animation: none;
+    stroke-dashoffset: 0;
+  }
+  .waiting-dialog.approved .success-mark {
+    animation: none;
+  }
+  .confetti-dot { animation: none !important; display: none; }
+}
+
+.confetti-dot {
+  position: absolute;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+  animation: confetti-fall 1.6s var(--hunkyard-ease) forwards;
+}
+@keyframes confetti-fall {
+  0%   { opacity: 0; transform: translateY(-16px) scale(0.5); }
+  15%  { opacity: 0.8; }
+  100% { opacity: 0; transform: translateY(50px) scale(0.3); }
+}
+
+.waiting-dialog .summary-receipt {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  cursor: text;
+}
+.waiting-dialog .summary-line {
+  font-size: 14px;
+  line-height: 1.5;
+  color: var(--hunkyard-editor-fg-secondary);
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.waiting-dialog .summary-copy-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--hunkyard-fg-muted);
+  cursor: pointer;
+  transition: background var(--hunkyard-dur-fast) ease, color var(--hunkyard-dur-fast) ease;
+}
+.waiting-dialog .summary-copy-btn:hover {
+  background: var(--hunkyard-brand-subtle);
+  color: var(--hunkyard-brand);
+}
+.waiting-dialog .summary-copy-btn:active {
+  transform: scale(0.92);
+}
+.waiting-dialog .summary-copy-btn.copied {
+  color: var(--hunkyard-green);
+}
+.waiting-dialog .summary-copy-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.waiting-dialog .waiting-edits {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--hunkyard-green);
+  margin-top: 12px;
+}
+
+/* Cancel button for the auto-close-after-approve countdown (close_on_approve_after_ms).
+   Created dynamically in hunkyard-shared.js right after #waitingMessage. */
+.waiting-close-cancel {
+  margin-top: 4px;
+  margin-bottom: 8px;
+}
+
+/* -- Prompt copy row -- */
+.prompt-copy-row {
+  margin: 16px 24px 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: var(--hunkyard-editor-bg-elevated);
+  border: none;
+  border-radius: var(--hunkyard-r-lg);
+  overflow: hidden;
+}
+
+.prompt-preview {
+  flex: 1;
+  min-width: 0;
+  padding: 10px 14px;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--hunkyard-editor-fg-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: default;
+  user-select: none;
+}
+
+.prompt-copy-btn {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 10px 14px;
+  border: none;
+  background: transparent;
+  color: var(--hunkyard-brand);
+  font-family: var(--hunkyard-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background var(--hunkyard-dur-fast) var(--hunkyard-ease),
+              color var(--hunkyard-dur-fast) var(--hunkyard-ease);
+  white-space: nowrap;
+}
+.prompt-copy-btn:hover {
+  background: var(--hunkyard-brand-subtle);
+}
+.prompt-copy-btn.copied {
+  color: var(--hunkyard-green);
+}
+.prompt-copy-btn svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.prompt-full-text {
+  display: none;
+}
+
+/* -- Footer / actions -- */
+.waiting-footer {
+  padding: 0 24px 20px;
+  display: flex;
+  justify-content: center;
+}
+
+/* -- Edits detected badge -- */
+.waiting-edits-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin: 14px 0 2px;
+  padding: 6px 12px;
+  background: var(--hunkyard-green-subtle);
+  border: 1px solid var(--hunkyard-green);
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--hunkyard-green);
+}
+.waiting-edits-badge svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* ===== No Changes Confirmation Overlay ===== */
+.confirm-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--hunkyard-overlay-bg);
+  z-index: 350;
+  align-items: center;
+  justify-content: center;
+}
+.confirm-overlay.active { display: flex; }
+.confirm-dialog {
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 12px;
+  padding: 24px 32px;
+  max-width: 480px;
+  width: 90vw;
+  text-align: center;
+  box-shadow: var(--hunkyard-shadow);
+}
+.confirm-dialog h3 { color: var(--hunkyard-yellow); margin-bottom: 12px; font-size: 16px; }
+.confirm-dialog p { color: var(--hunkyard-editor-fg-secondary); font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
+.confirm-actions { display: flex; flex-direction: column; gap: 12px; align-items: center; }
+.confirm-actions-row { display: flex; gap: 8px; justify-content: center; }
+.confirm-actions-row .btn { min-width: 160px; }
+.confirm-send-anyway {
+  font-family: var(--hunkyard-font-body);
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg-muted);
+  background: none;
+  border: none;
+  border-top: 1px solid var(--hunkyard-border);
+  padding: 10px 0 0;
+  margin-top: 4px;
+  cursor: pointer;
+  width: 100%;
+  transition: color 0.15s;
+}
+.confirm-send-anyway:hover { color: var(--hunkyard-editor-fg-secondary); }
+
+/* ===== Settings Panel Overlay ===== */
+.settings-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--hunkyard-overlay-bg);
+  z-index: 400;
+  align-items: center;
+  justify-content: center;
+}
+.settings-overlay.active {
+  display: flex;
+  animation: settings-overlay-in 0.18s ease-out;
+}
+@keyframes settings-overlay-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.settings-dialog {
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 12px;
+  max-width: 620px;
+  width: 90vw;
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--hunkyard-shadow);
+  animation: settings-dialog-in 0.18s ease-out;
+}
+@keyframes settings-dialog-in {
+  from { opacity: 0; transform: scale(0.97) translateY(4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Tab bar */
+.settings-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 1px solid var(--hunkyard-border);
+  padding: 0 20px;
+  flex-shrink: 0;
+  position: relative;
+}
+.settings-tab-underline {
+  position: absolute;
+  bottom: -1px;
+  height: 2px;
+  background: var(--hunkyard-brand);
+  border-radius: 1px;
+  pointer-events: none;
+}
+.settings-tab-underline.is-positioned {
+  transition: left 0.2s ease, width 0.2s ease;
+}
+.settings-tab {
+  padding: 12px 16px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+  transition: color 0.15s;
+}
+.settings-tab:hover { color: var(--hunkyard-editor-fg); }
+.settings-tab.active {
+  color: var(--hunkyard-brand);
+  border-bottom-color: transparent;
+}
+.settings-tab-close {
+  margin-left: auto;
+  padding: 8px;
+  font-size: 18px;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  border-radius: 6px;
+  line-height: 1;
+  min-width: 32px;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.15s, background 0.15s;
+  align-self: center;
+}
+.settings-tab-close:hover { color: var(--hunkyard-editor-fg); background: var(--hunkyard-editor-bg-hover); }
+
+/* Tab content */
+.settings-content {
+  overflow-y: auto;
+  padding: 20px;
+  flex: 1;
+  min-height: 0;
+}
+.settings-pane { display: none; }
+.settings-pane.active { display: block; }
+
+/* Section headers */
+.settings-section-label {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: var(--hunkyard-editor-fg-muted);
+  letter-spacing: 0.6px;
+  font-weight: 600;
+  margin-bottom: 10px;
+}
+.settings-section-label:not(:first-child) {
+  margin-top: 28px;
+}
+
+/* Display preference rows */
+.settings-display-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+.settings-display-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  margin-bottom: 0;
+}
+.settings-display-row:not(:last-child) {
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+.settings-display-row[hidden] {
+  display: none;
+}
+.settings-display-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--hunkyard-editor-fg);
+}
+/* Secondary label for a row that qualifies the row above it (custom code font). */
+.settings-display-label--sub {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+/* Dropdown + free-text controls in the Display section. */
+.settings-select,
+.settings-text-input {
+  font-family: inherit;
+  font-size: 13px;
+  padding: 5px 8px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  background: var(--hunkyard-editor-bg-card);
+  color: var(--hunkyard-editor-fg);
+}
+.settings-select {
+  max-width: 60%;
+  cursor: pointer;
+  /* Own chevron: the native arrow sits against the border and can't be moved. */
+  appearance: none;
+  padding-right: 30px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--hunkyard-editor-fg-muted) 50%),
+    linear-gradient(135deg, var(--hunkyard-editor-fg-muted) 50%, transparent 50%);
+  background-position: calc(100% - 17px) 55%, calc(100% - 12px) 55%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+}
+.settings-text-input {
+  width: 260px;
+  max-width: 60%;
+  font-family: var(--hunkyard-font-mono);
+}
+.settings-text-input::placeholder {
+  color: var(--hunkyard-editor-fg-muted);
+}
+.settings-select:focus-visible,
+.settings-text-input:focus-visible {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 1px;
+}
+.settings-text-input.is-invalid {
+  border-color: var(--hunkyard-red);
+}
+
+/* Toggle switch (used in settings panel for hide-resolved). */
+.comments-panel-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.comments-panel-switch input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+.comments-panel-switch-track {
+  position: absolute;
+  inset: 0;
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 9999px;
+  transition: background 0.15s, border-color 0.15s;
+}
+.comments-panel-switch-thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  background: var(--hunkyard-editor-fg-muted);
+  border-radius: 9999px;
+  transition: left 0.15s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s;
+}
+.comments-panel-switch input:checked ~ .comments-panel-switch-track {
+  background: var(--hunkyard-brand);
+  border-color: var(--hunkyard-brand);
+}
+.comments-panel-switch input:checked ~ .comments-panel-switch-track .comments-panel-switch-thumb {
+  left: 18px;
+  background: var(--hunkyard-fg-on-brand);
+}
+.comments-panel-switch input:focus-visible ~ .comments-panel-switch-track {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 2px;
+}
+
+/* Hide-resolved: body-class-driven CSS rule (replaces imperative DOM walk). */
+body.hide-resolved .comment-block:not(.panel-comment-block):has(.resolved-card) {
+  display: none;
+}
+
+/* Reuse theme-pill styling for both theme and width pills inside the panel */
+.settings-pill {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--hunkyard-border);
+  background: var(--hunkyard-bg-card);
+  border-radius: 9999px;
+}
+.settings-pill-indicator {
+  position: absolute;
+  height: 100%;
+  border-radius: 9999px;
+  background: var(--hunkyard-editor-bg-hover);
+  border: 1px solid var(--hunkyard-border);
+  transition: left 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  pointer-events: none;
+}
+.settings-pill-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  background: none;
+  border: none;
+  color: var(--hunkyard-editor-fg-muted);
+  position: relative;
+  z-index: 1;
+  transition: color 0.15s;
+  font-size: 13px;
+  font-weight: 500;
+}
+.settings-pill-btn:hover { color: var(--hunkyard-editor-fg); }
+.settings-pill-btn.active { color: var(--hunkyard-brand); }
+
+/* Theme pill: 3 icon buttons (reuse SVGs from old header pill) */
+.settings-pill--theme .settings-pill-indicator { width: 33.333%; }
+.settings-pill--theme .settings-pill-btn { width: 32px; padding: 8px 0; }
+.settings-pill--theme .settings-pill-btn svg { width: 16px; height: 16px; display: block; }
+
+/* Width pill: 3 equal-width text buttons */
+.settings-pill--width .settings-pill-indicator { width: 33.333%; }
+.settings-pill--width .settings-pill-btn { padding: 6px 0; width: 72px; text-align: center; }
+
+/* Config cards */
+.config-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.config-card {
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--hunkyard-border);
+  transition: border-color 0.15s, background 0.15s;
+}
+.config-card:hover {
+  border-color: var(--hunkyard-editor-fg-muted);
+}
+/* Unconfigured / action-needed cards get a dashed border */
+.config-card--unconfigured {
+  border-style: dashed;
+}
+.config-card--unconfigured:hover {
+  border-style: dashed;
+  border-color: var(--hunkyard-editor-fg-muted);
+}
+
+.config-card-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.config-card-icon {
+  font-size: 14px;
+  flex-shrink: 0;
+}
+.config-card-title {
+  font-weight: 500;
+  font-size: 14px;
+  color: var(--hunkyard-editor-fg);
+}
+.config-card-cmd-value {
+  margin-top: 8px;
+  background: var(--hunkyard-editor-bg);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 13px;
+  color: var(--hunkyard-editor-fg-secondary);
+  word-break: break-all;
+}
+.config-card-cmd-value code {
+  font-family: inherit;
+}
+.config-card-badge {
+  font-size: 12px;
+  color: var(--hunkyard-brand);
+  background: var(--hunkyard-brand-subtle);
+  padding: 2px 8px;
+  border-radius: 10px;
+  margin-left: 8px;
+}
+.config-card-body {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--hunkyard-editor-fg-secondary);
+  line-height: 1.5;
+}
+.config-card-cmd {
+  margin-top: 10px;
+  background: var(--hunkyard-editor-bg);
+  border-radius: 6px;
+  padding: 8px 12px;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 13px;
+  color: var(--hunkyard-editor-fg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.config-card-cmd-label {
+  color: var(--hunkyard-editor-fg-muted);
+  font-family: var(--hunkyard-font-body);
+  font-size: 11px;
+  margin-right: 8px;
+  flex-shrink: 0;
+}
+.config-card-copy {
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+.config-card-copy:hover { color: var(--hunkyard-editor-fg); background: var(--hunkyard-editor-bg-hover); }
+.config-card-copy.copied {
+  color: var(--hunkyard-green);
+}
+.config-card-actions {
+  margin-top: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.config-card-actions--end {
+  justify-content: flex-end;
+}
+.config-card-dismiss {
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  background: none;
+  border: none;
+  padding: 2px 8px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  transition: color 0.15s, background 0.15s;
+}
+.config-card-dismiss:hover { color: var(--hunkyard-editor-fg); background: var(--hunkyard-editor-bg-hover); }
+.config-card-dismiss:focus-visible {
+  outline: none;
+  box-shadow: var(--hunkyard-focus);
+}
+.config-card-dismissed {
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+  font-style: italic;
+}
+.config-card-snippet {
+  margin-top: 10px;
+  background: var(--hunkyard-editor-bg);
+  border-radius: 6px;
+  padding: 10px 12px;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 13px;
+  line-height: 1.8;
+  color: var(--hunkyard-editor-fg-secondary);
+  white-space: pre;
+  overflow-x: auto;
+}
+.config-card-agents {
+  margin-top: 6px;
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+/* Updates tab — compact integration rows expand into the shared command
+   surface. The Hunkyard release card stays open because it has one clear action. */
+.updates-list {
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.updates-section-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 18px;
+  margin-bottom: 7px;
+}
+.updates-section-head:first-child { margin-top: 0; }
+.updates-section-head .settings-section-label { margin: 0; }
+.updates-section-state {
+  margin-left: auto;
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 12px;
+}
+.updates-hunkyard-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 58px;
+  padding: 10px 12px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+}
+.updates-hunkyard-row--open {
+  border-bottom-left-radius: 0;
+  border-bottom-right-radius: 0;
+  border-bottom-color: transparent;
+}
+.updates-version {
+  color: var(--hunkyard-editor-fg-muted);
+  font-family: var(--hunkyard-font-mono);
+  font-size: 13px;
+}
+.updates-release-link {
+  margin-left: auto;
+  font-size: 12px;
+}
+.updates-release-notes {
+  color: var(--hunkyard-brand);
+  font-size: 13px;
+  text-decoration: none;
+}
+.updates-release-notes:hover {
+  color: var(--hunkyard-editor-fg);
+  text-decoration: none;
+}
+.updates-hunkyard-row .updates-status { margin-left: auto; }
+.updates-hunkyard-row .updates-release-link + .updates-status { margin-left: 4px; }
+.updates-hunkyard-detail {
+  padding: 9px 12px 9px 52px;
+  border: 1px solid var(--hunkyard-border);
+  border-top: 0;
+  color: var(--hunkyard-editor-fg-secondary);
+  font-size: 13px;
+}
+.updates-hunkyard-detail + .config-card-actions {
+  margin-top: 0;
+  padding: 9px 12px 11px 52px;
+  border: 1px solid var(--hunkyard-border);
+  border-top: 0;
+  border-radius: 0 0 8px 8px;
+}
+.updates-status {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  border-radius: 5px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.updates-status--ok { background: var(--hunkyard-green-subtle); color: var(--hunkyard-green); }
+.updates-status--stale { background: var(--hunkyard-yellow-bg); color: var(--hunkyard-yellow); }
+.updates-status--missing { background: var(--hunkyard-brand-bg); color: var(--hunkyard-brand); }
+.updates-status--muted { background: var(--hunkyard-bg-elevated); color: var(--hunkyard-editor-fg-muted); }
+.updates-copy-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  margin-left: auto;
+  padding: 3px 7px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--hunkyard-brand);
+  cursor: pointer;
+  font-size: 12px;
+}
+.updates-copy-all:hover { background: var(--hunkyard-brand-subtle); }
+.updates-copy-all svg { width: 13px; height: 13px; }
+.updates-empty {
+  padding: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 13px;
+}
+.updates-list-item + .updates-list-item {
+  border-top: 1px solid var(--hunkyard-border);
+}
+.updates-row {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border: 0;
+  background: transparent;
+  color: var(--hunkyard-editor-fg);
+  cursor: pointer;
+  text-align: left;
+}
+.updates-row:hover,
+.updates-row[aria-expanded="true"] {
+  background: var(--hunkyard-editor-bg-hover);
+}
+.updates-row:focus-visible {
+  outline: none;
+  box-shadow: inset var(--hunkyard-focus);
+}
+.updates-row-icon {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+}
+.updates-hunkyard-row .updates-row-icon--status {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.updates-row-icon--ok {
+  background: var(--hunkyard-green-subtle);
+  color: var(--hunkyard-green);
+}
+.updates-row-icon--warning {
+  background: var(--hunkyard-yellow-bg);
+  color: var(--hunkyard-yellow);
+}
+.updates-agent-icon,
+.updates-agent-icon img,
+.updates-agent-icon svg {
+  width: 20px;
+  height: 20px;
+  display: block;
+  object-fit: contain;
+}
+.updates-agent-icon-light { display: none !important; }
+html[data-theme="light"] .updates-agent-icon-dark { display: none !important; }
+html[data-theme="light"] .updates-agent-icon-light { display: block !important; }
+@media (prefers-color-scheme: light) {
+  html:not([data-theme]) .updates-agent-icon-dark { display: none !important; }
+  html:not([data-theme]) .updates-agent-icon-light { display: block !important; }
+}
+.updates-agent-icon--fallback {
+  color: var(--hunkyard-editor-fg-muted);
+}
+.updates-row-name {
+  flex: 0 0 auto;
+  color: var(--hunkyard-editor-fg);
+  font-size: 14px;
+  font-weight: 600;
+}
+.updates-row-preview {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--hunkyard-editor-fg-muted);
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.updates-row .updates-status { margin-left: auto; }
+.updates-row-detail {
+  padding: 9px 10px 10px;
+}
+.updates-row-note {
+  margin: 2px 0 8px;
+  color: var(--hunkyard-editor-fg-secondary);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.updates-command {
+  margin-top: 6px;
+}
+.updates-command-copy {
+  display: inline-grid;
+  width: 26px;
+  height: 26px;
+  padding: 5px;
+  place-items: center;
+  border: 1px solid var(--hunkyard-border);
+  color: var(--hunkyard-editor-fg-muted);
+}
+.updates-command-copy:hover {
+  color: var(--hunkyard-editor-fg);
+  border-color: var(--hunkyard-border-strong);
+  background: var(--hunkyard-editor-bg-hover);
+}
+.updates-command-copy svg {
+  width: 14px;
+  height: 14px;
+}
+
+/* Shortcuts table (inside settings panel) */
+.shortcuts-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.shortcut-reset-all {
+  appearance: none;
+  border: 0;
+  background: none;
+  color: var(--hunkyard-brand);
+  cursor: pointer;
+  font: inherit;
+  white-space: nowrap;
+}
+.shortcut-reset-all:hover { text-decoration: underline; }
+.shortcut-reset-all:focus-visible { outline: none; box-shadow: var(--hunkyard-focus); }
+.shortcuts-group-label {
+  font-size: 12px;
+  text-transform: uppercase;
+  color: var(--hunkyard-editor-fg-muted);
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  margin-top: 16px;
+}
+.shortcuts-group-label:first-child { margin-top: 0; }
+.shortcuts-table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-bottom: 4px;
+}
+.shortcuts-table td {
+  padding: 5px 0;
+  font-size: 13px;
+  color: var(--hunkyard-editor-fg-secondary);
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+.shortcuts-table td:first-child {
+  width: 180px;
+  white-space: nowrap;
+}
+.shortcuts-table tr:last-child td { border-bottom: none; }
+.shortcuts-table kbd {
+  display: inline-block;
+  background: var(--hunkyard-editor-bg-elevated);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 4px;
+  box-sizing: border-box;
+  height: 22px;
+  line-height: 18px;
+  padding: 1px 6px;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg);
+  min-width: 24px;
+  text-align: center;
+  vertical-align: middle;
+}
+.shortcut-binding {
+  appearance: none;
+  align-items: center;
+  border: 0;
+  box-sizing: border-box;
+  background: none;
+  border-radius: 4px;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  height: 26px;
+  line-height: 1;
+  padding: 2px;
+  vertical-align: middle;
+}
+.shortcut-binding:hover { background: var(--hunkyard-editor-bg-hover); }
+.shortcut-binding:focus-visible,
+.shortcut-binding.is-capturing { outline: none; box-shadow: var(--hunkyard-focus); }
+.shortcut-binding.is-customized kbd { border-color: var(--hunkyard-brand); }
+.shortcut-unassigned {
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 12px;
+  font-style: italic;
+}
+.shortcut-mode-badge {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg-muted);
+  background: var(--hunkyard-editor-bg-elevated);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  font-weight: 500;
+}
+
+/* About tab */
+.about-header {
+  text-align: center;
+  margin-bottom: 20px;
+}
+.about-header h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--hunkyard-editor-fg);
+  margin-bottom: 4px;
+}
+.about-version {
+  font-size: 13px;
+  color: var(--hunkyard-editor-fg-secondary);
+}
+.about-badge {
+  display: inline-block;
+  margin-top: 8px;
+  padding: 4px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.about-badge--current {
+  background: var(--hunkyard-diff-add-bg);
+  color: var(--hunkyard-green);
+}
+.about-badge--update {
+  background: var(--hunkyard-yellow-bg);
+  color: var(--hunkyard-yellow);
+}
+.about-session {
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  padding: 14px 16px;
+  font-size: 13px;
+  margin-bottom: 0;
+}
+.about-session-grid {
+  display: grid;
+  grid-template-columns: 90px 1fr;
+  gap: 5px 16px;
+  align-items: baseline;
+}
+.about-session-label {
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 12px;
+}
+.about-session-value {
+  color: var(--hunkyard-editor-fg);
+}
+.about-session-value code {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+  color: var(--hunkyard-brand);
+  word-break: break-all;
+}
+.about-links {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.about-link {
+  color: var(--hunkyard-editor-fg-muted);
+  text-decoration: none;
+  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border-radius: 6px;
+  border: 1px solid var(--hunkyard-border);
+  transition: background 0.15s, color 0.15s, border-color 0.15s, transform 0.15s;
+}
+.about-link:hover {
+  background: var(--hunkyard-editor-bg-hover);
+  color: var(--hunkyard-editor-fg);
+  border-color: var(--hunkyard-editor-fg-muted);
+  text-decoration: none;
+}
+.about-link:active {
+  transform: translateY(0);
+}
+.about-link svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+/* ===== Loading State ===== */
+.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 80vh;
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 15px;
+}
+
+.line-content.code-line::-webkit-scrollbar {
+  height: 0;
+}
+
+/* ===== Table of Contents ===== */
+.toc {
+  position: fixed;
+  top: 108px;
+  right: 16px;
+  width: 210px;
+  max-height: calc(100vh - 124px);
+  overflow-y: auto;
+  z-index: 90;
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  box-shadow: var(--hunkyard-shadow);
+  font-size: 12px;
+  transition: right 0.2s, opacity 0.2s, transform 0.2s;
+}
+.toc.toc-hidden {
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(6px);
+}
+.toc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 9px 12px 7px;
+  border-bottom: 1px solid var(--hunkyard-border);
+  font-weight: 600;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--hunkyard-editor-fg-muted);
+  background: var(--hunkyard-bg-card);
+  position: sticky;
+  top: 0;
+}
+.toc-close {
+  background: none;
+  border: none;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 1px 4px;
+  border-radius: 3px;
+  transition: all 0.15s;
+}
+.toc-close:hover { color: var(--hunkyard-editor-fg); background: var(--hunkyard-editor-bg-hover); }
+.toc-list {
+  list-style: none;
+  padding: 6px 0;
+  margin: 0;
+}
+.toc-list li { margin: 0; }
+.toc-list a {
+  display: block;
+  padding: 3px 12px;
+  color: var(--hunkyard-editor-fg-secondary);
+  text-decoration: none;
+  line-height: 1.45;
+  border-left: 2px solid transparent;
+  transition: color 0.1s, background 0.1s, border-color 0.1s;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.toc-list a:hover { color: var(--hunkyard-editor-fg); background: var(--hunkyard-editor-bg-hover); }
+.toc-list a.toc-active {
+  color: var(--hunkyard-brand);
+  border-left-color: var(--hunkyard-brand);
+  background: var(--hunkyard-brand-subtle);
+}
+
+
+/* ===== Responsive ===== */
+@media (max-width: 900px) {
+  .document-wrapper { padding-left: 8px; padding-right: 8px; }
+  .comment-block, .comment-form-wrapper { padding-left: 8px; }
+  .line-gutter { min-width: 36px; }
+  .file-tree-panel { width: 220px; }
+  .comments-panel, .pr-panel { width: 380px; }
+  .pr-toggle-btn .pr-toggle-number { display: none; }
+}
+@media (max-width: 600px) {
+  .toc, #tocToggle { display: none !important; }
+  .comments-panel, .pr-panel { display: none !important; }
+  .header { padding: 10px 14px; }
+  .header-title { font-size: 16px; }
+  .header-right { gap: 6px; }
+  .header-context { display: none; }
+  .base-branch-picker { display: none; }
+  .file-tree-panel { display: none; }
+  .sidebar-resize-handle { display: none !important; }
+  #updateBtn { display: none !important; }
+  .file-header { padding: 8px 12px; }
+  .file-header-toggle { display: none; }
+  .change-nav { display: none; }
+  .scope-toggle { display: none !important; }
+  .diff-mode-toggle { display: none !important; }
+
+  /* Wrap long code lines on mobile instead of per-line scrolling */
+  .line-content.code-line {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+}
+/* ===== Main Layout ===== */
+.main-layout {
+  display: flex;
+  min-height: calc(100vh - var(--header-height, 49px));
+  /* Clip the comments panel when it slides past the right edge (margin-right:-W).
+     Without this the off-canvas box extends scrollWidth and shows a horizontal
+     scrollbar. clip (not hidden) avoids creating a scroll container that can
+     break position:sticky descendants.
+     Clip BOTH axes: single-axis overflow-x: clip on an element this tall makes
+     Chrome stop painting and hit-testing everything below ~4,194,304px (2^22)
+     of the document — the whole page below the header, sticky sidebar
+     included, goes white on 2k+ file reviews. The vertical clip is free here:
+     .main-layout ends where the page does. */
+  overflow: clip;
+}
+.main-content {
+  --hunkyard-review-pad-inline: 16px;
+  --hunkyard-review-pad-top: 16px;
+  --hunkyard-review-pad-bottom: 80px;
+  flex: 1;
+  min-width: 0;
+  max-width: 100%;
+  /* Flush-left: when the file tree collapses the content grows into the
+     freed space instead of recentering (dual-edge motion feels uncanny on
+     diffs). margin-right:auto keeps any future max-width cap left-anchored. */
+  margin: 0 auto 0 0;
+}
+
+/* ===== Sidebar Resize Handles ===== */
+/* Thin draggable strip on the inner edge of each sidebar. Default transparent;
+   the brand-color line on hover/drag is the only visual affordance. Sticky so
+   it tracks the viewport vertically while pages scroll. */
+.sidebar-resize-handle {
+  flex: 0 0 4px;
+  align-self: stretch;
+  cursor: col-resize;
+  position: sticky;
+  top: var(--header-height, 49px);
+  height: calc(100vh - var(--header-height, 49px));
+  z-index: 86;
+  background: transparent;
+  transition: background 0.15s ease;
+}
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:focus-visible,
+.sidebar-resize-handle.dragging {
+  background: var(--hunkyard-brand);
+  outline: none;
+}
+/* Comments panel collapsed — slide off the right edge.
+   margin-right:-W zeros the flex contribution so main-content expands, and
+   parks the box past the container's right edge (mirrored by the file tree's
+   margin-left:-W on the left). .main-layout { overflow: clip } prevents that
+   off-canvas box from creating a page scrollbar.
+   (margin-left:-W was tried first; it collapses space without moving the panel,
+   so there was nothing to animate.) */
+.comments-panel-hidden {
+  margin-right: calc(-1 * var(--comments-panel-width, 480px));
+  visibility: hidden;
+}
+.main-layout:has(#commentsPanel.comments-panel-hidden) #commentsPanelResizer {
+  flex-basis: 0;
+  /* visibility:hidden drops tabindex=0 from the tab order (flex-basis:0 alone does not). */
+  visibility: hidden;
+}
+body.comments-panel-anim .comments-panel {
+  transition: margin-right 0.22s ease, visibility 0.22s;
+}
+body.comments-panel-anim #commentsPanelResizer { transition: flex-basis 0.22s ease; }
+@media (prefers-reduced-motion: reduce) {
+  body.comments-panel-anim .comments-panel,
+  body.comments-panel-anim #commentsPanelResizer { transition: none; }
+}
+/* Suppress text selection and force resize cursor while dragging. */
+body.sidebar-resizing,
+body.sidebar-resizing * {
+  user-select: none !important;
+  cursor: col-resize !important;
+}
+
+/* ===== File Tree Sidebar ===== */
+/* Collapsed via the header toggle: a negative margin equal to the panel's own
+   width pulls it off the left edge, so animating that one property slides the
+   panel out and expands the content in lockstep. --file-tree-width is written
+   by app.js from the measured width, so the distance tracks a user-resized
+   sidebar. `visibility` is in the transition list on purpose: it interpolates
+   discretely, so the panel stays visible for the whole slide out and reappears
+   instantly on the way back — and once hidden it's out of the tab order. */
+body.file-tree-collapsed .file-tree-panel {
+  margin-left: calc(-1 * var(--file-tree-width, 280px));
+  visibility: hidden;
+}
+body.file-tree-collapsed #fileTreeResizer {
+  flex-basis: 0;
+  /* visibility:hidden drops tabindex=0 from the tab order (flex-basis:0 alone does not). */
+  visibility: hidden;
+}
+/* Transitions only exist after the first user toggle (app.js adds
+   .file-tree-anim on click, never on load) so a collapsed sidebar doesn't
+   animate in on page load. The content's left edge stays put; only the
+   sidebar margin animates, so the diff expands into the freed space. */
+body.file-tree-anim .file-tree-panel {
+  transition: margin-left 0.22s ease, visibility 0.22s;
+}
+body.file-tree-anim #fileTreeResizer { transition: flex-basis 0.22s ease; }
+@media (prefers-reduced-motion: reduce) {
+  body.file-tree-anim .file-tree-panel,
+  body.file-tree-anim #fileTreeResizer { transition: none; }
+}
+#fileTreeToggle .ft-toggle-fill { opacity: 0.35; transition: opacity 0.15s ease; }
+#fileTreeToggle[aria-expanded="false"] .ft-toggle-fill { opacity: 0; }
+.file-tree-panel {
+  width: 280px;
+  flex-shrink: 0;
+  background: var(--hunkyard-bg-card);
+  border-right: 1px solid var(--hunkyard-border);
+  position: sticky;
+  top: var(--header-height, 49px);
+  height: calc(100vh - var(--header-height, 49px));
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  z-index: 85;
+}
+.file-tree-panel::-webkit-scrollbar { width: 5px; }
+.file-tree-panel::-webkit-scrollbar-thumb { background: var(--hunkyard-editor-scrollbar-thumb); border-radius: 3px; }
+
+.file-tree-header {
+  padding: 12px 16px 8px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--hunkyard-border);
+  flex-shrink: 0;
+}
+.file-tree-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.file-tree-stats {
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg-muted);
+  font-family: var(--hunkyard-font-mono);
+  display: flex;
+  gap: 6px;
+}
+.file-tree-stats .tree-stat-add { color: var(--hunkyard-green); }
+.file-tree-stats .tree-stat-del { color: var(--hunkyard-red); }
+
+.file-tree-collapse-btn {
+  background: none;
+  border: none;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-muted);
+  display: flex;
+  align-items: center;
+  border-radius: 3px;
+  transition: color 0.12s, background 0.12s;
+}
+.file-tree-collapse-btn:hover {
+  color: var(--hunkyard-editor-fg-secondary);
+  background: var(--hunkyard-editor-bg-hover);
+}
+.file-tree-collapse-btn svg {
+  transition: transform 0.15s;
+}
+.file-tree-collapse-btn.all-collapsed svg {
+  transform: rotate(180deg);
+}
+
+.file-tree-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 0;
+}
+
+/* Tree folder rows */
+.tree-folder {
+  user-select: none;
+}
+.tree-folder-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 0;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.08s;
+}
+.tree-folder-row:hover { background: var(--hunkyard-editor-bg-hover); }
+.tree-folder-chevron {
+  width: 16px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 10px;
+  color: var(--hunkyard-editor-fg-muted);
+  transition: transform 0.12s;
+}
+.tree-folder.collapsed .tree-folder-chevron { transform: rotate(-90deg); }
+.tree-folder.collapsed .tree-folder-children { display: none; }
+.tree-folder-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.tree-folder-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Tree file rows */
+.tree-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 0;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-secondary);
+  font-size: 13px;
+  transition: background 0.08s;
+  border-left: 2px solid transparent;
+}
+.tree-file:hover { background: var(--hunkyard-editor-bg-hover); }
+.tree-file.active {
+  background: var(--hunkyard-brand-subtle);
+  border-left-color: var(--hunkyard-brand);
+  color: var(--hunkyard-editor-fg);
+}
+
+.tree-file-icon {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.tree-file-status-icon {
+  width: 18px;
+  height: 18px;
+  fill: var(--hunkyard-editor-fg-muted);
+}
+.tree-file-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Comment badge in tree */
+.tree-comment-badge {
+  background: var(--hunkyard-brand-bg);
+  color: var(--hunkyard-brand);
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 8px;
+  min-width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 4px;
+  flex-shrink: 0;
+  font-family: var(--hunkyard-font-body);
+}
+
+/* Viewed indicator in tree */
+.tree-file.viewed .tree-file-name { color: var(--hunkyard-editor-fg-muted); }
+.tree-viewed-check {
+  font-size: 11px;
+  color: var(--hunkyard-green);
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+/* Copy path button in file header */
+.file-header-copy-path {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  margin-left: 6px;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-muted);
+  flex-shrink: 0;
+  line-height: 1;
+  border-radius: 3px;
+  transition: color 0.15s;
+}
+.file-header-copy-path:hover {
+  color: var(--hunkyard-brand);
+}
+.file-header-copy-path:focus-visible {
+  color: var(--hunkyard-brand);
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+/* Copy button in navbar (branch name / filename chip) */
+.header-copy-path {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0 0 0 4px;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-muted);
+  line-height: 1;
+}
+.header-copy-path:hover {
+  color: var(--hunkyard-brand);
+}
+.header-copy-path:focus-visible {
+  color: var(--hunkyard-brand);
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* ===== Comments Panel (Right Sidebar) ===== */
+.comments-panel {
+  width: 480px;
+  flex-shrink: 0;
+  background: var(--hunkyard-bg-card);
+  border-left: 1px solid var(--hunkyard-border);
+  position: sticky;
+  top: var(--header-height, 49px);
+  height: calc(100vh - var(--header-height, 49px));
+  overflow-y: hidden;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  z-index: 85;
+}
+.comments-panel::-webkit-scrollbar { width: 5px; }
+.comments-panel::-webkit-scrollbar-thumb { background: var(--hunkyard-editor-scrollbar-thumb); border-radius: 3px; }
+
+/* Two-row panel header */
+.comments-panel-header {
+  border-bottom: 1px solid var(--hunkyard-border);
+  flex-shrink: 0;
+}
+.comments-panel-header-row1 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px 0;
+}
+.comments-panel-header-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.comments-panel-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--hunkyard-editor-fg);
+}
+.comments-panel-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--hunkyard-editor-fg-muted);
+  background: var(--hunkyard-editor-bg-elevated);
+  border-radius: 9999px;
+  line-height: 1;
+}
+.comments-panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.comments-panel-close {
+  background: none;
+  border: none;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 4px;
+  border-radius: 4px;
+  line-height: 1;
+}
+.comments-panel-close:hover { background: var(--hunkyard-editor-bg-hover); color: var(--hunkyard-editor-fg); }
+
+.comments-panel-header-row2 {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px 12px;
+}
+
+/* Comments filter — reuses .scope-toggle + .toggle-btn */
+.comments-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--hunkyard-seg-track);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  padding: 3px;
+}
+.comments-filter-toggle .toggle-btn {
+  font-size: 12px;
+  height: 26px;
+  padding: 0 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.comments-filter-toggle .filter-count {
+  font-weight: 400;
+  opacity: 0.7;
+}
+
+/* Expand all / Collapse all link */
+.comments-panel-expand-all {
+  background: none;
+  border: none;
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  transition: color 0.15s;
+  white-space: nowrap;
+}
+.comments-panel-expand-all:hover { color: var(--hunkyard-editor-fg); }
+
+/* Panel comment cards — real .comment-card inside the panel */
+.panel-comment-block {
+  padding: 0 12px;
+  margin: 0;
+}
+.panel-comment-block .comment-header-left {
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+/* Panel general comment form */
+.comments-panel-body > .comment-form-wrapper {
+  padding: 12px;
+  border-bottom: 1px solid var(--hunkyard-border);
+  margin: 0;
+}
+.comments-panel-body > .comment-form-wrapper .comment-form {
+  margin: 0;
+}
+
+/* Panel body */
+.comments-panel-body {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.comments-panel-empty {
+  padding: 32px 16px;
+  text-align: center;
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+.comments-panel-empty::before {
+  content: '';
+  display: block;
+  width: 32px;
+  height: 32px;
+  margin: 0 auto 10px;
+  border: 2px dashed var(--hunkyard-border);
+  border-radius: 50%;
+  opacity: 0.5;
+}
+
+/* File groups */
+.comments-panel-file-group + .comments-panel-file-group {
+  border-top: 1px solid var(--hunkyard-border);
+}
+.comments-panel-file-name {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 12px 2px;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  user-select: none;
+}
+.comments-panel-file-name:hover {
+  color: var(--hunkyard-editor-fg);
+}
+.comments-panel-file-chevron {
+  flex-shrink: 0;
+  font-size: 9px;
+  transition: transform 0.15s;
+  display: inline-block;
+}
+.comments-panel-file-group.collapsed .comments-panel-file-chevron {
+  transform: rotate(-90deg);
+}
+.comments-panel-file-name-text {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.comments-panel-file-count {
+  flex-shrink: 0;
+  font-size: 10px;
+  color: var(--hunkyard-editor-fg-muted);
+  opacity: 0.6;
+  margin-left: auto;
+}
+.comments-panel-file-group.collapsed .comments-panel-file-cards {
+  display: none;
+}
+
+.comment-card-highlight {
+  animation: comment-inline-flash 1.5s ease-out;
+}
+@keyframes comment-inline-flash {
+  0%, 30% { box-shadow: 0 0 0 2px var(--hunkyard-brand); }
+  100% { box-shadow: none; }
+}
+
+/* ===== PR Overview Panel ===== */
+.pr-panel {
+  width: 480px;
+  flex-shrink: 0;
+  background: var(--hunkyard-bg-card);
+  border-left: 1px solid var(--hunkyard-border);
+  position: sticky;
+  top: var(--header-height, 49px);
+  height: calc(100vh - var(--header-height, 49px));
+  overflow-y: hidden;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  z-index: 85;
+}
+.pr-panel-body::-webkit-scrollbar { width: 5px; }
+.pr-panel-body::-webkit-scrollbar-thumb { background: var(--hunkyard-editor-scrollbar-thumb); border-radius: 3px; }
+.pr-panel-hidden { display: none; }
+
+.pr-panel-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0;
+}
+
+/* PR title row with close button */
+.pr-panel-link-section {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hunkyard-border);
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.pr-panel-pr-link {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  color: var(--hunkyard-editor-fg);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  transition: color 0.15s;
+  min-width: 0;
+  flex: 1;
+}
+.pr-panel-pr-link:hover { color: var(--hunkyard-brand); }
+.pr-panel-pr-link svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+  color: inherit;
+}
+.pr-panel-pr-title-text {
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.pr-panel-pr-number {
+  color: var(--hunkyard-editor-fg-muted);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.pr-panel-close {
+  background: none;
+  border: none;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+.pr-panel-close:hover { background: var(--hunkyard-editor-bg-hover); color: var(--hunkyard-editor-fg); }
+
+/* State badge + meta row */
+.pr-panel-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+.pr-panel-state {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+  padding: 3px 8px;
+  border-radius: 12px;
+}
+.pr-panel-state-open {
+  color: var(--hunkyard-green);
+  background: var(--hunkyard-badge-resolved-bg);
+}
+.pr-panel-state-merged {
+  color: var(--hunkyard-purple);
+  background: color-mix(in srgb, var(--hunkyard-purple) 15%, transparent);
+}
+.pr-panel-state-closed {
+  color: var(--hunkyard-red);
+  background: color-mix(in srgb, var(--hunkyard-red) 15%, transparent);
+}
+.pr-panel-state-draft {
+  color: var(--hunkyard-editor-fg-muted);
+  background: var(--hunkyard-editor-bg-elevated);
+}
+.pr-panel-author {
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+}
+
+/* Branch info */
+.pr-panel-branches {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hunkyard-border);
+  flex-wrap: wrap;
+}
+.pr-panel-branch {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 11px;
+  color: var(--hunkyard-brand);
+  background: var(--hunkyard-brand-subtle);
+  padding: 2px 8px;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+.pr-panel-arrow {
+  color: var(--hunkyard-editor-fg-muted);
+  flex-shrink: 0;
+}
+
+/* Stats */
+.pr-panel-stats {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+.pr-panel-stat {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.pr-panel-stat svg {
+  color: var(--hunkyard-editor-fg-muted);
+  opacity: 0.7;
+}
+.pr-panel-additions {
+  color: var(--hunkyard-green);
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+}
+.pr-panel-deletions {
+  color: var(--hunkyard-red);
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+}
+
+/* Description */
+.pr-panel-description {
+  padding: 16px;
+}
+.pr-panel-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--hunkyard-editor-fg-muted);
+  margin-bottom: 10px;
+}
+.pr-panel-description-body {
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--hunkyard-editor-fg);
+  overflow-wrap: break-word;
+  word-break: break-word;
+}
+.pr-panel-description-body p { margin: 0 0 8px; }
+.pr-panel-description-body p:last-child { margin-bottom: 0; }
+.pr-panel-description-body h1,
+.pr-panel-description-body h2,
+.pr-panel-description-body h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 12px 0 6px;
+  color: var(--hunkyard-editor-fg);
+}
+.pr-panel-description-body h1:first-child,
+.pr-panel-description-body h2:first-child,
+.pr-panel-description-body h3:first-child { margin-top: 0; }
+.pr-panel-description-body ul,
+.pr-panel-description-body ol {
+  margin: 4px 0;
+  padding-left: 20px;
+}
+.pr-panel-description-body li { margin: 2px 0; }
+.pr-panel-description-body code {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 11.5px;
+  padding: 1px 5px;
+  background: var(--hunkyard-editor-bg-elevated);
+  border-radius: 3px;
+}
+.pr-panel-description-body pre {
+  background: var(--hunkyard-editor-bg-elevated);
+  border-radius: 4px;
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.pr-panel-description-body pre code {
+  padding: 0;
+  background: none;
+}
+.pr-panel-description-body a {
+  color: var(--hunkyard-brand);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hunkyard-brand-subtle);
+}
+.pr-panel-description-body a:hover {
+  color: var(--hunkyard-brand-hover);
+  border-bottom-color: var(--hunkyard-brand-hover);
+}
+.pr-panel-description-body input[type="checkbox"] {
+  margin-right: 4px;
+  accent-color: var(--hunkyard-brand);
+}
+
+
+
+/* ===== File Sections ===== */
+.file-section {
+  scroll-margin-top: calc(var(--header-height, 49px) + 8px); /* accounts for sticky app header + gap */
+}
+.file-header {
+  /* stylelint-disable-next-line declaration-block-no-duplicate-properties */
+  position: -webkit-sticky;
+  position: sticky;
+  top: var(--header-height, 49px);
+  z-index: 80;
+  background: var(--hunkyard-editor-bg-elevated);
+  border: 1px solid var(--hunkyard-border);
+  border-left: none;
+  border-right: none;
+  padding: 4px 8px;
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: default;
+  transition: background 0.1s;
+  list-style: none; /* Remove default <summary> disclosure triangle */
+}
+.file-header::-webkit-details-marker { display: none; } /* Safari */
+.file-header::marker { display: none; } /* Firefox */
+.file-header:hover { background: var(--hunkyard-editor-bg-elevated); }
+.file-header-chevron {
+  color: var(--hunkyard-editor-fg-muted);
+  transition: transform 0.15s;
+  flex-shrink: 0;
+  width: 16px;
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.file-section:not([open]) .file-header-chevron { transform: rotate(-90deg); }
+.file-header-icon { width: 16px; height: 16px; flex-shrink: 0; }
+.file-header-name {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--hunkyard-editor-fg);
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  /* .dir and .filename are separate flex items so long paths can shrink the
+     directory first. A gap between them reads as a space before the filename.
+     The copy button keeps its own inset margin. */
+  gap: 0;
+  overflow: hidden;
+}
+.file-header-name .dir { color: var(--hunkyard-editor-fg-muted); flex-shrink: 2; }
+.file-header-name .filename { flex-shrink: 1; }
+/* Truncate long paths; copy button (flex-shrink:0 by default) stays full size */
+.file-header-name .dir,
+.file-header-name .filename {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  min-width: 0;
+}
+.file-header-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.file-header-badge.modified { background: var(--hunkyard-badge-modified-bg); color: var(--hunkyard-yellow); border: 1px solid var(--hunkyard-yellow-border); }
+.file-header-badge.added, .file-header-badge.untracked { background: var(--hunkyard-badge-resolved-bg); color: var(--hunkyard-green); border: 1px solid color-mix(in srgb, var(--hunkyard-green) 20%, transparent); }
+.file-header-badge.deleted { background: var(--hunkyard-badge-deleted-bg); color: var(--hunkyard-red); border: 1px solid color-mix(in srgb, var(--hunkyard-red) 20%, transparent); }
+.file-header-badge.removed { background: var(--hunkyard-badge-removed-bg); color: var(--hunkyard-badge-removed-color); border: 1px solid var(--hunkyard-badge-removed-border); }
+.file-header-stats {
+  display: flex;
+  gap: 6px;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 11px;
+}
+.file-header-stats .add { color: var(--hunkyard-green); }
+.file-header-stats .del { color: var(--hunkyard-red); }
+
+/* Viewed checkbox in file header */
+.file-header-viewed {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  user-select: none;
+  margin-left: auto;
+  padding-left: 8px;
+  flex-shrink: 0;
+}
+.file-header-viewed input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+  border: 1.5px solid var(--hunkyard-editor-fg-muted);
+  border-radius: 3px;
+  background: transparent;
+  position: relative;
+  transition: border-color 0.15s, background 0.15s;
+  flex-shrink: 0;
+}
+.file-header-viewed input[type="checkbox"]:checked {
+  background: var(--hunkyard-brand);
+  border-color: var(--hunkyard-brand);
+}
+.file-header-viewed input[type="checkbox"]:checked::after {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0.5px;
+  width: 5px;
+  height: 8px;
+  border: solid var(--hunkyard-editor-bg);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg);
+}
+.file-header-viewed input[type="checkbox"]:focus-visible {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 1px;
+}
+.file-header-viewed input[type="checkbox"]:checked + span {
+  color: var(--hunkyard-brand);
+}
+
+/* Shared toggle-btn base (used by file-header-toggle, scope-toggle, diff-mode-toggle).
+   Segmented control: soft track + lifted active pill. */
+.toggle-btn {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  color: var(--hunkyard-editor-fg-secondary);
+  cursor: pointer;
+  font-family: var(--hunkyard-font-body);
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  transition: background 0.12s ease, color 0.12s ease, box-shadow 0.12s ease;
+}
+.toggle-btn.active {
+  background: var(--hunkyard-seg-active);
+  color: var(--hunkyard-seg-active-fg);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.18),
+    inset 0 0 0 1px color-mix(in srgb, var(--hunkyard-brand) 22%, transparent);
+}
+[data-theme="light"] .toggle-btn.active,
+html[data-theme="light"] .toggle-btn.active {
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06),
+    inset 0 0 0 1px color-mix(in srgb, var(--hunkyard-brand) 18%, transparent);
+}
+.toggle-btn:hover:not(.active):not(:disabled) {
+  color: var(--hunkyard-editor-fg);
+  background: color-mix(in srgb, var(--hunkyard-editor-fg) 4%, transparent);
+}
+.toggle-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.toggle-btn:focus-visible {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 1px;
+}
+
+.file-header-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--hunkyard-seg-track);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  padding: 3px;
+  margin-left: 4px;
+}
+.file-header-toggle .toggle-btn {
+  font-size: 10px;
+  height: 22px;
+  padding: 0 8px;
+}
+
+/* Change navigation widget (document view) */
+.change-nav {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: 8px;
+}
+.change-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  background: var(--hunkyard-editor-bg);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 4px;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  font-size: 8px;
+  line-height: 1;
+  transition: all 0.15s;
+}
+.change-nav-btn:hover {
+  background: var(--hunkyard-editor-bg-hover);
+  color: var(--hunkyard-editor-fg);
+}
+.change-nav-label {
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg-muted);
+  white-space: nowrap;
+}
+
+/* Scope toggle in header (all/branch/staged/unstaged) */
+.scope-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--hunkyard-seg-track);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  padding: 3px;
+}
+.scope-toggle .toggle-btn {
+  font-size: 12px;
+  height: 26px;
+  padding: 0 10px;
+}
+.scope-toggle .toggle-btn:disabled { opacity: 0.4; cursor: default; }
+
+/* Commit picker (sidebar dropdown) */
+.commit-picker {
+  position: relative;
+  border-bottom: 1px solid var(--hunkyard-border);
+  padding: 6px 8px;
+}
+.commit-picker-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  font-size: 11px;
+  padding: 4px 8px;
+  background: var(--hunkyard-editor-bg-elevated);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 4px;
+  color: var(--hunkyard-editor-fg);
+  cursor: pointer;
+  white-space: nowrap;
+  font-family: inherit;
+  line-height: 1.4;
+}
+.commit-picker-prefix {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--hunkyard-editor-fg-muted);
+  flex-shrink: 0;
+}
+.commit-picker-hint {
+  padding: 6px 10px 2px;
+  font-size: 10px;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.commit-picker-clear-through {
+  display: block;
+  margin: 4px 8px;
+  padding: 4px 8px;
+  font-size: 11px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  width: calc(100% - 16px);
+}
+.commit-picker-clear-through:hover {
+  background: var(--hunkyard-editor-bg-hover);
+  color: var(--hunkyard-editor-fg);
+}
+.commit-pin-from,
+.commit-pin-through {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  padding: 1px 4px;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+.commit-pin-from {
+  background: var(--hunkyard-brand-bg);
+  color: var(--hunkyard-editor-fg);
+}
+.commit-pin-through {
+  background: color-mix(in srgb, var(--hunkyard-editor-fg-muted) 20%, transparent);
+  color: var(--hunkyard-editor-fg);
+}
+.commit-picker-item.is-from { background: color-mix(in srgb, var(--hunkyard-brand-bg) 60%, transparent); }
+.commit-picker-item.is-through { outline: 1px solid var(--hunkyard-editor-fg-muted); }
+.commit-picker-btn:hover { background: var(--hunkyard-editor-bg-hover); }
+.commit-picker-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+  text-align: left;
+}
+.commit-picker-chevron {
+  width: 10px;
+  height: 10px;
+  flex-shrink: 0;
+  transition: transform 0.15s ease;
+}
+.commit-picker.open .commit-picker-chevron { transform: rotate(180deg); }
+.commit-picker-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 8px;
+  right: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  z-index: 100;
+  padding: 4px;
+}
+.commit-picker.open .commit-picker-menu { display: block; }
+.commit-picker-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 8px;
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg);
+  cursor: pointer;
+  border-radius: 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.commit-picker-item:hover { background: var(--hunkyard-editor-bg-hover); }
+.commit-picker-item.active {
+  background: var(--hunkyard-brand-subtle);
+  color: var(--hunkyard-brand);
+  font-weight: 600;
+}
+.commit-picker-item-check {
+  flex-shrink: 0;
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--hunkyard-brand);
+  cursor: pointer;
+  align-self: center;
+}
+/* Non-interactive spacer that mirrors the checkbox footprint so the "All
+   commits" row's text aligns with the SHA column of the checkbox-prefixed
+   commit rows. Hidden from AT (aria-hidden) since "All commits" is not itself
+   a selectable commit. Width matches .commit-picker-item-check exactly. */
+.commit-picker-item-check-spacer {
+  width: 13px;
+  flex-shrink: 0;
+}
+/* Commits that fall between two checked commits: included in the diff range
+   but not themselves checked. Left accent bar + muted hint make this honest. */
+.commit-picker-item.in-range {
+  border-left: 2px solid var(--hunkyard-brand);
+  padding-left: 6px;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.commit-picker-item-range {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--hunkyard-brand);
+  flex-shrink: 0;
+}
+.commit-picker-item-sha {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 10px;
+  color: var(--hunkyard-editor-fg-muted);
+  flex-shrink: 0;
+}
+.commit-picker-item-msg {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  flex: 1;
+}
+.commit-picker-item-time {
+  font-size: 10px;
+  color: var(--hunkyard-editor-fg-muted);
+  flex-shrink: 0;
+  margin-left: auto;
+}
+.commit-picker-separator {
+  height: 1px;
+  background: var(--hunkyard-border);
+  margin: 4px 6px;
+}
+
+/* Diff mode toggle in header (split/unified) */
+.diff-mode-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: var(--hunkyard-seg-track);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  padding: 3px;
+}
+.diff-mode-toggle .toggle-btn {
+  font-size: 12px;
+  height: 26px;
+  padding: 0 10px;
+}
+
+/* Word-level highlights (suggestion diffs, rendered markdown round diff) */
+.diff-word-add { background: var(--hunkyard-diff-word-add-bg); border-radius: 2px; padding: 0 1px; }
+.diff-word-del { background: var(--hunkyard-diff-word-del-bg); border-radius: 2px; padding: 0 1px; }
+/* ===== Split Diff (side-by-side) ===== */
+
+/* Large diff placeholder */
+.diff-deleted-placeholder {
+  padding: 32px 24px;
+  text-align: center;
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 14px;
+}
+.file-header-name .rename-paths {
+  font-family: var(--hunkyard-font-mono, ui-monospace, monospace);
+  font-size: 13px;
+}
+.file-header-name .rename-arrow {
+  color: var(--hunkyard-editor-fg-muted);
+}
+.orphaned-placeholder {
+  font-style: italic;
+  color: var(--hunkyard-editor-fg-muted);
+  padding: 12px 16px;
+}
+.outdated-diff-comments {
+  border-top: 1px solid var(--hunkyard-border);
+  padding: 8px 0;
+}
+/* Outdated threads share the file-level layout; see .pierre-file-level. */
+.outdated-diff-comments > .comment-block {
+  padding-left: 0;
+}
+.outdated-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px 1px 4px;
+  border-radius: 10px;
+  background: var(--hunkyard-drift-badge-bg);
+  color: var(--hunkyard-drift-badge-fg);
+  border: 1px solid var(--hunkyard-drift-badge-border);
+  white-space: nowrap;
+}
+.outdated-badge::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  background-color: var(--hunkyard-drift-badge-fg);
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='currentColor'%3E%3Cpath d='M5.22 14.78a.75.75 0 001.06-1.06L4.56 12h8.69a.75.75 0 000-1.5H4.56l1.72-1.72a.75.75 0 00-1.06-1.06l-3 3a.75.75 0 000 1.06l3 3zM10.78 1.22a.75.75 0 00-1.06 1.06L11.44 4H2.75a.75.75 0 000 1.5h8.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3a.75.75 0 000-1.06l-3-3z'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16' fill='currentColor'%3E%3Cpath d='M5.22 14.78a.75.75 0 001.06-1.06L4.56 12h8.69a.75.75 0 000-1.5H4.56l1.72-1.72a.75.75 0 00-1.06-1.06l-3 3a.75.75 0 000 1.06l3 3zM10.78 1.22a.75.75 0 00-1.06 1.06L11.44 4H2.75a.75.75 0 000 1.5h8.69l-1.72 1.72a.75.75 0 101.06 1.06l3-3a.75.75 0 000-1.06l-3-3z'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+.outdated-comment .comment-card {
+  border-color: var(--hunkyard-drift-card-border);
+}
+/* GitHub-synced comment badge -- small pill with the GitHub mark, same
+   sizing as .outdated-badge. Uses neutral pill tokens so it reads as
+   informational ("synced from GitHub") rather than warning. */
+.forge-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 1px 7px 1px 4px;
+  border-radius: 10px;
+  background: var(--hunkyard-pill-bg);
+  color: var(--hunkyard-pill-fg);
+  border: 1px solid var(--hunkyard-pill-border);
+  white-space: nowrap;
+}
+.github-badge::before {
+  content: "";
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  background-color: var(--hunkyard-pill-fg);
+  -webkit-mask-image: var(--hunkyard-icon-github);
+  mask-image: var(--hunkyard-icon-github);
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+}
+/* Drifted anchor context — full-width disclosure bar + line-numbered panel */
+.drifted-context {
+  font-size: 12px;
+  border-top: 1px solid var(--hunkyard-border);
+}
+.drifted-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  background: none;
+  border: none;
+  padding: 8px 14px;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-muted);
+  font-family: inherit;
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1;
+  transition: color 0.15s, background 0.15s;
+}
+.drifted-toggle:hover {
+  color: var(--hunkyard-editor-fg-muted);
+  background: var(--hunkyard-editor-bg-elevated);
+}
+.drifted-toggle:focus-visible {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: -2px;
+}
+.drifted-chevron {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  transition: transform 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+.drifted-context.expanded .drifted-chevron {
+  transform: rotate(90deg);
+}
+.drifted-toggle-label {
+  flex: 1;
+  text-align: left;
+}
+.drifted-toggle-meta {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg-muted);
+  white-space: nowrap;
+}
+/* Animated expand/collapse via CSS grid */
+.drifted-panel-wrapper {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 0.2s cubic-bezier(0.25, 0.1, 0.25, 1);
+}
+.drifted-context.expanded .drifted-panel-wrapper {
+  grid-template-rows: 1fr;
+}
+.drifted-panel-inner {
+  overflow: hidden;
+}
+.drifted-panel {
+  border-top: 1px solid var(--hunkyard-border);
+  background: var(--hunkyard-editor-code-bg);
+}
+.drifted-anchor-text {
+  font-family: var(--hunkyard-font-code);
+  font-size: 11px;
+  line-height: 1.65;
+  color: var(--hunkyard-editor-fg-muted);
+  padding: 0;
+  margin: 0;
+  overflow-x: auto;
+  max-height: 240px;
+  overflow-y: auto;
+  white-space: pre;
+  -webkit-overflow-scrolling: touch;
+}
+.drifted-line {
+  display: flex;
+  min-height: 20px;
+}
+.drifted-line:first-child { padding-top: 8px; }
+.drifted-line:last-child { padding-bottom: 8px; }
+.drifted-line-number {
+  flex-shrink: 0;
+  width: 44px;
+  padding-right: 12px;
+  text-align: right;
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 11px;
+  user-select: none;
+  -webkit-user-select: none;
+  line-height: 1.65;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.6;
+}
+.drifted-line-content {
+  flex: 1;
+  min-width: 0;
+  padding-right: 14px;
+  white-space: pre;
+  line-height: 1.65;
+}
+.drifted-line-content:empty::after { content: ' '; }
+/* Hide drifted context when comment card is collapsed */
+.comment-card.collapsed .drifted-context {
+  display: none;
+}
+
+/* ===== Mini Toast =====
+   Host is a single fixed container; toasts stack inside. Both code-review
+   (app.js) and live-mode (live-mode.js) feed this via
+   hunkyard.shared.showToast(). Modifier classes (.mini-toast--info / --error /
+   --success) are reserved; default styling is shared. Exit cleanup is
+   transitionend-driven in JS — see frontend-js.md (no .remove() on elements
+   with CSS exit animations). */
+.mini-toast-host {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  z-index: 1000;
+  pointer-events: none;
+}
+.mini-toast {
+  background: var(--hunkyard-editor-bg-elevated);
+  color: var(--hunkyard-editor-fg);
+  border: 1px solid var(--hunkyard-border);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  max-width: 360px;
+  opacity: 0;
+  transform: translateY(20px);
+  transition: opacity 0.3s, transform 0.3s;
+  pointer-events: auto;
+}
+.mini-toast-visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* ===== Rendered Diff View (file mode) ===== */
+.diff-view {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  max-width: 100%;
+  overflow: hidden;
+}
+.diff-view-cell {
+  min-width: 0;
+  overflow-x: auto;
+}
+.diff-view-cell:nth-child(odd) {
+  border-right: 1px solid var(--hunkyard-border);
+}
+.diff-view-side-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--hunkyard-editor-fg-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  padding: 6px 16px;
+  border-bottom: 1px solid var(--hunkyard-border);
+  background: var(--hunkyard-editor-bg-card);
+}
+.diff-view .line-gutter,
+.diff-view-unified .line-gutter {
+  min-width: 32px;
+  width: auto;
+  padding: 0;
+}
+.diff-view .line-num,
+.diff-view-unified .line-num {
+  display: inline;
+}
+.diff-view .line-comment-gutter,
+.diff-view-unified .line-comment-gutter {
+  margin-left: 0;
+}
+.line-comment-gutter.diff-no-comment {
+  cursor: default;
+}
+.line-comment-gutter.diff-no-comment:hover .line-add {
+  opacity: 0;
+  pointer-events: none;
+}
+.diff-view .line-block.diff-added .line-content {
+  background: var(--hunkyard-diff-add-bg);
+}
+.diff-view .line-block.diff-removed .line-content {
+  background: var(--hunkyard-diff-del-bg);
+}
+.diff-view-unified {
+  max-width: var(--content-width);
+  margin: 0 auto;
+}
+.diff-view-unified .line-block.diff-added .line-content {
+  background: var(--hunkyard-diff-add-bg);
+}
+.diff-view-unified .line-block.diff-removed .line-content {
+  background: var(--hunkyard-diff-del-bg);
+}
+#diffToggle.active {
+  background: var(--hunkyard-brand);
+  color: var(--hunkyard-fg-on-brand);
+  border-color: var(--hunkyard-brand);
+}
+
+/* ===== File-Level Comments ===== */
+/* Story chapters render file-level threads above the diff, outside Pierre.
+   Diffs left-align file-level threads, so these are left-aligned too, at a
+   16px inset and reading width, instead of centered. */
+.file-comments {
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hunkyard-border);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+
+.file-comments > * {
+  width: 100%;
+  max-width: var(--content-width);
+}
+
+/* File-level threads and the form have no line gutter to line up with. */
+.file-comments .comment-block,
+.file-comments .comment-form-wrapper {
+  padding-left: 0;
+}
+
+.file-comments .comment-card {
+  margin-bottom: 8px;
+}
+
+.file-comments .comment-card:last-child {
+  margin-bottom: 0;
+}
+
+.file-comment-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--hunkyard-brand);
+  padding: 2px 6px;
+  border-radius: 4px;
+  margin-left: 8px;
+  transition: opacity 0.15s;
+}
+
+.file-comment-btn svg { width: 13px; height: 13px; }
+
+.file-comment-btn:hover {
+  opacity: 0.8;
+}
+
+/* Send now button */
+.btn-agent {
+  background: transparent;
+  color: var(--hunkyard-brand);
+  border: 1px solid var(--hunkyard-brand);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.btn-agent:hover {
+  background: var(--hunkyard-brand);
+  color: var(--hunkyard-fg-on-brand);
+}
+.btn-agent:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+/* Live Thread — green ambient glow (the theme's green) */
+.live-thread > .comment-card {
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--hunkyard-green) 20%, transparent),
+              0 0 12px color-mix(in srgb, var(--hunkyard-green) 6%, transparent);
+}
+.live-thread.agent-pending > .comment-card {
+  animation: agent-glow 2s ease-in-out infinite;
+}
+@keyframes agent-glow {
+  0%, 100% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--hunkyard-green) 20%, transparent),
+                          0 0 8px color-mix(in srgb, var(--hunkyard-green) 5%, transparent); }
+  50% { box-shadow: 0 0 0 1px color-mix(in srgb, var(--hunkyard-green) 35%, transparent),
+                    0 0 16px color-mix(in srgb, var(--hunkyard-green) 12%, transparent); }
+}
+
+/* Live thread badge */
+.live-thread-badge {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--hunkyard-green);
+  background: var(--hunkyard-live-badge-bg);
+  padding: 1px 6px;
+  border-radius: 3px;
+}
+.live-thread-badge.pulsing {
+  animation: badge-pulse 2s ease-in-out infinite;
+}
+@keyframes badge-pulse {
+  0%, 100% { opacity: 0.7; }
+  50% { opacity: 1; }
+}
+
+/* Pending agent indicator */
+.agent-pending-reply {
+  padding: 8px 12px;
+  border-top: 1px solid var(--hunkyard-border);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  opacity: 0.7;
+}
+.agent-pending-author {
+  font-size: 11px;
+  font-weight: 600;
+  font-family: var(--hunkyard-font-mono);
+  color: var(--hunkyard-brand);
+}
+.agent-pending-cursor {
+  font-family: var(--hunkyard-font-mono);
+  font-weight: 700;
+  color: var(--hunkyard-brand);
+  animation: agent-cursor-blink 1s step-end infinite;
+}
+@keyframes agent-cursor-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.live-thread.agent-pending .reply-input,
+.live-thread.agent-pending .reply-textarea,
+.live-thread.agent-pending .reply-form-buttons {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+
+/* Stack chip + popover — vertical-tree alternative to the old horizontal
+   breadcrumb. Renders only when the picker reports >1 stack entry.
+   Click chip to toggle popover; click outside or Escape to close. */
+/* Stack chip styled to match the .header-chip (branch indicator):
+   soft brand-tinted background, brand-colored text, integrated padding.
+   The chip is a single visual unit composed of three controls:
+   button (label+chevron, opens popover), exit ✕ (switch to working tree),
+   and the popover positioned beneath. */
+.stack-chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 24px;
+  padding: 0 4px 0 10px;
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+  color: var(--hunkyard-brand);
+  background: var(--hunkyard-pill-bg);
+  border: 1px solid var(--hunkyard-pill-border);
+  border-radius: 6px;
+}
+/* Stack-mode segmented composite: branch chip + stack chip read as one
+   unit. Adjacent corners flatten and the inter-chip gap collapses so a
+   single 1px seam separates the segments. Both chips keep the neutral
+   pill chrome so the cluster stays calm — brand color carries on the
+   head label and the stack-chip glyphs only, marking "this is the thing
+   being reviewed". */
+.compare-rail.is-stack .header-chip.header-context {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+.compare-rail.is-stack .stack-chip {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+  border-left-width: 0;
+  margin-left: 0;
+}
+/* Collapse the inter-chip gap to zero only between the merged segments,
+   without affecting other compare-rail children (resume pill, etc.).
+   The left border returns at 1px so the seam between branch chip and
+   stack chip reads as a clean divider. */
+.compare-rail.is-stack .header-chip.header-context + .stack-chip {
+  margin-left: -6px;
+  border-left-width: 1px;
+  border-left-color: var(--hunkyard-pill-border);
+}
+.stack-chip-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.stack-chip-btn:focus-visible {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+.stack-chip-icon {
+  width: 13px;
+  height: 13px;
+  flex-shrink: 0;
+  color: var(--hunkyard-pill-fg-muted);
+  opacity: 0.85;
+}
+.stack-chip-label {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--hunkyard-brand);
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stack-chip-chevron {
+  color: var(--hunkyard-pill-fg-muted);
+  opacity: 0.7;
+  font-size: 10px;
+  transition: transform 120ms ease;
+}
+.stack-chip.open .stack-chip-chevron { transform: rotate(180deg); }
+.stack-chip-exit {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  margin-left: 4px;
+  border: 0;
+  border-left: 1px solid var(--hunkyard-pill-border);
+  border-radius: 0 4px 4px 0;
+  background: transparent;
+  color: var(--hunkyard-pill-fg-muted);
+  opacity: 0.85;
+  font-size: 11px;
+  line-height: 1;
+  cursor: pointer;
+}
+.stack-chip-exit:hover {
+  background: var(--hunkyard-pill-bg-hover);
+  opacity: 1;
+}
+.stack-chip-exit:focus-visible {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 1px;
+  opacity: 1;
+}
+.stack-popover {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 30;
+  min-width: 220px;
+  max-width: 360px;
+  padding: 6px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  background: var(--hunkyard-bg-card);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+}
+.stack-chip.open .stack-popover { display: block; }
+.stack-popover-title {
+  padding: 4px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.stack-popover-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--hunkyard-editor-fg);
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.4;
+  text-align: left;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.stack-popover-item:hover:not([aria-current]):not(:disabled) {
+  background: var(--hunkyard-editor-bg-hover);
+}
+.stack-popover-item:focus-visible {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: -1px;
+}
+.stack-popover-item:disabled {
+  cursor: default;
+}
+.stack-popover-current {
+  background: var(--hunkyard-brand-bg);
+  font-weight: 600;
+  cursor: default;
+}
+.stack-popover-marker-wrap {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 4px;
+  width: 54px;
+  flex-shrink: 0;
+}
+.stack-popover-marker {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.stack-popover-marker-target {
+  color: var(--hunkyard-brand);
+  background: var(--hunkyard-brand-subtle);
+}
+.stack-popover-marker-base {
+  color: var(--hunkyard-editor-fg-muted);
+  background: color-mix(in srgb, var(--hunkyard-editor-fg-muted) 14%, transparent);
+}
+.stack-popover-in-range:not(.stack-popover-current) {
+  background: color-mix(in srgb, var(--hunkyard-brand-subtle) 45%, transparent);
+}
+.stack-popover-tree {
+  font-family: monospace;
+  color: var(--hunkyard-editor-fg-muted);
+  white-space: pre;
+}
+.stack-popover-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.stack-popover-sha {
+  flex-shrink: 0;
+  margin-left: 8px;
+  font-size: 0.75em;
+  font-family: var(--hunkyard-font-mono);
+  color: var(--hunkyard-editor-fg-muted);
+  opacity: 0.7;
+}
+
+/* Default-branch entry in the stack popover is a non-interactive root
+   marker — it indicates "stack starts here" but doesn't trigger any
+   action. */
+.stack-popover-root {
+  cursor: default;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.stack-popover-root:hover { background: transparent; }
+.stack-popover-root.stack-popover-is-base {
+  color: var(--hunkyard-editor-fg);
+  background: color-mix(in srgb, var(--hunkyard-editor-bg-hover) 65%, transparent);
+}
+
+/* Compare-against radio rows. Live inside the stack popover — saves a
+   second toolbar bar in the page header for what's a relatively rare
+   action, and the subcopy answers "what does Layer mean" inline. */
+.stack-popover-divider {
+  height: 1px;
+  background: var(--hunkyard-border);
+  margin: 6px 4px;
+}
+.stack-popover-loading {
+  padding: 8px 10px 10px;
+  font-family: var(--hunkyard-font-body);
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+  font-style: italic;
+}
+.stack-popover-scope {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  background: transparent;
+  border-radius: 5px;
+  font-family: var(--hunkyard-font-body);
+  text-align: left;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg);
+}
+.stack-popover-scope:hover:not(:disabled) {
+  background: var(--hunkyard-editor-bg-hover);
+}
+.stack-popover-scope:focus-visible {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: -1px;
+}
+.stack-popover-scope:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.stack-popover-scope-radio {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  margin-top: 2px;
+  border-radius: 50%;
+  border: 1.5px solid var(--hunkyard-pill-border);
+  background: transparent;
+  position: relative;
+}
+.stack-popover-scope.is-active .stack-popover-scope-radio {
+  border-color: var(--hunkyard-brand);
+}
+.stack-popover-scope.is-active .stack-popover-scope-radio::after {
+  content: '';
+  position: absolute;
+  inset: 2px;
+  border-radius: 50%;
+  background: var(--hunkyard-brand);
+}
+.stack-popover-scope-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.stack-popover-scope-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--hunkyard-editor-fg);
+}
+.stack-popover-scope.is-active .stack-popover-scope-name {
+  color: var(--hunkyard-brand);
+}
+.stack-popover-scope-sub {
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg-muted);
+  line-height: 1.35;
+}
+
+/* Resume PR pill — visible only in working-tree focus when the session
+   has a stashed last range focus.
+   Click restores that range focus via POST /api/focus. */
+/* Resume pill — appears in working-tree mode after exiting a stack.
+   Treated as a quiet "you-were-here" breadcrumb annotation rather than a
+   call-to-action: dashed border, no fill, brand color appears only on
+   hover so the affordance reads as available without competing with the
+   live diff target chips. */
+.resume-pr-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  border: 1px dashed var(--hunkyard-pill-border);
+  background: transparent;
+  color: var(--hunkyard-rail-fg);
+  font-family: var(--hunkyard-font-body);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: pointer;
+  white-space: nowrap;
+  margin-left: 4px;
+  max-width: 32ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.resume-pr-pill:hover {
+  border-style: solid;
+  border-color: var(--hunkyard-brand);
+  background: var(--hunkyard-brand-subtle);
+  color: var(--hunkyard-brand);
+}
+.resume-pr-pill:focus-visible {
+  outline: 2px solid var(--hunkyard-brand);
+  outline-offset: 1px;
+}
+
+/* ===== Review Conversation (top-of-doc section) ===== */
+/* Linear-inspired: no card chrome around the container, no brand rails.
+   Hierarchy is carried by typography, rhythm, and a hairline divider in
+   the sidebar. */
+.review-conversation {
+  max-width: var(--content-width);
+  margin: 20px 24px 24px;
+  padding: 0;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+}
+.review-conversation[data-doc-layout="centered"] {
+  width: 100%;
+  max-width: min(var(--content-width), calc(100% - 32px));
+  margin: 20px auto 24px;
+}
+/* The review list already pads the files; line the conversation up with them. */
+body.pierre-review .review-conversation:not([data-doc-layout="centered"]) { margin-inline: 0; }
+.review-conversation.collapsed .review-conversation-body { display: none; }
+
+.review-conversation-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  user-select: none;
+}
+.review-conversation.collapsed .review-conversation-header { margin-bottom: 0; }
+.review-conversation-toggle {
+  background: none;
+  border: none;
+  color: var(--hunkyard-editor-fg-muted);
+  cursor: pointer;
+  padding: 0;
+  width: 18px;
+  height: 18px;
+  margin-left: -2px;
+  border-radius: var(--hunkyard-r-sm);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform var(--hunkyard-dur-fast) var(--hunkyard-ease),
+              color var(--hunkyard-dur-fast) var(--hunkyard-ease);
+}
+.review-conversation-toggle svg { width: 12px; height: 12px; }
+.review-conversation-toggle:hover { color: var(--hunkyard-editor-fg); }
+.review-conversation.collapsed .review-conversation-toggle { transform: rotate(-90deg); }
+.review-conversation-header .icon {
+  display: inline-flex;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.review-conversation-header .icon svg {
+  width: 13px;
+  height: 13px;
+}
+.review-conversation-header .label {
+  color: var(--hunkyard-editor-fg);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.review-conversation-header .count {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--hunkyard-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--hunkyard-editor-fg-muted);
+  background: none;
+  padding: 0;
+  min-width: 0;
+  height: auto;
+  border-radius: 0;
+}
+
+/* Linear's "calm invitation": ghost button with a dashed plus chip that
+   becomes solid on hover. No solid border around the whole button. */
+.review-conversation-add-more {
+  margin-top: 12px;
+  font-size: 13px;
+  color: var(--hunkyard-editor-fg-muted);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: var(--hunkyard-r-md);
+  padding: 7px 10px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+  font-family: inherit;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  transition: background var(--hunkyard-dur-fast) var(--hunkyard-ease),
+              color var(--hunkyard-dur-fast) var(--hunkyard-ease),
+              border-color var(--hunkyard-dur-fast) var(--hunkyard-ease);
+}
+.review-conversation-add-more::before {
+  content: "";
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border-radius: var(--hunkyard-r-sm);
+  border: 1px dashed var(--hunkyard-border-strong);
+  background:
+    linear-gradient(currentColor, currentColor) center / 1.5px 6px no-repeat,
+    linear-gradient(currentColor, currentColor) center / 6px 1.5px no-repeat;
+  transition: border-color var(--hunkyard-dur-fast) var(--hunkyard-ease),
+              border-style var(--hunkyard-dur-fast) var(--hunkyard-ease);
+}
+.review-conversation-add-more:hover::before {
+  color: var(--hunkyard-brand);
+  border-style: solid;
+  border-color: var(--hunkyard-brand);
+}
+.review-conversation-add-more:hover {
+  background: var(--hunkyard-editor-bg-hover);
+  color: var(--hunkyard-editor-fg);
+  border-color: var(--hunkyard-border);
+}
+
+/* Threads + form inside the section reuse the same renderers — strip the
+   line-anchored 56px gutter so they span the full section width. */
+.review-conversation .comment-block { padding: 0; margin: 0; }
+.review-conversation .comment-block + .comment-block { margin-top: 10px; }
+.review-conversation .comment-form-wrapper { padding-left: 0; }
+
+/* ===== Tree section: review-conversation row sits in its own section
+   above FILES, separated by the file-tree-header's bottom border. ===== */
+.tree-section--conversation {
+  padding: 8px 4px;
+  flex-shrink: 0;
+}
+.tree-conversation-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 28px;
+  padding: 0 10px;
+  margin: 0 4px;
+  cursor: pointer;
+  color: var(--hunkyard-editor-fg-secondary);
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: var(--hunkyard-r-md);
+  transition: background var(--hunkyard-dur-fast) var(--hunkyard-ease),
+              color var(--hunkyard-dur-fast) var(--hunkyard-ease);
+}
+.tree-conversation-row:hover {
+  background: var(--hunkyard-editor-bg-hover);
+  color: var(--hunkyard-editor-fg);
+}
+.tree-conversation-row.active {
+  background: var(--hunkyard-brand-subtle);
+  color: var(--hunkyard-editor-fg);
+}
+.tree-conversation-icon {
+  display: inline-flex;
+  width: 16px;
+  height: 16px;
+  color: var(--hunkyard-editor-fg-muted);
+  flex-shrink: 0;
+  transition: color var(--hunkyard-dur-fast) var(--hunkyard-ease);
+}
+.tree-conversation-row:hover .tree-conversation-icon,
+.tree-conversation-row.active .tree-conversation-icon {
+  color: var(--hunkyard-editor-fg-secondary);
+}
+.tree-conversation-icon svg { width: 14px; height: 14px; }
+.tree-conversation-name {
+  flex: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  letter-spacing: -0.005em;
+}
+.tree-conversation-badge {
+  font-family: var(--hunkyard-font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--hunkyard-editor-fg-muted);
+  background: none;
+  padding: 0;
+}
+.tree-conversation-row.active .tree-conversation-badge {
+  color: var(--hunkyard-brand);
+}
+
+
+/* ===== Mobile / Touch ===== */
+
+/* 768px (tablet portrait) breakpoint — hide sidebars and secondary controls.
+   !important is required because some elements (.header-context,
+   .scope-toggle, .diff-mode-toggle, .base-branch-picker) get inline
+   style.display = '' set by app.js init code that runs unconditionally
+   regardless of viewport, which would otherwise win over the stylesheet. */
+@media (max-width: 768px) {
+  .file-tree-panel { display: none !important; }
+  #fileTreeToggle { display: none !important; }
+  /* Story mode reuses the left sidebar toggle for the chapter drawer. */
+  body.hunkyard-story-active #fileTreeToggle { display: flex !important; }
+  .sidebar-resize-handle { display: none !important; }
+  .comments-panel { display: none !important; }
+  .scope-toggle { display: none !important; }
+  .diff-mode-toggle { display: none !important; }
+  .header-context { display: none !important; }
+  .base-branch-picker { display: none !important; }
+
+  /* Chrome on mobile computes viewport width from getBoundingClientRect() of
+     all descendants, including those inside overflow:clip containers. A
+     wrapping inline <span> (e.g. a syntax token) has a bounding rect that is
+     the union of all its line boxes — so a span that starts at column 10 and
+     wraps at column 80 reports right:80 even though its container clips at
+     column 40. Converting these spans to inline-block + max-width:100% +
+     overflow:hidden constrains each span's bounding rect to its container,
+     which stops Chrome from expanding the scrollable viewport. */
+  .diff-view,
+  .diff-view-unified { overflow-x: auto; }
+
+  /* File header on mobile: two-row layout.
+     Row 1: [chevron] [icon] [name ………………] [comment-btn]
+     Row 2:           [toggle] ……………… [badge] [+/- stats]
+     Row 2 is indented past the chevron and aligned with the icon. Hide the
+     "Viewed" checkbox whose margin-left:auto would otherwise consume all
+     remaining flex space and crush the filename. Override the base 10px
+     gap on the wrap axis so row 2 sits tight under row 1 (the base gap is
+     fine as column-gap for inline spacing within each row). */
+  .file-header { flex-wrap: wrap; row-gap: 2px; }
+  .file-header-viewed { display: none; }
+
+  /* Row 1: chevron, icon, name, comment-btn (default flex order = source
+     order). Push the comment button to the right edge via margin-left:auto
+     so the name expands to fill the row. */
+  .file-comment-btn { margin-left: auto; }
+
+  /* Force a row break before row 2's items. The pseudo-element on
+     .file-header-name uses the flex-wrap trick: a 100%-basis item triggers
+     wrap before whatever comes after the name in source order.
+     Place it AFTER the name so row 1 ends at the comment button. */
+  .file-header::after {
+    content: '';
+    flex-basis: 100%;
+    width: 0;
+    height: 0;
+    order: 5;
+  }
+
+  /* Row 2 items — assign explicit order so they all land after the break. */
+  .file-header-toggle { order: 10; margin-left: 28px; }
+  .file-header-badge  { order: 20; margin-left: auto; }
+  .file-header-stats  { order: 21; }
+  /* Row 1 items keep default order (0); the comment button stays on row 1
+     because order:0 < 5 < 10. */
+
+}
+
+/* Mobile file picker — shown instead of the hidden file-tree sidebar. */
+.mobile-file-picker-bar {
+  display: none;
+}
+@media (max-width: 768px) {
+  .mobile-file-picker-bar:not(.mobile-file-picker-hidden) {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    background: var(--hunkyard-bg-card);
+    border-bottom: 1px solid var(--hunkyard-border);
+    position: sticky;
+    top: var(--header-height, 49px);
+    z-index: 90;
+  }
+  .mobile-file-picker-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--hunkyard-editor-fg-muted);
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .mobile-file-picker-select {
+    flex: 1;
+    min-width: 0;
+    font-family: var(--hunkyard-font-mono);
+    font-size: 13px;
+    color: var(--hunkyard-editor-fg);
+    background: var(--hunkyard-editor-bg-elevated);
+    border: 1px solid var(--hunkyard-border);
+    border-radius: 6px;
+    padding: 6px 8px;
+    cursor: pointer;
+    min-height: 44px;
+  }
+  .mobile-file-picker-select:focus {
+    outline: 2px solid var(--hunkyard-brand);
+    outline-offset: 1px;
+  }
+}
+
+/* Touch-specific affordances and target sizing.
+   Reply actions are hover-revealed on desktop — on touch there's no hover,
+   so always show. All interactive header buttons get ≥44×44 (WCAG 2.5.5).
+   Textareas use 16px font-size to prevent iOS Safari focus-zoom. */
+@media (pointer: coarse) {
+  .reply-actions {
+    opacity: 1;
+  }
+
+  .comment-nav-btn {
+    padding: 12px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .comment-count-btn {
+    padding: 10px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .theme-toggle {
+    padding: 12px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .update-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .file-comment-btn {
+    padding: 12px 10px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .reply-actions button {
+    padding: 10px 8px;
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .toc-close {
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* iOS Safari zooms any focused input below 16px. */
+  .comment-form textarea,
+  .reply-input,
+  .settings-select,
+  .settings-text-input {
+    font-size: 16px;
+  }
+
+  /* Tiny header-row affordances: copy-path icon in .file-header-name and
+     the diff hunk-expand button. Both render in the file body on mobile so
+     they need real touch targets. */
+  .file-header-copy-path {
+    min-width: 44px;
+    min-height: 44px;
+    padding: 12px;
+  }
+}
+
+/* F3: add-comment affordance for touch in rendered documents.
+   On desktop the affordance is the `+` (.line-add) revealed on row hover.
+   Touch devices never fire hover, so a `+` prefix sits before each
+   commentable .line-num as an inline ::before; display:inline-block +
+   width:1.2ch reserves a fixed slot so the glyph sits flush before the
+   digit. Pierre diffs get the same cue through PIERRE_UNSAFE_CSS (app.js). */
+@media (pointer: coarse) {
+  .line-num::before {
+    content: '+';
+    display: inline-block;
+    width: 1.2ch;
+    color: var(--hunkyard-editor-fg-muted);
+    opacity: 0.6;
+    font-weight: 700;
+    pointer-events: none;
+  }
+  /* Read-only line-number cells (a .line-block whose .line-comment-gutter
+     has .diff-no-comment) must not advertise commentability. */
+  .line-block:has(.line-comment-gutter.diff-no-comment) .line-num::before {
+    display: none;
+  }
+
+  /* F4 reliability: disable the browser's scroll/zoom gesture recognizer
+     on tap targets so it cannot race the pointerdown handler and fire
+     pointercancel before pointerup. Without this, single taps on phones
+     are sometimes silently dropped. */
+  .line-comment-gutter { touch-action: none; }
+}
+
+/* ============================================================
+   Story mode — rail + overview/chapter/support views.
+   Design target: hunkyard-meta story-chapters/linear.html mockup.
+   All colors via --hunkyard-* / --hunkyard-l-* / --hunkyard-story-* tokens
+   (theme.css, 4 blocks). Only shown when session.story present;
+   #storyRoot is display:none otherwise → zero flat-view regression.
+   ============================================================ */
+#storyRoot { display: none; }
+/* Lock the story shell to the viewport so the content pane (#storyPane,
+   overflow-y:auto) is the scroll region — not the window. Without a bounded
+   height the flex row grows with content, the document overflows the viewport,
+   and the window becomes scrollable; a stray scroll (scroll-anchoring, an
+   animated scrollIntoView, focus) then leaves it a few px off the top on
+   chapter nav (see story.spec "resets scroll" — flaky only where content
+   overflows, e.g. CI). Bounding the row keeps scrolling inside the pane. */
+body.hunkyard-story-active #storyRoot {
+  display: flex;
+  height: calc(100vh - var(--header-height, 49px));
+  overflow: hidden;
+}
+/* When story view is active, hide the flat file layout + its tree,
+   but keep header, comments panel, PR panel functional.
+   #fileTreeToggle stays visible — it toggles the chapter rail instead. */
+body.hunkyard-story-active #filesContainer,
+body.hunkyard-story-active #reviewConversation,
+body.hunkyard-story-active .file-tree-panel,
+body.hunkyard-story-active #fileTreeResizer { display: none !important; }
+
+body.hunkyard-story-active #compareRail,
+body.hunkyard-story-active #scopeToggle,
+body.hunkyard-story-active #commitDropdown,
+body.hunkyard-story-active #baseBranchPicker,
+body.hunkyard-story-active #baseBranchArrow,
+body.hunkyard-story-active #branchContext { display: none !important; }
+
+.hunkyard-story-root {
+  min-height: 0;
+  width: 100%;
+}
+
+/* ---------- The rail: TOC + progress + navigator ---------- */
+.hunkyard-story-rail {
+  width: 280px;
+  flex: 0 0 auto;
+  border-right: 1px solid var(--hunkyard-l-hairline);
+  background: var(--hunkyard-bg-page);
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 14px 10px 24px;
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: var(--header-height, 44px);
+  height: calc(100vh - var(--header-height, 44px));
+  z-index: 85;
+}
+.hunkyard-story-rail-resizer { display: none; }
+body.hunkyard-story-active .hunkyard-story-rail-resizer { display: block; }
+/* Desktop story: collapse the chapter rail with the same left-edge slide as
+   the file tree. --story-rail-width is measured in app.js. Mobile keeps the
+   existing off-canvas drawer (hunkyard-story-rail-open) instead — these rules MUST
+   stay min-width scoped so a leftover collapsed class can't keep the fixed
+   mobile drawer visibility:hidden under an open scrim. */
+@media (min-width: 769px) {
+  body.hunkyard-story-rail-collapsed .hunkyard-story-rail {
+    margin-left: calc(-1 * var(--story-rail-width, 280px));
+    visibility: hidden;
+  }
+  body.hunkyard-story-rail-collapsed #storyRailResizer {
+    flex-basis: 0;
+    visibility: hidden;
+  }
+  body.story-rail-anim .hunkyard-story-rail {
+    transition: margin-left 0.22s ease, visibility 0.22s;
+  }
+  body.story-rail-anim #storyRailResizer { transition: flex-basis 0.22s ease; }
+  @media (prefers-reduced-motion: reduce) {
+    body.story-rail-anim .hunkyard-story-rail,
+    body.story-rail-anim #storyRailResizer { transition: none; }
+  }
+}
+.hunkyard-story-rail__title { display: flex; align-items: baseline; gap: 8px; padding: 4px 8px 2px; }
+.hunkyard-story-rail__title h2 { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
+.hunkyard-story-rail__meta { padding: 0 8px 10px; font-size: 11.5px; color: var(--hunkyard-fg-muted); font-variant-numeric: tabular-nums; }
+.hunkyard-story-rail__label {
+  font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--hunkyard-fg-muted); padding: 10px 8px 6px;
+}
+.hunkyard-story-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 7px 8px; border-radius: var(--hunkyard-r-md);
+  cursor: pointer; position: relative;
+  color: var(--hunkyard-fg-secondary);
+  transition: background 90ms;
+  scroll-margin: 12px;
+  border: 0; background: transparent; width: 100%; text-align: left;
+  font-family: inherit; font-size: inherit;
+}
+.hunkyard-story-row:hover { background: var(--hunkyard-l-hover); }
+.hunkyard-story-row.active { background: var(--hunkyard-l-active); color: var(--hunkyard-fg-primary); }
+.hunkyard-story-row.active::before {
+  content: ""; position: absolute; left: -10px; top: 6px; bottom: 6px;
+  width: 3px; border-radius: 0 3px 3px 0; background: var(--hunkyard-brand);
+}
+.hunkyard-story-row__index {
+  flex-shrink: 0; width: 20px; height: 20px; border-radius: var(--hunkyard-r-sm);
+  display: grid; place-items: center;
+  font-family: var(--hunkyard-font-mono); font-size: 11px; font-weight: 600;
+  color: var(--hunkyard-fg-muted); background: var(--hunkyard-l-surface-2);
+}
+.hunkyard-story-row.active .hunkyard-story-row__index { color: var(--hunkyard-story-accent); background: var(--hunkyard-story-num-bg); }
+.hunkyard-story-row__body { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.hunkyard-story-row__name { display: block; font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hunkyard-story-row.active .hunkyard-story-row__name { font-weight: 600; }
+.hunkyard-story-row__sub { display: block; font-size: 11px; color: var(--hunkyard-fg-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.hunkyard-story-row.support { opacity: 0.85; }
+.hunkyard-story-row.support .hunkyard-story-row__index { background: transparent; border: 1px dashed var(--hunkyard-l-hairline-strong); }
+
+/* Per-chapter status dot (viewed = filled, partial = conic, none = ring) */
+.hunkyard-story-status {
+  flex-shrink: 0; width: 14px; height: 14px; border-radius: 50%;
+  border: 1.5px solid var(--hunkyard-border-strong); position: relative;
+}
+.hunkyard-story-status.partial { background: conic-gradient(var(--hunkyard-green) var(--p, 50%), transparent 0); border-color: var(--hunkyard-green); }
+.hunkyard-story-status.done { background: var(--hunkyard-green); border-color: var(--hunkyard-green); }
+.hunkyard-story-status.done::after {
+  content: "\2713"; position: absolute; inset: 0; display: grid; place-items: center;
+  font-size: 8.5px; font-weight: 800; color: var(--hunkyard-bg-page);
+}
+
+.hunkyard-story-rail__spacer { flex: 1; }
+.hunkyard-story-rail__hint {
+  margin: 12px 8px 0; padding-top: 12px; border-top: 1px solid var(--hunkyard-l-hairline);
+  font-size: 11px; color: var(--hunkyard-fg-muted);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;
+}
+.hunkyard-story-rail__hint button {
+  color: var(--hunkyard-fg-secondary); background: transparent; border: 0; cursor: pointer;
+  display: inline-flex; gap: 5px; align-items: center; font-family: inherit; font-size: inherit; padding: 0;
+}
+.hunkyard-story-rail__hint button:hover { color: var(--hunkyard-brand); }
+
+/* ---------- Content pane ---------- */
+.hunkyard-story-pane { flex: 1; overflow-y: auto; scroll-behavior: auto; min-width: 0; }
+.hunkyard-story-pane__inner { max-width: none; margin: 0; padding: var(--hunkyard-review-pad-top) var(--hunkyard-review-pad-inline) var(--hunkyard-review-pad-bottom); }
+.hunkyard-story-view { display: none; }
+.hunkyard-story-view.active { display: block; animation: hunkyard-story-fade 160ms ease; }
+#hunkyard-story-view-overview { max-width: none; margin: 0; }
+@keyframes hunkyard-story-fade { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+
+/* ---------- Overview view ---------- */
+.hunkyard-story-prologue__eyebrow {
+  display: flex; align-items: center; gap: 8px; margin-bottom: 12px;
+  font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.09em;
+  color: var(--hunkyard-fg-muted);
+}
+.hunkyard-story-prologue__eyebrow .dot { width: 5px; height: 5px; border-radius: 50%; background: var(--hunkyard-brand); }
+.hunkyard-story-prologue h2 {
+  font-size: 22px; font-weight: 650; line-height: 1.3;
+  margin-bottom: 12px; max-width: none;
+}
+.hunkyard-story-prologue__overview {
+  color: var(--hunkyard-fg-primary);
+  font-size: 15px;
+  max-width: none;
+  margin-bottom: 14px;
+}
+.hunkyard-story-prologue__overview p { margin: 0 0 8px; }
+.hunkyard-story-prologue__overview p:last-child { margin-bottom: 0; }
+.hunkyard-story-pane a {
+  color: var(--hunkyard-brand);
+  text-decoration: none;
+  border-bottom: 1px solid var(--hunkyard-brand-subtle);
+}
+.hunkyard-story-pane a:hover {
+  color: var(--hunkyard-brand-hover);
+  border-bottom-color: var(--hunkyard-brand-hover);
+}
+.hunkyard-story-prologue__overview h1,
+.hunkyard-story-prologue__overview h2,
+.hunkyard-story-prologue__overview h3 {
+  color: var(--hunkyard-fg-primary);
+  font-size: 14px;
+  font-weight: 650;
+  margin: 14px 0 6px;
+}
+.hunkyard-story-prologue__overview h1:first-child,
+.hunkyard-story-prologue__overview h2:first-child,
+.hunkyard-story-prologue__overview h3:first-child { margin-top: 0; }
+.hunkyard-story-prologue__overview ul,
+.hunkyard-story-prologue__overview ol {
+  margin: 6px 0 10px;
+  padding-left: 20px;
+}
+.hunkyard-story-prologue__overview li { margin: 3px 0; }
+.hunkyard-story-prologue__overview code {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 0.88em;
+  padding: 1px 5px;
+  background: var(--hunkyard-editor-bg-elevated);
+  border-radius: 3px;
+}
+.hunkyard-story-prologue__overview pre {
+  background: var(--hunkyard-editor-bg-elevated);
+  border-radius: var(--hunkyard-r-sm);
+  padding: 8px 10px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+.hunkyard-story-prologue__overview pre code {
+  padding: 0;
+  background: none;
+}
+.hunkyard-story-prologue__bullets {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin: 18px 0 22px;
+  padding-top: 16px;
+  border-top: 1px solid var(--hunkyard-l-hairline);
+}
+.hunkyard-story-prologue__bullet-group h3 {
+  margin-bottom: 8px;
+  font-size: 11px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--hunkyard-fg-muted);
+}
+.hunkyard-story-prologue__bullet-group ul {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+}
+.hunkyard-story-prologue__bullet-group li {
+  position: relative;
+  padding-left: 15px;
+  color: var(--hunkyard-fg-secondary);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+.hunkyard-story-prologue__bullet-group li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.68em;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--hunkyard-brand);
+}
+.hunkyard-story-prologue h2 span { color: var(--hunkyard-fg-muted); font-weight: 400; }
+.hunkyard-story-divider {
+  display: flex; align-items: center; gap: 10px; margin: 4px 0 14px;
+  font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em;
+  color: var(--hunkyard-fg-muted);
+}
+.hunkyard-story-divider::after { content: ""; flex: 1; border-top: 1px solid var(--hunkyard-l-hairline); }
+
+.hunkyard-story-toc { display: flex; flex-direction: column; }
+.hunkyard-story-toc__item {
+  display: flex; align-items: center; gap: 14px;
+  padding: 13px 12px; border-radius: var(--hunkyard-r-md);
+  cursor: pointer; position: relative;
+  border: 0; border-bottom: 1px solid var(--hunkyard-l-hairline);
+  transition: background 90ms; background: transparent; width: 100%; text-align: left;
+  font-family: inherit; color: var(--hunkyard-fg-primary);
+}
+.hunkyard-story-toc__item:last-child { border-bottom: 0; }
+.hunkyard-story-toc__item:hover { background: var(--hunkyard-l-hover); }
+.hunkyard-story-toc__index {
+  flex-shrink: 0; width: 26px; height: 26px; border-radius: var(--hunkyard-r-md);
+  display: grid; place-items: center;
+  font-family: var(--hunkyard-font-mono); font-size: 12px; font-weight: 700;
+  color: var(--hunkyard-story-accent); background: var(--hunkyard-story-num-bg);
+}
+.hunkyard-story-toc__item.support .hunkyard-story-toc__index { color: var(--hunkyard-story-support-fg); background: transparent; border: 1px dashed var(--hunkyard-l-hairline-strong); font-size: 10px; }
+.hunkyard-story-toc__main { flex: 1; min-width: 0; }
+.hunkyard-story-toc__title { display: block; font-size: 14px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 2px; }
+.hunkyard-story-toc__item.support .hunkyard-story-toc__title { font-weight: 500; color: var(--hunkyard-fg-secondary); }
+.hunkyard-story-toc__summary { display: block; font-size: 12.5px; color: var(--hunkyard-fg-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hunkyard-story-toc__summary p { margin: 0; display: inline; }
+.hunkyard-story-toc__meta {
+  flex-shrink: 0; font-size: 11px; color: var(--hunkyard-fg-muted);
+  font-family: var(--hunkyard-font-mono); font-variant-numeric: tabular-nums;
+  display: flex; align-items: center; gap: 12px;
+}
+.hunkyard-story-toc__go { color: var(--hunkyard-fg-muted); font-size: 14px; opacity: 0; transition: opacity 90ms; }
+.hunkyard-story-toc__item:hover .hunkyard-story-toc__go { opacity: 1; color: var(--hunkyard-brand); }
+
+/* ---------- Chapter view ---------- */
+.hunkyard-story-chapter__top { display: flex; align-items: flex-start; gap: 12px; margin: 0 0 6px; }
+.hunkyard-story-chapter__index {
+  flex-shrink: 0; width: 30px; height: 30px; border-radius: var(--hunkyard-r-md); margin-top: 2px;
+  display: grid; place-items: center;
+  font-family: var(--hunkyard-font-mono); font-size: 13px; font-weight: 700;
+  color: var(--hunkyard-story-accent); background: var(--hunkyard-story-num-bg);
+}
+.hunkyard-story-chapter__index.support { color: var(--hunkyard-story-support-fg); background: transparent; border: 1px dashed var(--hunkyard-l-hairline-strong); }
+.hunkyard-story-chapter__heading { flex: 1; min-width: 0; }
+.hunkyard-story-chapter__eyebrow { font-size: 11px; color: var(--hunkyard-fg-muted); font-variant-numeric: tabular-nums; margin-bottom: 2px; }
+.hunkyard-story-chapter__heading h2 { font-size: 20px; font-weight: 650; letter-spacing: -0.02em; margin: 0; }
+.hunkyard-story-chapter__mark-row {
+  margin-top: 22px;
+  display: flex;
+  justify-content: flex-end;
+}
+.hunkyard-story-chapter__mark {
+  flex-shrink: 0; margin-top: 4px;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; color: var(--hunkyard-fg-muted); cursor: pointer;
+  padding: 4px 10px; border-radius: var(--hunkyard-r-md);
+  border: 1px solid var(--hunkyard-l-hairline); background: var(--hunkyard-l-surface-2);
+}
+.hunkyard-story-chapter__mark:hover { background: var(--hunkyard-l-hover); color: var(--hunkyard-fg-primary); }
+.hunkyard-story-chapter__summary { color: var(--hunkyard-fg-secondary); font-size: 13.5px; max-width: 66ch; margin: 8px 0 18px 42px; }
+.hunkyard-story-chapter__summary p { margin: 0 0 6px; }
+.hunkyard-story-chapter__summary p:last-child { margin-bottom: 0; }
+.hunkyard-story-chapter__diagram { margin: 0 0 18px 42px; }
+
+/* Per-file hunk group — regular file-section/header chrome with story metadata.
+   Same look as the review list: one border around header, file-level
+   comments and hunks, on the code background. overflow: clip rounds the
+   corners without making a scroll container, so the sticky header sticks. */
+.hunkyard-story-file-group {
+  margin-bottom: 18px;
+  background: var(--hunkyard-editor-bg);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: var(--hunkyard-r-md);
+  overflow: clip;
+}
+.hunkyard-story-file-group > .hunkyard-review-file-header {
+  border-top: none;
+}
+/* Collapsed: the group's own border closes the header. */
+.hunkyard-story-file-group:not([open]) > .hunkyard-review-file-header { border-bottom: none; }
+/* The clip would cut off the default outline drawn outside the header. */
+.hunkyard-story-file-group > .hunkyard-review-file-header:focus-visible { outline: 2px solid var(--hunkyard-brand); outline-offset: -2px; }
+.hunkyard-story-file-group.viewed { opacity: 0.62; transition: opacity 140ms; }
+.hunkyard-story-file-group.viewed:hover { opacity: 1; }
+.hunkyard-review-file-header {
+  top: 0;
+}
+.hunkyard-story-file-group__stat { color: var(--hunkyard-fg-muted); font-size: 11px; white-space: nowrap; }
+.hunkyard-story-file-group__stat .add { color: var(--hunkyard-green); }
+.hunkyard-story-file-group__stat .del { color: var(--hunkyard-red); }
+.hunkyard-story-elsewhere {
+  font-family: var(--hunkyard-font-body); font-size: 10.5px;
+  color: var(--hunkyard-fg-muted); background: var(--hunkyard-l-surface-2);
+  border: 1px solid var(--hunkyard-l-hairline); border-radius: 999px; padding: 1px 9px;
+  cursor: pointer;
+}
+.hunkyard-story-elsewhere:hover { color: var(--hunkyard-brand); border-color: var(--hunkyard-brand-subtle); }
+/* The diff renderer output nests directly under the group; no extra chrome */
+.hunkyard-story-file-group__empty { padding: 14px; color: var(--hunkyard-fg-muted); font-size: 12.5px; }
+
+/* Chapter footer — next-chapter nudge */
+.hunkyard-story-footer {
+  margin-top: 24px; padding-top: 18px; border-top: 1px solid var(--hunkyard-l-hairline);
+  display: flex; align-items: center; gap: 12px;
+}
+.hunkyard-story-next {
+  flex: 1; display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: var(--hunkyard-r-lg);
+  background: var(--hunkyard-l-surface); border: 1px solid var(--hunkyard-l-hairline);
+  cursor: pointer; transition: border-color 100ms, background 100ms;
+  width: 100%; text-align: left; font-family: inherit; color: var(--hunkyard-fg-primary);
+}
+.hunkyard-story-next:hover { background: var(--hunkyard-l-hover); border-color: var(--hunkyard-brand-subtle); }
+.hunkyard-story-next .body { display: flex; flex-direction: column; min-width: 0; }
+.hunkyard-story-next .lbl { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em; color: var(--hunkyard-fg-muted); }
+.hunkyard-story-next .nm { display: block; font-size: 13.5px; font-weight: 600; }
+.hunkyard-story-next .idx {
+  width: 28px; height: 28px; border-radius: var(--hunkyard-r-md); display: grid; place-items: center;
+  font-family: var(--hunkyard-font-mono); font-size: 12px; font-weight: 700;
+  color: var(--hunkyard-brand); background: var(--hunkyard-brand-bg);
+}
+.hunkyard-story-next .go { margin-left: auto; color: var(--hunkyard-fg-muted); font-size: 18px; }
+.hunkyard-story-next.prev .go { margin-left: 0; }
+.hunkyard-story-next.prev .body { margin-right: auto; }
+.hunkyard-story-next.done .idx { color: var(--hunkyard-green); background: var(--hunkyard-badge-resolved-bg); }
+
+/* ---------- Rail toggle (mobile drawer) ---------- */
+.hunkyard-story-rail-scrim { display: none; }
+
+/* ---------- Mobile pass ---------- */
+@media (max-width: 768px) {
+  body.hunkyard-story-active #storyRoot { display: block; }
+  body.hunkyard-story-active .hunkyard-story-rail-resizer { display: none !important; }
+  .hunkyard-story-rail {
+    position: fixed; top: var(--header-height, 44px); bottom: 0; left: 0; width: 82vw !important; max-width: 320px; z-index: 40;
+    transform: translateX(-102%); transition: transform 200ms cubic-bezier(.4, 0, .2, 1);
+    background: var(--hunkyard-bg-card); box-shadow: 12px 0 40px rgba(0, 0, 0, 0.4); height: auto; max-height: none;
+  }
+  body.hunkyard-story-rail-open .hunkyard-story-rail { transform: none; }
+  .hunkyard-story-rail-scrim {
+    display: none; position: fixed; inset: var(--header-height, 44px) 0 0 0; background: var(--hunkyard-overlay-bg); z-index: 39;
+  }
+  body.hunkyard-story-rail-open .hunkyard-story-rail-scrim { display: block; }
+  .main-content { --hunkyard-review-pad-top: 18px; --hunkyard-review-pad-inline: 16px; --hunkyard-review-pad-bottom: 60px; }
+  .hunkyard-story-prologue__bullets { grid-template-columns: 1fr; }
+  .hunkyard-story-chapter__summary { margin-left: 0; }
+  .hunkyard-story-chapter__diagram { margin-left: 0; }
+}
+@media (pointer: coarse) {
+  .hunkyard-story-row,
+  .hunkyard-story-toc__item,
+  .hunkyard-story-next { min-height: 44px; }
+  .hunkyard-story-chapter__mark { min-height: 32px; }
+}
+
+/* ===== Pierre review view (git mode) =====
+   @pierre/diffs CodeView owns its own scroll container, so the file list
+   becomes a viewport-height pane instead of scrolling the window. The review
+   conversation is moved into CodeView's (non-virtualized) list header. */
+body.pierre-review .main-layout { min-height: 0; }
+body.pierre-review .main-content {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--review-chrome-height, var(--header-height, 49px)));
+  min-height: 0;
+}
+body.pierre-review #filesContainer {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-inline: var(--hunkyard-review-pad-inline);
+}
+/* One border around each file: header, file-level comments and all hunks.
+   The header keeps only its bottom edge so the sides don't double up.
+   overflow: clip rounds the corners without making a scroll container, so
+   the sticky header still sticks. */
+body.pierre-review #filesContainer diffs-container {
+  border: 1px solid var(--hunkyard-border);
+  border-radius: var(--hunkyard-r-md);
+  overflow: clip;
+}
+body.pierre-review #filesContainer diffs-container .hunkyard-review-file-header {
+  border-top: none;
+}
+/* Collapsed: the file's own border closes the header. */
+body.pierre-review #filesContainer diffs-container .hunkyard-review-file-header.collapsed {
+  border-bottom: none;
+}
+.pierre-file-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  cursor: default;
+}
+button.file-header-chevron {
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+button.file-header-chevron:focus-visible { outline: 2px solid var(--hunkyard-brand); outline-offset: 1px; }
+.pierre-file-header.collapsed .file-header-chevron {
+  transform: rotate(-90deg);
+}
+.pierre-annotation {
+  padding-left: 0;
+}
+/* Pierre's wrap mode sets word-break: break-word on the host. Inherited by
+   Hunkyard content, it lets table columns shrink below a word ("Ty|pe"). */
+.pierre-annotation,
+.pierre-document {
+  word-break: normal;
+}
+/* File-level threads and the file form share one annotation cell above the
+   file. In diffs they start at the code column, like line comments, at
+   reading width. Block margins collapse between siblings, so this gives the
+   same space above, between and below them. In split diffs the cell is the
+   old side when the file has one, so they sit on the left. Outdated threads
+   follow the same horizontal layout, with no vertical margin. */
+.pierre-file-level,
+.outdated-diff-comments > .comment-block {
+  max-width: var(--content-width);
+}
+.pierre-file-level {
+  width: 100%;
+  margin: 12px 0;
+}
+/* Rendered documents and placeholders have no code column: center at
+   reading width with at least 16px each side (placeholders left-align,
+   below). Files-mode source already
+   reserves that inset, so it only centers. */
+[data-hunkyard-document] .pierre-file-level,
+[data-hunkyard-document] .outdated-diff-comments > .comment-block {
+  max-width: min(var(--content-width), calc(100% - 32px));
+}
+[data-hunkyard-document] .pierre-file-level,
+[data-hunkyard-document] .outdated-diff-comments > .comment-block,
+[data-hunkyard-file-view] .pierre-file-level,
+[data-hunkyard-file-view] .outdated-diff-comments > .comment-block {
+  margin-left: auto;
+  margin-right: auto;
+}
+/* Placeholders (deleted, renamed, orphaned) have no code column: left-align
+   with the same 16px inset as the placeholder text. */
+[data-hunkyard-document]:has(.diff-deleted-placeholder) .pierre-file-level,
+[data-hunkyard-document]:has(.diff-deleted-placeholder) .outdated-diff-comments > .comment-block {
+  margin-left: 16px;
+  margin-right: auto;
+}
+/* Line comments and forms inside a diff (review list or story) stay at
+   reading width, like classic Hunkyard, instead of spanning a wide diff. */
+.pierre-annotation:not(.pierre-file-level) {
+  max-width: var(--content-width);
+}
+
+/* The rendered document sits in a Pierre annotation slot, which inherits
+   the code typography from the diffs host; restore the page's. */
+.pierre-document {
+  width: 100%;
+  font-family: var(--hunkyard-font-body);
+  font-size: 1rem;
+  line-height: 1.7;
+  color: var(--hunkyard-editor-fg);
+}
+.pierre-document .document-wrapper {
+  max-width: min(var(--content-width), calc(100% - 32px));
+  padding-inline: 0;
+}
+
+/* ===== Theme preview page (/themes) ===== */
+.settings-theme-preview-link {
+  font-size: 13px;
+  color: var(--hunkyard-brand);
+}
+.theme-preview-page {
+  background: var(--hunkyard-bg-page);
+  color: var(--hunkyard-fg-primary);
+}
+.theme-preview-title {
+  font-weight: 600;
+  color: var(--hunkyard-fg-secondary);
+}
+.theme-preview-page .header-right .btn {
+  text-decoration: none;
+}
+.theme-preview-page .header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.theme-preview-layout {
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  height: calc(100vh - var(--header-height, 49px));
+}
+.theme-preview-list {
+  overflow-y: auto;
+  border-right: 1px solid var(--hunkyard-border);
+  background: var(--hunkyard-bg-card);
+  padding: 8px;
+}
+.theme-preview-list-hint {
+  padding: 4px 8px 8px;
+  font-size: 12px;
+  color: var(--hunkyard-fg-muted);
+}
+.theme-preview-list [role="listbox"]:focus-visible {
+  outline: none;
+}
+.theme-preview-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 8px;
+  border-radius: var(--hunkyard-r-md);
+  cursor: pointer;
+  font-size: 13px;
+}
+.theme-preview-item:hover {
+  background: var(--hunkyard-option-hover);
+}
+.theme-preview-item[aria-selected="true"] {
+  background: var(--hunkyard-option-selected-bg);
+  color: var(--hunkyard-brand);
+  font-weight: 600;
+}
+.theme-preview-list [role="listbox"]:focus-visible .theme-preview-item[aria-selected="true"] {
+  box-shadow: inset 0 0 0 1px var(--hunkyard-focus-ring);
+}
+.theme-preview-item-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Each theme's own colours, drawn on its own background. */
+.theme-preview-swatches {
+  display: inline-flex;
+  gap: 3px;
+  padding: 4px 5px;
+  border: 1px solid;
+  border-radius: var(--hunkyard-r-sm);
+}
+.theme-preview-swatch {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+.theme-preview-current {
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--hunkyard-fg-muted);
+}
+.theme-preview-main {
+  overflow-y: auto;
+  padding: 24px 32px 80px;
+}
+.theme-preview-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+.theme-preview-name {
+  font-size: 18px;
+  font-weight: 600;
+}
+.theme-preview-status {
+  font-size: 13px;
+  color: var(--hunkyard-fg-muted);
+  min-height: 1.2em;
+}
+.theme-preview-file {
+  margin-bottom: 18px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--hunkyard-editor-bg);
+}
+.theme-preview-file .hunkyard-review-file-header {
+  border: 0;
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+.theme-preview-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+@media (max-width: 768px) {
+  .theme-preview-layout { grid-template-columns: 1fr; grid-template-rows: 200px minmax(0, 1fr); }
+  .theme-preview-list { border-right: 0; border-bottom: 1px solid var(--hunkyard-border); }
+  .theme-preview-main { padding: 16px; }
+}
+
+/* ===== Find in diff (hunkyard-find.js) ===== */
+.hunkyard-find-bar {
+  position: fixed;
+  top: calc(var(--header-height, 49px) + 8px);
+  right: 24px;
+  z-index: 300;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 4px 4px 8px;
+  background: var(--hunkyard-bg-card);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.hunkyard-find-bar[hidden] { display: none; }
+.hunkyard-find-input {
+  width: 220px;
+  padding: 4px 6px;
+  font-size: 13px;
+  font-family: var(--hunkyard-font-mono);
+  background: var(--hunkyard-editor-bg-elevated);
+  color: var(--hunkyard-editor-fg);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 4px;
+  outline: none;
+}
+.hunkyard-find-input:focus { border-color: var(--hunkyard-brand); }
+.hunkyard-find-input::placeholder { color: var(--hunkyard-editor-fg-muted); }
+.hunkyard-find-empty .hunkyard-find-input { border-color: var(--hunkyard-red); }
+.hunkyard-find-count {
+  min-width: 72px;
+  padding: 0 4px;
+  font-size: 12px;
+  color: var(--hunkyard-fg-secondary);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.hunkyard-find-btn {
+  min-width: 26px;
+  height: 26px;
+  padding: 0 4px;
+  font-size: 13px;
+  background: transparent;
+  color: var(--hunkyard-fg-secondary);
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.hunkyard-find-btn:hover { background: var(--hunkyard-editor-bg-hover); color: var(--hunkyard-fg-primary); }
+.hunkyard-find-btn:focus-visible { outline: none; box-shadow: var(--hunkyard-focus); }
+.hunkyard-find-case { font-size: 12px; font-weight: 600; }
+.hunkyard-find-case[aria-pressed="true"] { background: var(--hunkyard-brand-bg); color: var(--hunkyard-brand); }
+@media (max-width: 768px) {
+  .hunkyard-find-bar { left: 16px; right: 16px; }
+  /* 16px stops iOS Safari zooming the page when the input takes focus. */
+  .hunkyard-find-input { flex: 1 1 auto; width: auto; min-width: 0; font-size: 16px; }
+  .hunkyard-find-count { min-width: 0; white-space: nowrap; }
+  .hunkyard-find-count, .hunkyard-find-btn { flex-shrink: 0; }
+}
+
+.publish-review-dialog {
+  width: min(560px, calc(100vw - 32px));
+  max-height: calc(100dvh - 32px);
+  margin: auto;
+  overflow: hidden;
+  padding: 0;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  background: var(--hunkyard-editor-bg);
+  color: var(--hunkyard-editor-fg);
+  font-size: 14px;
+  line-height: 1.5;
+}
+.publish-review-dialog::backdrop { background: var(--hunkyard-overlay-bg); }
+.publish-review-dialog form { display: flex; flex-direction: column; max-height: calc(100dvh - 34px); }
+.publish-review-header { padding: 16px 20px; border-bottom: 1px solid var(--hunkyard-border); flex-shrink: 0; }
+.publish-review-header h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.publish-review-body { display: grid; gap: 20px; padding: 20px; overflow-y: auto; overscroll-behavior: contain; }
+.publish-summary > label { display: block; margin-bottom: 8px; font-weight: 600; }
+.publish-review-dialog textarea {
+  display: block;
+  width: 100%;
+  min-height: 104px;
+  padding: 8px 12px;
+  resize: vertical;
+  font: inherit;
+  color: inherit;
+  background: var(--hunkyard-editor-bg);
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+}
+.publish-review-dialog textarea:focus-visible { outline: 2px solid var(--hunkyard-brand); outline-offset: -1px; }
+.publish-review-dialog textarea::placeholder { color: var(--hunkyard-editor-fg-muted); }
+.publish-review-dialog fieldset { display: grid; gap: 2px; margin: 0; border: 0; padding: 0; min-width: 0; }
+.publish-review-dialog legend { margin-bottom: 8px; font-weight: 600; }
+.publish-review-dialog fieldset label { display: flex; align-items: center; gap: 8px; min-height: 32px; padding: 6px 8px; border-radius: 6px; cursor: pointer; overflow-wrap: anywhere; }
+.publish-review-dialog fieldset label:hover { background: var(--hunkyard-editor-bg-hover); }
+.publish-decision label:has(input:checked) { background: var(--hunkyard-brand-subtle); }
+.publish-skills-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 8px; }
+.publish-review-dialog input { accent-color: var(--hunkyard-brand); flex-shrink: 0; }
+.publish-review-dialog input:focus-visible { outline: 2px solid var(--hunkyard-brand); outline-offset: 3px; }
+.publish-review-dialog p { margin: 0; color: var(--hunkyard-editor-fg-muted); font-size: 12px; }
+.publish-summary p { margin-top: 6px; }
+.publish-review-footer { padding: 12px 20px 16px; border-top: 1px solid var(--hunkyard-border); flex-shrink: 0; }
+.publish-review-footer p { margin-bottom: 12px; }
+.publish-review-footer .confirm-actions-row { justify-content: flex-end; gap: 8px; }
+.publish-review-footer .btn { flex: 0 0 auto; min-height: 32px; padding-inline: 16px; }
+@media (max-width: 480px) {
+  .publish-review-dialog fieldset label { min-height: 44px; }
+  .publish-review-footer .btn { min-height: 44px; }
+}
+
+/* Files changed controls stay with the diff pane, as on GitHub. */
+.review-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+  min-height: 56px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--hunkyard-border);
+  background: var(--hunkyard-editor-bg);
+  font-size: 13px;
+}
+.review-toolbar[hidden] { display: none; }
+.review-toolbar-title { display: flex; align-items: center; gap: 8px; margin-right: auto; white-space: nowrap; }
+.review-file-count { padding: 0 6px; border-radius: 12px; background: var(--hunkyard-editor-bg-elevated); font-size: 12px; font-variant-numeric: tabular-nums; }
+.file-tree-search { padding: 4px 12px 12px; }
+.file-tree-search input { width: 100%; min-height: 32px; padding: 4px 8px; border: 1px solid var(--hunkyard-border); border-radius: 6px; background: var(--hunkyard-editor-bg); color: var(--hunkyard-editor-fg); font: inherit; font-size: 12px; }
+.file-tree-search input::placeholder { color: var(--hunkyard-editor-fg-muted); }
+.file-tree-search input:focus-visible { outline: 2px solid var(--hunkyard-brand); outline-offset: -1px; }
+body.pierre-review .header { flex-wrap: wrap; gap: 8px; }
+body.pierre-review .header-left { min-width: 0; }
+body.pierre-review .header-right { flex-shrink: 0; }
+body.pierre-review .file-header-name { font-size: 12px; font-weight: 600; }
+body.pierre-review .file-header-chevron { width: 24px; height: 24px; }
+body.pierre-review .file-header-toggle { flex-shrink: 0; }
+body.pierre-review .file-header-icon { display: none; }
+@media (max-width: 768px) {
+  .review-toolbar { gap: 8px; padding: 8px 12px; }
+  .review-toolbar .viewed-count { display: none; }
+  body.pierre-review .file-header-badge,
+  body.pierre-review .file-header-stats { display: none; }
+  body.pierre-review .file-header { gap: 4px; }
+}
+#singleFileToggle { min-height: 32px; }
+#singleFileToggle[aria-pressed="true"] { background: var(--hunkyard-brand-subtle); border-color: var(--hunkyard-brand); color: var(--hunkyard-editor-fg); }
+body.hunkyard-story-active #reviewToolbar { display: none; }
+
+/* Commit metadata stays aligned while full subjects wrap below it. */
+.commit-picker-commit,
+.compare-commit-item { display: flex; flex-direction: column; align-items: stretch; gap: 3px; white-space: normal; }
+.commit-picker-item-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.commit-picker-commit .commit-picker-item-msg,
+.compare-commit-item .commit-picker-item-msg { white-space: normal; overflow-wrap: anywhere; flex: initial; font-family: var(--hunkyard-font-body); line-height: 1.4; }
+.compare-commit-item.active { background: var(--hunkyard-brand-subtle); color: var(--hunkyard-editor-fg); }
+
+.commit-picker-item-meta .commit-picker-item-time { font-size: 11px; }

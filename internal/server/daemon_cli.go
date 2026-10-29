@@ -1,0 +1,354 @@
+package server
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"strconv"
+
+	"github.com/BSH2409/hunkyard/internal/clicmd"
+	"github.com/BSH2409/hunkyard/internal/config"
+	"github.com/BSH2409/hunkyard/internal/focus"
+	"github.com/BSH2409/hunkyard/internal/session"
+	"github.com/BSH2409/hunkyard/internal/vcs"
+)
+
+// PrintHelpFn is wired from cmd/hunkyard for flag-set usage text.
+var PrintHelpFn func()
+
+// PrintVersionFn is wired from cmd/hunkyard for --version early exit.
+var PrintVersionFn func()
+
+// DaemonCLIConfig holds resolved daemon configuration from CLI flags, env, and config files.
+type DaemonCLIConfig struct {
+	Port                        int
+	Host                        string
+	PublicURL                   string
+	AllowUnauthenticatedNetwork bool
+	NoOpen                      bool
+	OpenCmd                     string
+	Quiet                       bool
+	NotifyOnRoundReady          bool
+	OutputDir                   string
+	Author                      string
+	BaseBranch                  string
+	IgnorePatterns              []string
+	Files                       []string
+	NoIntegrationCheck          bool
+	NoUpdateCheck               bool
+	AgentCmd                    string
+	PlanDir                     string
+	PlanName                    string
+	ReviewPath                  string
+	VCSOverride                 string
+	Cfg                         config.Config
+	Focus                       *session.Focus
+	RemoteFiles                 bool
+	LiveOrigin                  string
+	LiveCookie                  string
+	PreviewFile                 string
+	SkillsFile                  string // trusted CLI manifest only
+	SessionID                   string // user-facing reconnect ID from --session
+	SessionKeyOverride          string // internal: force session registry key in _serve
+}
+
+type daemonFlagSet struct {
+	portSet                     bool
+	port                        int
+	host                        string
+	publicURL                   string
+	allowUnauthenticatedNetwork bool
+	noOpen                      bool
+	showVersion                 bool
+	outputDir                   string
+	quiet                       bool
+	noIgnore                    bool
+	baseBranch                  string
+	vcsOverride                 string
+	planDir                     string
+	planName                    string
+	fileArgs                    []string
+	prSpec                      string
+	rangeSpec                   string
+	scopeSpec                   string
+	remoteFiles                 bool
+	liveOrigin                  string
+	liveCookie                  string
+	previewFile                 string
+	skillsFile                  string
+	sessionID                   string
+	sessionKeyOverride          string
+}
+
+func parseDaemonFlags(args []string) daemonFlagSet {
+	fs := flag.NewFlagSet("hunkyard", flag.ExitOnError)
+	port := fs.Int("port", 0, "Port to listen on (default: random available port)")
+	fs.IntVar(port, "p", 0, "Port to listen on (shorthand)")
+	host := fs.String("host", "", "Host to listen on (default: 0.0.0.0)")
+	publicURL := fs.String("public-url", "", "Advertised base URL for browser/stderr (overrides HUNKYARD_PUBLIC_URL; e.g. https://machine.ts.net for tailscale serve)")
+	allowUnauthNet := fs.Bool(config.AllowUnauthenticatedNetworkFlag, false, "Allow non-loopback listen or public_url without authentication (trusted network only)")
+	noOpen := fs.Bool("no-open", false, "Don't auto-open browser")
+	showVersion := fs.Bool("version", false, "Print version and exit")
+	fs.BoolVar(showVersion, "v", false, "Print version and exit (shorthand)")
+	outputDir := fs.String("output", "", "Hunkyard data root for reviews (default: ~/.hunkyard); reviews live in <root>/reviews/<key>/")
+	fs.StringVar(outputDir, "o", "", "Hunkyard data root for reviews (shorthand)")
+	quiet := fs.Bool("quiet", false, "On success, suppress connect/start status, tips, and session summary")
+	fs.BoolVar(quiet, "q", false, "On success, suppress connect/start status, tips, and session summary (shorthand)")
+	noIgnore := fs.Bool("no-ignore", false, "Disable all ignore patterns from config files")
+	baseBranch := fs.String("base-branch", "", "Base branch to diff against (overrides auto-detection)")
+	vcsFlag := fs.String("vcs", "", "VCS backend to use: git, sl/sapling, jj/jujutsu (default: auto-detect)")
+	planDir := fs.String("plan-dir", "", "")
+	planName := fs.String("name", "", "")
+	prSpec := fs.String("pr", "", "Review a GitHub pull request by number or URL")
+	rangeSpec := fs.String("range", "", "Review A..B exactly or A...B from their merge base")
+	scopeSpec := fs.String("scope", "", "Diff scope when reviewing a PR: layer (default) or full-stack")
+	remoteFiles := fs.Bool("remote", false, "Read PR file content through the GitHub API")
+	liveOrigin := fs.String("live-origin", "", "")
+	liveCookie := fs.String("live-cookie", "", "")
+	previewFile := fs.String("preview-file", "", "")
+	skillsFile := fs.String("skills-file", "", "Host-supplied local skill manifest")
+	sessionID := fs.String("session", "", "Reconnect to an existing review session by ID")
+	sessionKeyOverride := fs.String("session-key", "", "")
+	fs.Usage = func() {
+		if PrintHelpFn != nil {
+			PrintHelpFn()
+		}
+	}
+	// Keep in sync with the fs.Bool/fs.BoolVar registrations above.
+	args = clicmd.ReorderFlagsFirst(args, map[string]bool{
+		config.AllowUnauthenticatedNetworkFlag: true,
+		"no-open":                              true,
+		"version":                              true,
+		"v":                                    true,
+		"quiet":                                true,
+		"q":                                    true,
+		"no-ignore":                            true,
+		"remote":                               true,
+	})
+	fs.Parse(args)
+	portSet := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == "port" || f.Name == "p" {
+			portSet = true
+		}
+	})
+
+	return daemonFlagSet{
+		portSet:                     portSet,
+		port:                        *port,
+		host:                        *host,
+		publicURL:                   *publicURL,
+		allowUnauthenticatedNetwork: *allowUnauthNet,
+		noOpen:                      *noOpen,
+		showVersion:                 *showVersion,
+		outputDir:                   *outputDir,
+		quiet:                       *quiet,
+		noIgnore:                    *noIgnore,
+		baseBranch:                  *baseBranch,
+		vcsOverride:                 *vcsFlag,
+		planDir:                     *planDir,
+		planName:                    *planName,
+		fileArgs:                    fs.Args(),
+		prSpec:                      *prSpec,
+		rangeSpec:                   *rangeSpec,
+		scopeSpec:                   *scopeSpec,
+		remoteFiles:                 *remoteFiles,
+		liveOrigin:                  *liveOrigin,
+		liveCookie:                  *liveCookie,
+		previewFile:                 *previewFile,
+		skillsFile:                  *skillsFile,
+		sessionID:                   *sessionID,
+		sessionKeyOverride:          *sessionKeyOverride,
+	}
+}
+
+func applyDaemonConfigDefaults(sf *daemonFlagSet, cfg config.Config) { //nolint:gocyclo // Mirrors documented CLI/env/config precedence.
+	if !sf.portSet {
+		sf.port = config.ResolvePort(sf.port, cfg.Port)
+		if sf.port == 0 && os.Getenv("HUNKYARD_PORT") == "" {
+			sf.port = 5000
+		}
+	}
+	sf.host = config.ResolveHost(sf.host, cfg.Host)
+	sf.publicURL = config.ResolvePublicURL(sf.publicURL, cfg)
+	if !sf.noOpen && cfg.NoOpen {
+		sf.noOpen = true
+	}
+	if !sf.quiet && cfg.Quiet {
+		sf.quiet = true
+	}
+	if sf.outputDir == "" && sf.planDir == "" {
+		sf.outputDir = cfg.Output
+	}
+	if sf.baseBranch == "" && cfg.BaseBranch != "" {
+		sf.baseBranch = cfg.BaseBranch
+	}
+	if sf.baseBranch != "" {
+		vcs.SetDefaultBranchOverride(sf.baseBranch)
+	}
+}
+
+func daemonMustGetwd() string {
+	wd, err := os.Getwd()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "hunkyard: unable to determine current working directory: %v\n", err)
+		os.Exit(1)
+	}
+	return wd
+}
+
+func resolveVCSOverride(flagVal, cfgVal string) string {
+	if flagVal != "" {
+		return flagVal
+	}
+	return cfgVal
+}
+
+// ResolveDaemonCLIConfig parses flags, loads config files, and resolves the
+// final daemon configuration from all sources (CLI > env > config > defaults).
+// Returns nil when the command should exit early (e.g. --version).
+func ResolveDaemonCLIConfig(args []string) (*DaemonCLIConfig, error) { //nolint:gocyclo // Central CLI configuration resolver.
+	sf := parseDaemonFlags(args)
+
+	if sf.showVersion {
+		if PrintVersionFn != nil {
+			PrintVersionFn()
+		}
+		return nil, nil
+	}
+
+	configDir := ""
+	v := vcs.DetectVCS(sf.vcsOverride)
+	repoRoot := ""
+	if v != nil {
+		configDir, _ = v.RepoRoot()
+		repoRoot = configDir
+	}
+	if configDir == "" {
+		configDir = daemonMustGetwd()
+	}
+	cfg := config.LoadConfigForCommands(configDir)
+
+	applyDaemonConfigDefaults(&sf, cfg)
+	if sf.publicURL != "" {
+		normalized, err := config.NormalizePublicURL(sf.publicURL)
+		if err != nil {
+			return nil, err
+		}
+		sf.publicURL = normalized
+	}
+
+	allowUnauthNet := sf.allowUnauthenticatedNetwork || config.EnvAllowsUnauthenticatedNetwork()
+	if config.NeedsUnauthenticatedNetworkAck(sf.host, sf.publicURL) && !allowUnauthNet {
+		return nil, config.ErrUnauthenticatedNetwork(sf.host, sf.publicURL)
+	}
+
+	var ignorePatterns []string
+	if !sf.noIgnore {
+		ignorePatterns = cfg.IgnorePatterns
+	}
+
+	f, err := focus.ResolveFocus(sf.prSpec, sf.rangeSpec, sf.scopeSpec, sf.remoteFiles, v, repoRoot)
+	if err != nil {
+		return nil, err
+	}
+
+	remoteFiles := sf.remoteFiles
+	if remoteFiles && f == nil {
+		fmt.Fprintln(os.Stderr, "Warning: --remote has no effect without --pr or --range; ignoring")
+		remoteFiles = false
+	}
+
+	return &DaemonCLIConfig{
+		Port:                        sf.port,
+		Host:                        sf.host,
+		PublicURL:                   sf.publicURL,
+		AllowUnauthenticatedNetwork: allowUnauthNet && config.NeedsUnauthenticatedNetworkAck(sf.host, sf.publicURL),
+		NoOpen:                      sf.noOpen,
+		OpenCmd:                     cfg.OpenCmd,
+		Quiet:                       sf.quiet,
+		NotifyOnRoundReady:          cfg.NotifyOnRoundReadyEnabled(),
+		OutputDir:                   sf.outputDir,
+		Author:                      cfg.Author,
+		BaseBranch:                  sf.baseBranch,
+		IgnorePatterns:              ignorePatterns,
+		NoIntegrationCheck:          cfg.NoIntegrationCheck,
+		NoUpdateCheck:               cfg.NoUpdateCheck,
+		AgentCmd:                    cfg.AgentCmd,
+		Files:                       sf.fileArgs,
+		PlanDir:                     sf.planDir,
+		PlanName:                    sf.planName,
+		VCSOverride:                 resolveVCSOverride(sf.vcsOverride, cfg.VCS),
+		Cfg:                         cfg,
+		Focus:                       f,
+		RemoteFiles:                 remoteFiles,
+		LiveOrigin:                  sf.liveOrigin,
+		LiveCookie:                  sf.liveCookie,
+		PreviewFile:                 sf.previewFile,
+		SkillsFile:                  sf.skillsFile,
+		SessionID:                   sf.sessionID,
+		SessionKeyOverride:          sf.sessionKeyOverride,
+	}, nil
+}
+
+// PreflightCheck runs pre-spawn checks for default git mode (no files, no
+// focus, no plan). Returns a user-facing message to print on stderr if the
+// daemon should not be spawned, or "" if everything looks fine.
+func PreflightCheck(sc *DaemonCLIConfig) string {
+	if sc == nil {
+		return ""
+	}
+	v := vcs.DetectVCS(sc.VCSOverride)
+	if v == nil {
+		return "Not in a version-controlled repository.\n\n" +
+			"  hunkyard              review changed files (run inside a git/sapling/jj repo)\n" +
+			"  hunkyard <file...>    review specific file(s)\n"
+	}
+	if sc.BaseBranch != "" {
+		v.SetDefaultBranchOverride(sc.BaseBranch)
+	}
+	root, err := v.RepoRoot()
+	if err != nil {
+		return ""
+	}
+	_, _, _, _, derr := session.DetectVCSChanges(v, root, sc.IgnorePatterns)
+	if !errors.Is(derr, session.ErrNoChangedFiles) {
+		return ""
+	}
+	return "No changed files found.\n\n" +
+		"  hunkyard              review changed files (needs changes against the base branch)\n" +
+		"  hunkyard <file...>    review specific file(s)\n"
+}
+
+// FocusKeyArgs returns the args slice used to key the daemon session for a
+// PR/range focus. PR-keyed daemons reuse the same review file across head
+// changes; range-keyed daemons are unique per (base, head) pair.
+//
+// DiffScope is NOT part of the key — the picker must let users toggle scopes
+// within a single session.
+func FocusKeyArgs(sc *DaemonCLIConfig) []string {
+	if sc == nil || sc.Focus == nil || sc.Focus.Kind != session.FocusRange {
+		if sc == nil {
+			return nil
+		}
+		return sc.Files
+	}
+	if sc.Focus.ChangeNumber > 0 {
+		return []string{session.PRFocusKey(sc.Focus.ChangeNumber, sc.Focus.RemoteBaseProject, sc.Focus.RemoteHost)}
+	}
+	return []string{fmt.Sprintf("range:%s..%s", sc.Focus.BaseSHA, sc.Focus.HeadSHA)}
+}
+
+// ResolvePortFromEnv mirrors config.ResolvePort for tests that assemble DaemonCLIConfig manually.
+func ResolvePortFromEnv(flagPort, cfgPort int) int {
+	if flagPort != 0 {
+		return flagPort
+	}
+	if envPort := os.Getenv("HUNKYARD_PORT"); envPort != "" {
+		if p, err := strconv.Atoi(envPort); err == nil {
+			return p
+		}
+	}
+	return cfgPort
+}

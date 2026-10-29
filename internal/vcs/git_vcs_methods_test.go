@@ -1,0 +1,360 @@
+package vcs
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+)
+
+// TestGitVCS_Methods exercises GitVCS interface methods so coverage counts
+// toward this package (cross-package calls from session tests do not).
+func TestGitVCS_Methods(t *testing.T) {
+	dir := InitTestRepo(t)
+	t.Chdir(dir)
+	ClearGitEnvForTest(t)
+	g := &GitVCS{}
+
+	root, err := g.RepoRoot()
+	if err != nil {
+		t.Fatal(err)
+	}
+	rootInfo, err := os.Stat(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dirInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !os.SameFile(rootInfo, dirInfo) {
+		t.Errorf("RepoRoot() = %q, want %q", root, dir)
+	}
+	if got := g.CurrentBranch(); got != "main" {
+		t.Errorf("CurrentBranch() = %q, want main", got)
+	}
+	g.SetDefaultBranchOverride("main")
+	t.Cleanup(func() { g.SetDefaultBranchOverride("") })
+	if got := g.DefaultBranch(); got != "main" {
+		t.Errorf("DefaultBranch() = %q, want main", got)
+	}
+	if g.GetDefaultBranchOverride() != "main" {
+		t.Errorf("override = %q", g.GetDefaultBranchOverride())
+	}
+
+	base := GitRun(t, dir, "rev-parse", "HEAD")
+	head := CommitAtForTest(t, dir, "a.txt", "hi", "add a")
+
+	if mb, err := g.MergeBase("HEAD"); err != nil || mb != head {
+		t.Errorf("MergeBase(HEAD) = %q, %v; want %q, nil", mb, err, head)
+	}
+	if got := g.DefaultBaseRef(); got != "main" {
+		t.Errorf("DefaultBaseRef() = %q, want main", got)
+	}
+
+	changed, err := g.ChangedFilesOnDefaultInDir(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed) != 0 {
+		t.Errorf("ChangedFilesOnDefaultInDir(clean) = %+v, want no changes", changed)
+	}
+
+	changed, err = g.ChangedFilesFromBaseInDir("HEAD", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed) != 0 {
+		t.Errorf("ChangedFilesFromBaseInDir(HEAD) = %+v, want no changes", changed)
+	}
+
+	changed, err = g.ChangedFilesScoped("layer", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed) != 0 {
+		t.Errorf("ChangedFilesScoped(fallback, clean) = %+v, want no changes", changed)
+	}
+
+	changed, err = g.ChangedFilesForCommit(head, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(changed) != 1 || changed[0].Path != "a.txt" {
+		t.Errorf("ChangedFilesForCommit = %+v", changed)
+	}
+
+	path := filepath.Join(dir, "a.txt")
+	hunks, err := g.FileDiffUnified("a.txt", base, dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hunks) != 1 || len(hunks[0].Lines) != 1 || hunks[0].Lines[0].Type != "add" || hunks[0].Lines[0].Content != "hi" {
+		t.Fatalf("FileDiffUnified = %+v, want one added line %q", hunks, "hi")
+	}
+
+	scopedHunks, err := g.FileDiffScoped("a.txt", "layer", base, dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(scopedHunks, hunks) {
+		t.Errorf("FileDiffScoped(fallback) = %+v, want %+v", scopedHunks, hunks)
+	}
+
+	commitHunks, err := g.FileDiffForCommit("a.txt", head, dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(commitHunks, hunks) {
+		t.Errorf("FileDiffForCommit = %+v, want %+v", commitHunks, hunks)
+	}
+
+	newFileHunks, err := g.FileDiffUnifiedNewFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(newFileHunks) != 1 || len(newFileHunks[0].Lines) != 1 || newFileHunks[0].Lines[0].Content != "hi" {
+		t.Errorf("FileDiffUnifiedNewFile = %+v, want one added line %q", newFileHunks, "hi")
+	}
+
+	log, err := g.CommitLog(base, head, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(log) != 1 || log[0].SHA != head || log[0].Message != "add a" {
+		t.Errorf("CommitLog = %+v, want one add-a commit at %s", log, head)
+	}
+
+	untracked, err := g.UntrackedFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(untracked) != 0 {
+		t.Errorf("UntrackedFiles(clean) = %+v, want none", untracked)
+	}
+
+	tracked, err := g.AllTrackedFiles(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"README.md", "a.txt"}; !reflect.DeepEqual(tracked, want) {
+		t.Errorf("AllTrackedFiles = %v, want %v", tracked, want)
+	}
+
+	remotes, err := g.RemoteBranches(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(remotes) != 0 {
+		t.Errorf("RemoteBranches(no remotes) = %v, want none", remotes)
+	}
+
+	ns, err := g.DiffNumstat(base, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := map[string]NumstatEntry{"a.txt": {Additions: 1}}; !reflect.DeepEqual(ns, want) {
+		t.Errorf("DiffNumstat = %#v, want %#v", ns, want)
+	}
+
+	betweenNS, err := g.DiffNumstatBetweenSHAs(base, head, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if entry, ok := betweenNS["a.txt"]; !ok || entry.Additions == 0 {
+		t.Errorf("DiffNumstatBetweenSHAs a.txt = %+v, want additions > 0", betweenNS["a.txt"])
+	}
+	if _, err := g.DiffNumstatBetweenSHAs("", head, dir); err == nil {
+		t.Error("DiffNumstatBetweenSHAs empty base: want error")
+	}
+
+	content, err := g.FileContentAtRef("README.md", "HEAD", dir)
+	if err != nil || content != "# Test" {
+		t.Errorf("FileContentAtRef = %q, %v; want %q, nil", content, err, "# Test")
+	}
+
+	between, err := g.ChangedFilesBetweenSHAs(base, head, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []FileChange{{Path: "a.txt", Status: "added"}}
+	if !reflect.DeepEqual(between, want) {
+		t.Errorf("ChangedFilesBetweenSHAs = %+v, want %+v", between, want)
+	}
+
+	diffHunks, err := g.FileDiffBetweenSHAs("a.txt", "", base, head, dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(diffHunks, hunks) {
+		t.Errorf("FileDiffBetweenSHAs = %+v, want %+v", diffHunks, hunks)
+	}
+
+	data, err := g.ReadFileAtSHA(head, "a.txt", dir)
+	if err != nil || string(data) != "hi" {
+		t.Errorf("ReadFileAtSHA = %q, %v; want %q, nil", data, err, "hi")
+	}
+
+	if !g.HasObject(head, dir) {
+		t.Error("HasObject(head) false")
+	}
+
+	status := g.FileStatusInRepo("a.txt", base, dir)
+	if status != "added" {
+		t.Errorf("FileStatusInRepo = %q, want added", status)
+	}
+
+	if got := g.UserName(); got != "Test" {
+		t.Errorf("UserName() = %q, want Test", got)
+	}
+
+	ctxHunks, err := g.FileDiffUnifiedCtx(t.Context(), "a.txt", base, dir, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(ctxHunks, hunks) {
+		t.Errorf("FileDiffUnifiedCtx = %+v, want %+v", ctxHunks, hunks)
+	}
+
+	tipSHA := GitRun(t, dir, "rev-parse", "HEAD")
+	GitRun(t, dir, "update-ref", "refs/remotes/origin/feat-x", tipSHA)
+	branchTips, err := RemoteBranchTips(g, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantTips := []BranchEntry{{Name: "origin/feat-x", HeadSHA: tipSHA}}
+	if !reflect.DeepEqual(branchTips, wantTips) {
+		t.Errorf("RemoteBranchTips = %+v, want %+v", branchTips, wantTips)
+	}
+}
+
+func TestResolveDefaultBranchSHA_Git(t *testing.T) {
+	dir := InitTestRepo(t)
+	want := GitRun(t, dir, "rev-parse", "HEAD")
+	got, err := ResolveDefaultBranchSHA(&GitVCS{}, dir, "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Errorf("got %s want %s", got, want)
+	}
+}
+
+func TestResolveDefaultBranchSHA_NilVCS(t *testing.T) {
+	if _, err := ResolveDefaultBranchSHA(nil, "", "main"); err == nil {
+		t.Fatal("expected error for nil vcs")
+	}
+}
+
+func TestIsCommitish(t *testing.T) {
+	if !IsCommitish("abc1234") {
+		t.Error("expected true for hex sha")
+	}
+	if IsCommitish("not-a-sha") {
+		t.Error("expected false for non-hex")
+	}
+	if IsCommitish("-bad") {
+		t.Error("expected false for option injection")
+	}
+}
+
+func TestSplitCommitRange_Valid(t *testing.T) {
+	base, head, ok := SplitCommitRange("abc1234..def5678")
+	if !ok || base != "abc1234" || head != "def5678" {
+		t.Errorf("got %q, %q, %v", base, head, ok)
+	}
+}
+
+func TestWalkAncestors_Git(t *testing.T) {
+	dir := InitTestRepo(t)
+	CommitAtForTest(t, dir, "a.txt", "1", "a")
+	shas, err := WalkAncestors(&GitVCS{}, dir, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(shas) < 2 {
+		t.Errorf("expected >= 2 ancestors, got %d", len(shas))
+	}
+}
+
+func TestLocalBranchTips_Git(t *testing.T) {
+	dir := InitTestRepo(t)
+	CommitAtForTest(t, dir, "a.txt", "x", "a")
+	GitRun(t, dir, "checkout", "-b", "feat-x")
+	CommitAtForTest(t, dir, "b.txt", "y", "b")
+
+	got, err := LocalBranchTips(&GitVCS{}, dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, name := range got {
+		if name == "feat-x" {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("feat-x not in tips: %+v", got)
+	}
+}
+
+// WorkingTreeFingerprint runs `git status --porcelain` in the process CWD and
+// returns "" for a clean tree, so asserting it from the ambient checkout is
+// nondeterministic (dev machines are dirty, CI runners are clean). Chdir into
+// a repo with an untracked file to make the assertion meaningful.
+func TestGitVCS_WorkingTreeFingerprint(t *testing.T) {
+	dir := InitTestRepo(t)
+	t.Chdir(dir)
+	if err := os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if (&GitVCS{}).WorkingTreeFingerprint() == "" {
+		t.Error("WorkingTreeFingerprint empty for dirty tree")
+	}
+}
+
+func TestResolveCommitOID_BranchAndShortSHA(t *testing.T) {
+	dir := InitTestRepo(t)
+	full := GitRun(t, dir, "rev-parse", "HEAD")
+	v := &GitVCS{}
+
+	got, err := ResolveCommitOID(v, "main", dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != full {
+		t.Fatalf("branch resolve = %q, want %q", got, full)
+	}
+	got, err = ResolveCommitOID(v, full[:7], dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != full {
+		t.Fatalf("short SHA resolve = %q, want %q", got, full)
+	}
+}
+
+func TestResolveCommitOID_ErrorPaths(t *testing.T) {
+	if _, err := ResolveCommitOID(nil, "HEAD", ""); err == nil {
+		t.Fatal("expected nil VCS error")
+	}
+	dir := InitTestRepo(t)
+	if _, err := ResolveCommitOID(&GitVCS{}, "   ", dir); err == nil {
+		t.Fatal("expected empty ref error")
+	}
+	if _, err := ResolveCommitOID(&GitVCS{}, "definitely-missing-ref-xyz", dir); err == nil {
+		t.Fatal("expected missing git ref error")
+	}
+	unknown := &fakeFetchVCS{name: "hg"}
+	if _, err := ResolveCommitOID(unknown, "tip", dir); err == nil || !strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("got %v, want not supported", err)
+	}
+	// jj/sl error branches (no real bookmark / rev in empty-ish dir).
+	if _, err := ResolveCommitOID(&fakeFetchVCS{name: "jj"}, "no-such-bookmark", dir); err == nil {
+		t.Fatal("expected jj resolve error")
+	}
+	if _, err := ResolveCommitOID(&fakeFetchVCS{name: "sl"}, "no-such-rev", dir); err == nil {
+		t.Fatal("expected sl resolve error")
+	}
+}

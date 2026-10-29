@@ -1,0 +1,150 @@
+{
+  "schema_version": 1,
+  "provenance": "LearnPreferences::Privacy.sanitize; synthetic inputs only",
+  "cases": [
+    {
+      "name": "credentials",
+      "input": "always use token sk-live-1234567890abcdef",
+      "accepted": false,
+      "excerpt": null,
+      "fingerprint": "befe0f3a586edb30b45cf795f5bd242c18bc10abf0878e2fa0f27de504fc05df",
+      "reason": "sensitive_content"
+    },
+    {
+      "name": "excerpt_utf8",
+      "input": "prefer éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "accepted": true,
+      "excerpt": "prefer ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+      "fingerprint": "37e99a681bd864e404e0c5887d2154c541e3d0ba6bbd10fcc290e5c0910a48e7",
+      "reason": null
+    },
+    {
+      "name": "pem",
+      "input": "-----BEGIN PRIVATE KEY-----\nnot-a-real-key\n-----END PRIVATE KEY-----",
+      "accepted": false,
+      "excerpt": null,
+      "fingerprint": "cb35faa80b7e2fc141ea72cd34436a49fbbed7916ae9fc320e4ce098b6d3a046",
+      "reason": "sensitive_content"
+    },
+    {
+      "name": "password",
+      "input": "password=synthetic-test-value",
+      "accepted": false,
+      "excerpt": null,
+      "fingerprint": "2ca29abc41637ab7fde3a12f5adf706a143527d309ae09522b6cd912c07d2407",
+      "reason": "sensitive_content"
+    },
+    {
+      "name": "authorization",
+      "input": "Authorization: Bearer synthetic",
+      "accepted": false,
+      "excerpt": null,
+      "fingerprint": "f781741bfb20606cc3fbac96cd718b11dbd5acc6994469c3a01a8b7ba6816e29",
+      "reason": "sensitive_content"
+    },
+    {
+      "name": "credential_url",
+      "input": "fetch https://user:password@example.test/private",
+      "accepted": false,
+      "excerpt": null,
+      "fingerprint": "14a9b3632acf7bba8ab2bc48c88c6c0fd3a0bf75b79a39478aa9b607b1c7b00e",
+      "reason": "sensitive_content"
+    },
+    {
+      "name": "environment_dump",
+      "input": "DATABASE_URL=postgres://example\nAPI_TOKEN=abcd\nREDIS_URL=redis://example",
+      "accepted": false,
+      "excerpt": null,
+      "fingerprint": "93645c67f335f60160a038eb9f2f55523562260d67b77143b64bddb7144bb2c7",
+      "reason": "sensitive_content"
+    },
+    {
+      "name": "code_block",
+      "input": "def method_1(value); value + 1; end\ndef method_2(value); value + 2; end\ndef method_3(value); value + 3; end\ndef method_4(value); value + 4; end\ndef method_5(value); value + 5; end\ndef method_6(value); value + 6; end\ndef method_7(value); value + 7; end\ndef method_8(value); value + 8; end\ndef method_9(value); value + 9; end\ndef method_10(value); value + 10; end\ndef method_11(value); value + 11; end\ndef method_12(value); value + 12; end\ndef method_13(value); value + 13; end\ndef method_14(value); value + 14; end\ndef method_15(value); value + 15; end\ndef method_16(value); value + 16; end\ndef method_17(value); value + 17; end\ndef method_18(value); value + 18; end\ndef method_19(value); value + 19; end\ndef method_20(value); value + 20; end",
+      "accepted": false,
+      "excerpt": null,
+      "fingerprint": "7615f293961374c31b1ba2c1eeeb46a8c34b5a93763091a8c71346e6f47b4b43",
+      "reason": "sensitive_content"
+    },
+    {
+      "name": "late_code_block",
+      "input": "normal prose\\nputs value_1\nputs value_2\nputs value_3\nputs value_4\nputs value_5\nputs value_6\nputs value_7\nputs value_8\nputs value_9\nputs value_10\nputs value_11\nputs value_12\nputs value_13\nputs value_14\nputs value_15\nputs value_16\nputs value_17\nputs value_18\nputs value_19\nputs value_20\nputs value_21\nputs value_22\nputs value_23\nputs value_24\nputs value_25",
+      "accepted": false,
+      "excerpt": null,
+      "fingerprint": "76b0bb74a8309794637af1c241ca90a9b1da2b357f9a67bbd40ee8bcb5dfe3cb",
+      "reason": "sensitive_content"
+    },
+    {
+      "name": "url",
+      "input": "Prefer the guide at https://docs.example.test/private-guide",
+      "accepted": true,
+      "excerpt": "Prefer the guide at [URL]",
+      "fingerprint": "49e2fad3cfe072edd9c976af1e291a0d98b13777bdbad4fbb84e86cffaaf7eb4",
+      "reason": null
+    },
+    {
+      "name": "ssh_email",
+      "input": "Prefer reviewing git@github.com:acme/private-repo.git with customer@example.test",
+      "accepted": true,
+      "excerpt": "Prefer reviewing [REPOSITORY_URL] with [EMAIL]",
+      "fingerprint": "8d3c5ff8ab32495d1f5415c49b9ad2ec2be5f12e66775c9aa3dddb1491d003a5",
+      "reason": null
+    },
+    {
+      "name": "unicode_whitespace",
+      "input": "  prefer early returns\tplease\n",
+      "accepted": true,
+      "excerpt": "prefer early returns please",
+      "fingerprint": "eba1256490ecbf67d60ff57e930b9251e8896a8ed42204bd652dc9ceefe2d71e",
+      "reason": null
+    },
+    {
+      "name": "empty",
+      "input": "",
+      "accepted": true,
+      "excerpt": "",
+      "fingerprint": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "reason": null
+    },
+    {
+      "name": "safe",
+      "input": "Keep helpers focused.",
+      "accepted": true,
+      "excerpt": "Keep helpers focused.",
+      "fingerprint": "c11c9746c54399411940ac3ef419fb155927f3023be622758b221946d4b96836",
+      "reason": null
+    },
+    {
+      "name": "api_token",
+      "input": "api_key=abcdefghijklmnopqrstuvwxyz",
+      "accepted": false,
+      "excerpt": null,
+      "fingerprint": "322c43d7c9306ddead8796abf41e76746cfaa4a6ad4bd76f44ab2b2b523552f7",
+      "reason": "sensitive_content"
+    },
+    {
+      "name": "ordinary_code",
+      "input": "Use one early return, not a helper.",
+      "accepted": true,
+      "excerpt": "Use one early return, not a helper.",
+      "fingerprint": "c9b236e69e6eb151e936b629ddc9a986fad331f7ba3806fb29eb605bf05b83f0",
+      "reason": null
+    },
+    {
+      "name": "unicode",
+      "input": "Prefer 日本語 names for é examples.",
+      "accepted": true,
+      "excerpt": "Prefer 日本語 names for é examples.",
+      "fingerprint": "7f7616b0d098ba2e50531c524b40cec449aa6ecc6245fd23bafab2555bd8dcaa",
+      "reason": null
+    },
+    {
+      "name": "less_than",
+      "input": "Prefer <>& with a literal \\u2028.",
+      "accepted": true,
+      "excerpt": "Prefer <>& with a literal \\u2028.",
+      "fingerprint": "6103b2ea474c4ba16201dc9098da9440ec5ec07166f7d062047933f0f25022d4",
+      "reason": null
+    }
+  ]
+}

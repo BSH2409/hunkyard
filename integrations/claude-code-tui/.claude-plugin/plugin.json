@@ -1,0 +1,18 @@
+{
+  "name": "hunkyard-tui",
+  "version": "0.1.0",
+  "description": "Early: hunkyard inside Claude Code. Comment on the conversation, your diff or a file in a pane, send the review to Claude, and read Claude's replies in threads.",
+  "author": {
+    "name": "BSH2409"
+  },
+  "homepage": "https://github.com/BSH2409/hunkyard",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "hunkyardBin": {
+      "type": "string",
+      "title": "hunkyard binary",
+      "description": "Path or name of the hunkyard CLI. Code comments go to hunkyard's review file through it.",
+      "default": "hunkyard"
+    }
+  }
+}

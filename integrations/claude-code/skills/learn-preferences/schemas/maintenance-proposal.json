@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hunkyard:learn-preferences:maintenance-proposal",
+  "title": "Learn preferences maintenance proposal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "input_digest", "actions", "summary"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "input_digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "actions": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/action" }
+    },
+    "summary": { "$ref": "#/$defs/summary" }
+  },
+  "$defs": {
+    "rule_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "source_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "digest"],
+      "properties": {
+        "file": { "type": "string" },
+        "digest": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+      }
+    },
+    "scope": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "repo_key"],
+      "properties": {
+        "kind": { "enum": ["global", "repository"] },
+        "repo_key": {
+          "type": ["string", "null"],
+          "pattern": "^[a-z0-9](?:[a-z0-9-]{0,63})-[0-9a-f]{12}$"
+        }
+      }
+    },
+    "proposed_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "directive", "scope", "surfaces", "load_tier", "origin",
+        "source_pack", "source_ref", "supersedes", "conflicts_with"
+      ],
+      "properties": {
+        "id": { "$ref": "#/$defs/rule_id" },
+        "directive": { "type": "string" },
+        "scope": { "$ref": "#/$defs/scope" },
+        "surfaces": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "enum": [
+              "api", "architecture", "communication", "database", "devops",
+              "frontend", "jobs", "naming", "performance", "rails", "reviews",
+              "ruby", "security", "services", "testing", "wordpress"
+            ]
+          }
+        },
+        "load_tier": { "type": ["string", "null"], "enum": ["core", "surface", null] },
+        "origin": { "enum": ["feedback", "inferred", "legacy_seed", "source_pack"] },
+        "source_pack": { "type": ["string", "null"], "enum": ["code-like-him", null] },
+        "source_ref": {
+          "anyOf": [
+            { "$ref": "#/$defs/source_ref" },
+            { "type": "null" }
+          ]
+        },
+        "supersedes": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rule_id" }
+        },
+        "conflicts_with": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rule_id" }
+        }
+      }
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "type", "observation_ids", "rule_id", "target_rule_ids", "reason_code",
+        "source_ref", "proposed_rule"
+      ],
+      "properties": {
+        "type": {
+          "enum": [
+            "ignore_observation", "create_rule", "confirm_rule", "merge_rules",
+            "refine_rule", "change_scope", "supersede_rule", "quarantine_conflict",
+            "mark_dormant", "reactivate_rule", "refresh_source_pack"
+          ]
+        },
+        "observation_ids": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "rule_id": {
+          "anyOf": [
+            { "$ref": "#/$defs/rule_id" },
+            { "type": "null" }
+          ]
+        },
+        "target_rule_ids": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/rule_id" }
+        },
+        "reason_code": {
+          "enum": [
+            "task_local", "factual_correction", "too_vague", "duplicate",
+            "durable_preference", "conditional_merge", "explicit_supersession",
+            "scope_evidence", "conflict_detected", "stale_candidate",
+            "confirming_evidence", "explicit_instruction", "source_refresh",
+            "source_no_actionable_rule"
+          ]
+        },
+        "source_ref": {
+          "anyOf": [
+            { "$ref": "#/$defs/source_ref" },
+            { "type": "null" }
+          ]
+        },
+        "proposed_rule": {
+          "anyOf": [
+            { "$ref": "#/$defs/proposed_rule" },
+            { "type": "null" }
+          ]
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "processed", "ignored", "created", "confirmed", "merged", "refined",
+        "scoped", "superseded", "conflicted", "dormant", "reactivated",
+        "source_pack_refreshed"
+      ],
+      "properties": {
+        "processed": { "type": "integer", "minimum": 0 },
+        "ignored": { "type": "integer", "minimum": 0 },
+        "created": { "type": "integer", "minimum": 0 },
+        "confirmed": { "type": "integer", "minimum": 0 },
+        "merged": { "type": "integer", "minimum": 0 },
+        "refined": { "type": "integer", "minimum": 0 },
+        "scoped": { "type": "integer", "minimum": 0 },
+        "superseded": { "type": "integer", "minimum": 0 },
+        "conflicted": { "type": "integer", "minimum": 0 },
+        "dormant": { "type": "integer", "minimum": 0 },
+        "reactivated": { "type": "integer", "minimum": 0 },
+        "source_pack_refreshed": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

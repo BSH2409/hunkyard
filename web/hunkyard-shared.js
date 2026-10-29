@@ -1,0 +1,1152 @@
+// hunkyard-shared.js — helpers consumed by both app.js (code review) and
+// live-mode.js (live review). Vanilla JS, no module loader.
+//
+// Exports onto window.hunkyard.shared. Order of <script> tags in index.html
+// guarantees this file loads before app.js or live-mode.js.
+
+(function () {
+  'use strict';
+
+  // escapeHTML — canonical HTML escaper for the entire frontend. Escapes
+  // &, <, >, ", and ' (single quote). Safe in both content and attribute
+  // contexts.
+  function escapeHTML(s) {
+    if (s === null || s === undefined) return '';
+    return String(s)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  async function fetchJSON(url, opts) {
+    const o = Object.assign({}, opts || {});
+    o.headers = Object.assign({ 'Accept': 'application/json' }, (opts && opts.headers) || {});
+    const r = await fetch(url, o);
+    if (!r.ok) {
+      const text = await r.text().catch(() => '');
+      const err = new Error('fetchJSON ' + url + ' ' + r.status + ' ' + text);
+      err.status = r.status;
+      throw err;
+    }
+    const ct = (r.headers.get && r.headers.get('content-type')) || '';
+    if (ct.indexOf('application/json') === -1) return null;
+    return r.json();
+  }
+
+  // URL-decodes the value, matching setCookie's URL-encode on write. Keeping
+  // get/set symmetric means callers don't sprinkle encode/decode at use sites.
+  function getCookie(name) {
+    const parts = (document.cookie || '').split(';');
+    for (let i = 0; i < parts.length; i++) {
+      const kv = parts[i].trim();
+      const eq = kv.indexOf('=');
+      if (eq < 0) continue;
+      if (kv.slice(0, eq) === name) {
+        const raw = kv.slice(eq + 1);
+        try { return decodeURIComponent(raw); }
+        catch (_) { return raw; }
+      }
+    }
+    return null;
+  }
+
+  // 2-arg signature, matching app.js's policy byte-for-byte: 1-year max-age
+  // (preferences should survive browser restarts), SameSite=Strict, and
+  // URL-encode the value so JSON / special chars round-trip safely.
+  function setCookie(name, value) {
+    document.cookie = name + '=' + encodeURIComponent(value)
+      + '; path=/; max-age=31536000; SameSite=Strict';
+  }
+
+  // The hunkyard-settings cookie is JSON. getCookie URL-decodes for us, so we
+  // hand the raw JSON straight to JSON.parse — same shape as app.js.
+  function readThemeFromSettings() {
+    const raw = getCookie('hunkyard-settings');
+    if (!raw) return 'system';
+    try {
+      const parsed = JSON.parse(raw);
+      return (parsed && parsed.theme) || 'system';
+    } catch (_) {
+      return 'system';
+    }
+  }
+
+  function applyThemeFromCookie() {
+    const t = readThemeFromSettings();
+    const html = document.documentElement;
+    if (t === 'light' || t === 'dark') html.setAttribute('data-theme', t);
+    else html.removeAttribute('data-theme');
+    // UI palette for the chosen light/dark theme (hunkyard-theme-palette.js).
+    if (window.hunkyard && window.hunkyard.themePalette) window.hunkyard.themePalette.applySaved(html);
+  }
+
+  // Rendered markdown follows the code display settings (Pierre applies them
+  // to diffs and code files) through CSS keyed on <html data-line-numbers /
+  // data-code-overflow>: gutter numbers hide, code blocks wrap. Call on load
+  // and after either setting changes.
+  function applyDisplayAttributes(root) {
+    const html = root || document.documentElement;
+    html.setAttribute('data-line-numbers', getSetting('lineNumbers', 'on') === 'off' ? 'off' : 'on');
+    html.setAttribute('data-code-overflow', getSetting('codeOverflow', 'scroll') === 'wrap' ? 'wrap' : 'scroll');
+  }
+
+  // Generic hunkyard-settings JSON cookie accessors (mirror app.js semantics).
+  function readSettings() {
+    const raw = getCookie('hunkyard-settings');
+    if (!raw) return {};
+    try { return JSON.parse(raw) || {}; }
+    catch (_) { return {}; }
+  }
+  function writeSettings(obj) {
+    setCookie('hunkyard-settings', JSON.stringify(obj || {}));
+  }
+  function getSetting(key, fallback) {
+    const s = readSettings();
+    return Object.prototype.hasOwnProperty.call(s, key) ? s[key] : fallback;
+  }
+  function setSetting(key, value) {
+    const s = readSettings();
+    s[key] = value;
+    writeSettings(s);
+  }
+
+  // ---- Code font ----
+  // The `codeFont` setting overrides --hunkyard-font-code, which code lines,
+  // diff rows, and inline <code> resolve through. An empty value means "use
+  // theme.css's stack", so the override is removed rather than set to a
+  // hardcoded copy of the default — the default can then change in one place.
+  //
+  // The two built-ins are always available. Installed font families are
+  // discovered by the Go server and added by hunkyard-settings-panes.js.
+  const CODE_FONT_PRESETS = [
+    { id: 'default', label: 'Default (GitHub monospace)', stack: '' },
+    { id: 'system', label: 'System monospace', stack: 'ui-monospace, SFMono-Regular, Menlo, Consolas, monospace' },
+  ];
+  const MAX_CODE_FONT_LENGTH = 256;
+
+  // Returns the sanitized stack, or '' when the value can't be trusted as a
+  // font-family list. setProperty already drops values containing a `;`, but
+  // rejecting the whole class of declaration-escaping characters up front lets
+  // the settings UI tell the user their input was ignored instead of silently
+  // falling back.
+  function sanitizeCodeFont(value) {
+    const v = String(value === null || value === undefined ? '' : value).trim();
+    if (!v) return '';
+    if (v.length > MAX_CODE_FONT_LENGTH) return '';
+    if (/[;{}<>@]/.test(v)) return '';
+    if (/url\s*\(/i.test(v) || /expression\s*\(/i.test(v)) return '';
+    if (typeof CSS !== 'undefined' && CSS && CSS.supports && !CSS.supports('font-family', v)) return '';
+    return v;
+  }
+
+  function applyCodeFont(stack) {
+    const root = document.documentElement;
+    if (!root || !root.style) return '';
+    const clean = sanitizeCodeFont(stack);
+    if (clean) root.style.setProperty('--hunkyard-font-code', clean);
+    else root.style.removeProperty('--hunkyard-font-code');
+    return clean;
+  }
+
+  function applyCodeFontFromCookie() {
+    return applyCodeFont(getSetting('codeFont', ''));
+  }
+
+  // Persists then applies. Returns the stack that was actually stored, so a
+  // caller can detect that an invalid custom value was rejected.
+  function setCodeFont(stack) {
+    const clean = sanitizeCodeFont(stack);
+    setSetting('codeFont', clean);
+    applyCodeFont(clean);
+    return clean;
+  }
+
+  // Updates the navbar comment-count indicator. Both code-review (app.js)
+  // and live-mode (live-mode.js) call this so the pill, classes, and
+  // tooltip stay in lockstep — drift here is the navbar inconsistency the
+  // user keeps noticing. Each mode still owns its own filter-pill counts,
+  // since the filter pill itself isn't shared.
+  //
+  // opts: { totalCount, openCount }
+  //   - totalCount: total comments (open + resolved)
+  //   - openCount:  unresolved comments
+  // Touches: #commentCountNumber (text), #commentCount (.comment-count-resolved
+  // + title), #commentNavGroup (.has-comments + display).
+  function updateCommentCountIndicator(opts) {
+    var o = opts || {};
+    var totalCount = o.totalCount | 0;
+    var openCount = o.openCount | 0;
+    var navGroup = document.getElementById('commentNavGroup');
+    var navBtn = document.getElementById('commentCount');
+    var numEl = document.getElementById('commentCountNumber');
+    if (navGroup) navGroup.style.display = '';
+    if (totalCount === 0) {
+      if (navGroup) navGroup.classList.remove('has-comments');
+      if (navBtn) {
+        navBtn.classList.add('comment-count-resolved');
+        navBtn.title = 'Toggle comments panel';
+      }
+      if (numEl) numEl.textContent = '';
+    } else if (openCount > 0) {
+      if (navGroup) navGroup.classList.add('has-comments');
+      if (navBtn) {
+        navBtn.classList.remove('comment-count-resolved');
+        navBtn.title = openCount + ' unresolved comment' + (openCount === 1 ? '' : 's') + ' — toggle panel';
+      }
+      if (numEl) numEl.textContent = String(openCount);
+    } else {
+      if (navGroup) navGroup.classList.add('has-comments');
+      if (navBtn) {
+        navBtn.classList.add('comment-count-resolved');
+        navBtn.title = totalCount + ' resolved comment' + (totalCount === 1 ? '' : 's') + ' — toggle panel';
+      }
+      if (numEl) numEl.textContent = String(totalCount);
+    }
+  }
+
+  // ===== Toast =====
+  // Unified mini-toast helper used by both code-review (app.js) and
+  // live-mode (live-mode.js). Replaces the prior `showMiniToast`
+  // (app.js, transition-based, rule-compliant) and `showToast`
+  // (live-mode.js, called .remove() directly — violated frontend-js.md
+  // "Never call .remove() on elements with CSS exit animations").
+  //
+  // API: showToast(message, opts?) -> dismiss()
+  //   opts.timeout: ms before auto-dismiss (default 3000; pass 0 to keep open)
+  //   opts.kind:    'info' (default) | 'error' | 'success' (sets modifier class)
+  //
+  // The returned function dismisses the toast early (idempotent).
+  // Cleanup is driven by `transitionend` on the visibility class toggle —
+  // never by an unconditional setTimeout(remove).
+  function ensureToastHost() {
+    if (typeof document === 'undefined' || !document.body) return null;
+    var host = document.querySelector('.mini-toast-host');
+    if (host) return host;
+    host = document.createElement('div');
+    host.className = 'mini-toast-host';
+    document.body.appendChild(host);
+    return host;
+  }
+
+  function showToast(message, opts) {
+    var host = ensureToastHost();
+    if (!host) return function () {};
+    var o = opts || {};
+    var timeout = (typeof o.timeout === 'number') ? o.timeout : 3000;
+    var kind = (o.kind === 'error' || o.kind === 'success') ? o.kind : 'info';
+
+    var t = document.createElement('div');
+    t.className = 'mini-toast mini-toast--' + kind;
+    t.setAttribute('role', kind === 'error' ? 'alert' : 'status');
+    t.setAttribute('aria-live', kind === 'error' ? 'assertive' : 'polite');
+    t.setAttribute('aria-atomic', 'true');
+    t.textContent = (message == null) ? '' : String(message);
+    host.appendChild(t);
+
+    var raf = (typeof requestAnimationFrame === 'function')
+      ? requestAnimationFrame
+      : function (f) { return setTimeout(f, 16); };
+    raf(function () { t.classList.add('mini-toast-visible'); });
+
+    var dismissed = false;
+    var settled = false;
+    var timer = null;
+
+    function finish() {
+      if (settled) return;
+      settled = true;
+      if (t.parentNode) t.parentNode.removeChild(t);
+    }
+
+    function dismiss() {
+      if (dismissed) return;
+      dismissed = true;
+      if (timer) { clearTimeout(timer); timer = null; }
+      t.addEventListener('transitionend', finish, { once: true });
+      t.classList.remove('mini-toast-visible');
+      // Fallback: transitionend may not fire (reduced-motion, hidden tab,
+      // tests). 400ms > the 300ms CSS transition.
+      setTimeout(finish, 400);
+    }
+
+    if (timeout > 0) {
+      timer = setTimeout(dismiss, timeout);
+    }
+    return dismiss;
+  }
+
+  // ===== formatStatsDuration =====
+  // Human-readable duration: "42s", "3m", "1h", "1h 15m".
+  function formatStatsDuration(seconds) {
+    if (seconds < 60) return seconds + 's';
+    var hours = Math.floor(seconds / 3600);
+    var minutes = Math.floor((seconds % 3600) / 60);
+    if (hours === 0) return minutes + 'm';
+    if (minutes === 0) return hours + 'h';
+    return hours + 'h ' + minutes + 'm';
+  }
+
+  // Wire up the summary receipt copy button (once).
+  var _summaryBtnWired = false;
+  function wireSummaryCopyBtn() {
+    if (_summaryBtnWired) return;
+    var btn = document.getElementById('summaryCopyBtn');
+    if (!btn) return;
+    _summaryBtnWired = true;
+    btn.addEventListener('click', function () {
+      var receipt = btn.closest('.summary-receipt');
+      var text = receipt ? receipt.getAttribute('data-copy-text') : '';
+      if (!text) return;
+      navigator.clipboard.writeText(text).then(function () {
+        btn.classList.add('copied');
+        var iconCopy = btn.querySelector('.icon-copy');
+        var iconCheck = btn.querySelector('.icon-check');
+        if (iconCopy) iconCopy.style.display = 'none';
+        if (iconCheck) iconCheck.style.display = '';
+        setTimeout(function () {
+          btn.classList.remove('copied');
+          if (iconCopy) iconCopy.style.display = '';
+          if (iconCheck) iconCheck.style.display = 'none';
+        }, 1800);
+      });
+    });
+  }
+
+  var CONFETTI_COLORS = ['#56d364', '#85aaf8', '#ff8c6b', '#e8c555', '#d285f8'];
+  function spawnConfetti(container) {
+    if (!container) return;
+    container.style.position = 'relative';
+    container.style.overflow = 'hidden';
+    for (var i = 0; i < 14; i++) {
+      var dot = document.createElement('span');
+      dot.className = 'confetti-dot';
+      var size = 4 + Math.random() * 5;
+      dot.style.width = size + 'px';
+      dot.style.height = size + 'px';
+      dot.style.left = (8 + Math.random() * 84) + '%';
+      dot.style.top = (10 + Math.random() * 30) + '%';
+      dot.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+      dot.style.animationDelay = (Math.random() * 0.5) + 's';
+      container.appendChild(dot);
+    }
+  }
+
+  // ===== Auto-close after approve =====
+  // When `close_on_approve_after_ms` is configured (global-only, see
+  // internal/config/config.go), runFinishReview counts down on the waiting
+  // dialog's message line and calls window.close() once the delay elapses.
+  // A Cancel button (created lazily, reused across approvals) stops the
+  // countdown and leaves the Approved dialog as-is. Ticks once per second
+  // via chained setTimeout so tests can drive it with a fake clock (only
+  // setTimeout/clearTimeout are needed, matching the showToast sandbox).
+  var CLOSE_COUNTDOWN_TICK_MS = 1000;
+  // In-flight countdown: { cancelled, timers, messageEl, cancelBtn }, or null
+  // when idle. Held at module scope so clearAutoCloseTimers can abort a
+  // countdown started by an earlier call.
+  var _autoCloseRun = null;
+
+  // Announce on the shared polite live region. The per-second countdown text
+  // deliberately does NOT live here — repeating it every tick would flood a
+  // screen reader; callers announce once when state changes.
+  function announceAutoClose(text) {
+    var el = document.getElementById('copyStatus');
+    if (!el) return;
+    el.textContent = '';
+    el.textContent = text;
+  }
+
+  // Aborts any in-flight auto-close countdown and undoes its UI: clears the
+  // pending ticks, marks the run cancelled so already-scheduled callbacks bail
+  // out, hides the Cancel button and drops the timer role from the message
+  // line. Callers must invoke this whenever the reviewer leaves the waiting
+  // dialog ("Back to editing", overlay backdrop) — otherwise the countdown
+  // keeps running behind the dismissed overlay and closes the tab.
+  function clearAutoCloseTimers() {
+    var run = _autoCloseRun;
+    _autoCloseRun = null;
+    if (!run) return;
+    run.cancelled = true;
+    run.timers.forEach(function (id) { clearTimeout(id); });
+    if (run.cancelBtn) run.cancelBtn.style.display = 'none';
+    if (run.messageEl && typeof run.messageEl.removeAttribute === 'function') {
+      run.messageEl.removeAttribute('role');
+    }
+  }
+
+  // Creates (once) or reuses the Cancel button, inserted right after
+  // messageEl so it shows up under the "Closing in Ns…" text. Dynamic
+  // creation avoids template churn across index.html / live-mode markup.
+  function ensureCloseCancelBtn(messageEl) {
+    var existing = document.getElementById('waitingCloseCancel');
+    if (existing) return existing;
+    if (!messageEl || !messageEl.parentNode || typeof messageEl.parentNode.insertBefore !== 'function') return null;
+    var btn = document.createElement('button');
+    btn.type = 'button';
+    btn.id = 'waitingCloseCancel';
+    btn.className = 'btn btn-sm waiting-close-cancel';
+    btn.textContent = 'Cancel';
+    messageEl.parentNode.insertBefore(btn, messageEl.nextSibling);
+    return btn;
+  }
+
+  // Starts (or no-ops) the auto-close countdown for this approval. `ms` is
+  // the resolved `close_on_approve_after_ms` value — undefined/negative
+  // means disabled (matches CloseOnApproveAfterMsEnabled on the Go side).
+  function scheduleAutoClose(ms, messageEl) {
+    clearAutoCloseTimers();
+    if (typeof ms !== 'number' || !isFinite(ms) || ms < 0) return;
+
+    var remaining = ms;
+    var cancelBtn = ensureCloseCancelBtn(messageEl);
+    var run = { cancelled: false, timers: [], messageEl: messageEl, cancelBtn: cancelBtn };
+    _autoCloseRun = run;
+
+    function showCountdown() {
+      if (!messageEl) return;
+      messageEl.style.display = '';
+      messageEl.textContent = 'Closing in ' + Math.ceil(remaining / 1000) + 's…';
+    }
+
+    function onCancel() {
+      if (run.cancelled) return;
+      clearAutoCloseTimers();
+      if (messageEl) { messageEl.style.display = 'none'; messageEl.textContent = ''; }
+      // The Cancel button was focused and is now hidden — hand focus to the
+      // Copy-prompt button so keyboard/AT users don't get dropped on <body>.
+      var clip = document.getElementById('waitingClipboard');
+      if (clip && typeof clip.focus === 'function') clip.focus();
+      announceAutoClose('Auto-close cancelled. This tab will stay open.');
+    }
+
+    if (cancelBtn) {
+      cancelBtn.style.display = '';
+      cancelBtn.onclick = onCancel;
+    }
+    // role="timer" has an implicit aria-live of "off", so the per-second text
+    // updates stay silent while still being exposed as a timer to AT.
+    if (messageEl && typeof messageEl.setAttribute === 'function') {
+      messageEl.setAttribute('role', 'timer');
+    }
+    // Move focus to Cancel so the escape hatch is reachable without hunting,
+    // and announce the countdown once (never per tick).
+    if (cancelBtn && typeof cancelBtn.focus === 'function') cancelBtn.focus();
+    var totalSecs = Math.ceil(ms / 1000);
+    announceAutoClose(
+      'Approved. This tab closes in ' + totalSecs +
+      (totalSecs === 1 ? ' second' : ' seconds') + '. Press Cancel to stay.',
+    );
+
+    function tick() {
+      if (run.cancelled) return;
+      if (remaining <= 0) {
+        try { window.close(); } catch (_) {}
+        // If the tab is still open (window.close() is a no-op on tabs the
+        // browser didn't open via script), tell the user how to proceed.
+        var closedCheckId = setTimeout(function () {
+          if (run.cancelled || window.closed) return;
+          // The countdown is spent, so tear it down: drop role="timer" (an
+          // idle timer AT can still read) and hide Cancel, which no longer
+          // cancels anything.
+          clearAutoCloseTimers();
+          if (messageEl) {
+            messageEl.style.display = '';
+            messageEl.textContent = 'Approved — you can close this tab';
+          }
+          // role="timer" is aria-live "off", so the new text is silent on its
+          // own; announce the terminal state on the polite region instead.
+          announceAutoClose('Approved — you can close this tab.');
+        }, 50);
+        run.timers.push(closedCheckId);
+        return;
+      }
+      showCountdown();
+      var nextId = setTimeout(function () {
+        remaining -= CLOSE_COUNTDOWN_TICK_MS;
+        tick();
+      }, Math.min(CLOSE_COUNTDOWN_TICK_MS, remaining));
+      run.timers.push(nextId);
+    }
+
+    tick();
+  }
+
+  // ===== runFinishReview =====
+  // Shared finish-review flow used by both code-review (app.js) and
+  // live-mode (live-mode.js). POSTs /api/finish, parses
+  // {approved, prompt}, drives the #waitingDialog modal (heading,
+  // message, prompt body, "Copy prompt" affordance), replays the
+  // approved-checkmark CSS animation via the offsetWidth reflow trick,
+  // and copies the prompt to the clipboard. The caller owns its own
+  // uiState transition via the onWaiting/onApproved callbacks.
+  //
+  // opts:
+  //   onWaiting()        — called after a non-approved finish (caller flips uiState).
+  //   onApproved(prompt) — called after an approved finish. Receives the prompt string.
+  //   onError(err)       — error surfacer (caller decides toast vs. console). Default: console.error.
+  //   dedup              — optional inflight flag (window.hunkyard.live.inflight.makeInFlightFlag()).
+  //                        If provided and busy, the call is a no-op (returns null).
+  //
+  // Returns: Promise<{approved, prompt} | null>. Rejects only when onError is not
+  // supplied; if onError is supplied, the error is delivered there and the promise
+  // resolves to null (matches existing call-site ergonomics).
+  var finishInFlight = false;
+  async function runFinishReview(opts) {
+    var o = opts || {};
+    var dedup = o.dedup;
+    if (serverStopped || finishInFlight) return null;
+    if (dedup && typeof dedup.busy === 'function' && dedup.busy()) return null;
+    if (dedup && typeof dedup.set === 'function') dedup.set();
+    finishInFlight = true;
+    try {
+      if (typeof o.checkConsent === 'function') {
+        var consentOk = await o.checkConsent();
+        if (!consentOk) return null;
+      }
+      if (serverStopped) return null;
+      var publication = window.hunkyardReview ? await window.hunkyardReview.prepare(o.publicationKey) : null;
+      if (publication === false) return null;
+      var resp = await fetch('/api/finish', publication ? {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(publication),
+      } : { method: 'POST' });
+      if (!resp.ok) throw new Error(resp.status === 409 ? 'Review changed; reload before publishing.' : 'Finish review failed: HTTP ' + resp.status);
+      var data = await resp.json();
+      if (publication) {
+        window.hunkyardReview.published();
+        var preferenceStatus = document.getElementById('preferenceStatus');
+        if (preferenceStatus) preferenceStatus.textContent = 'Preference classification pending in the launching CLI.';
+      }
+      var approved = !!data.approved;
+      var prompt = data.prompt || 'I reviewed the changes, no feedback, good to go!';
+
+      var dialog = document.getElementById('waitingDialog');
+      var headingEl = document.getElementById('waitingHeading');
+      var messageEl = document.getElementById('waitingMessage');
+      var clipEl = document.getElementById('waitingClipboard');
+      var promptEl = document.getElementById('waitingPrompt');
+      var previewEl = document.getElementById('promptPreview');
+
+      if (promptEl) promptEl.textContent = prompt;
+      if (previewEl) previewEl.textContent = prompt;
+      if (clipEl) {
+        var copyLabel = clipEl.querySelector('.copy-label');
+        if (copyLabel) copyLabel.textContent = 'Copy';
+        clipEl.classList.remove('copied');
+        clipEl.setAttribute('aria-label', 'Copy prompt to clipboard');
+      }
+
+      if (dialog) {
+        dialog.classList.remove('approved');
+        dialog.querySelectorAll('.confetti-dot').forEach(function (d) { d.remove(); });
+        if (approved) {
+          // Force reflow so the CSS animation restarts when the class is re-added.
+          void dialog.offsetWidth;
+          dialog.classList.add('approved');
+          spawnConfetti(dialog.querySelector('.waiting-header'));
+        }
+      }
+      if (headingEl) headingEl.textContent = approved ? 'Approved' : 'Review submitted';
+      // A countdown from a previous approval must not survive into this
+      // finish: on the non-approved path nothing else would stop it, and the
+      // message line we're about to rewrite is the countdown's own output.
+      clearAutoCloseTimers();
+      if (messageEl) {
+        if (approved) {
+          messageEl.style.display = 'none';
+        } else {
+          messageEl.style.display = '';
+          messageEl.textContent =
+            "Your feedback is saved. The next review round will appear here.";
+        }
+      }
+
+      var receiptEl = document.getElementById('summaryReceipt');
+      var lineEl = document.getElementById('summaryLine');
+      if (receiptEl && lineEl) {
+        if (approved && data.stats) {
+          var statParts = [];
+          if (data.stats.files_reviewed) statParts.push(data.stats.files_reviewed + (data.stats.files_reviewed === 1 ? ' file' : ' files'));
+          if (data.stats.comments_submitted) statParts.push(data.stats.comments_submitted + (data.stats.comments_submitted === 1 ? ' comment' : ' comments'));
+          var dur = data.stats.duration_seconds;
+          if (dur != null) statParts.push(formatStatsDuration(dur));
+          if (statParts.length) {
+            var plainText = 'Done reviewing — ' + statParts.join(' · ');
+            receiptEl.setAttribute('data-copy-text', plainText);
+            var html = 'Done reviewing <span class="sep">—</span> ';
+            html += statParts.join(' <span class="sep">·</span> ');
+            lineEl.innerHTML = html;
+            receiptEl.style.display = '';
+            wireSummaryCopyBtn();
+          } else {
+            receiptEl.style.display = 'none';
+          }
+        } else {
+          receiptEl.style.display = 'none';
+        }
+      }
+
+      try { await navigator.clipboard.writeText(prompt); } catch (_) {}
+
+      var closeMs;
+      if (approved) {
+        // close_on_approve_after_ms is global-only and off by default. Prefer
+        // the value baked into the /api/finish response: the daemon may stop
+        // immediately after an approved finish (stopDaemonOnApproval), so a
+        // separate /api/config round-trip can race and fail. Fall back to the
+        // config endpoint only when the finish payload omits the field (older
+        // daemon). Best-effort — a missing/failed config fetch just means no
+        // auto-close, never blocks the approval itself.
+        if (typeof data.close_on_approve_after_ms === 'number') {
+          closeMs = data.close_on_approve_after_ms;
+        } else {
+          try {
+            var cfgResp = await fetch('/api/config');
+            if (cfgResp && cfgResp.ok) {
+              var cfgData = await cfgResp.json();
+              closeMs = cfgData && cfgData.close_on_approve_after_ms;
+            }
+          } catch (_) { /* best effort */ }
+        }
+      }
+
+      if (approved && typeof o.onApproved === 'function') o.onApproved(prompt);
+      else if (!approved && typeof o.onWaiting === 'function') o.onWaiting();
+
+      // Must run after onApproved: the waiting overlay is display:none until
+      // the caller flips uiState to 'waiting', and focus() on a hidden Cancel
+      // button is a silent no-op.
+      if (approved) scheduleAutoClose(closeMs, messageEl);
+
+      return { approved: approved, prompt: prompt };
+    } catch (err) {
+      if (typeof o.onError === 'function') {
+        o.onError(err);
+        return null;
+      }
+      throw err;
+    } finally {
+      finishInFlight = false;
+      if (dedup && typeof dedup.clear === 'function') dedup.clear();
+    }
+  }
+
+  // ===== waitForSession =====
+  // Shared base poll for the deferred-init readiness gate. The server
+  // returns 503 until SetSession() completes — every endpoint other
+  // than /api/health is gated. Callers (code-review init,
+  // live-mode init) wrap this with their own UI hook via
+  // onProgress(elapsedMs).
+  //
+  // opts:
+  //   url        — defaults to '/api/session'.
+  //   intervalMs — poll interval, default 200.
+  //   maxWaitMs  — optional cap; rejects after with a timeout error.
+  //   onProgress — optional (elapsedMs) => void, called before each retry sleep.
+  //   signal     — optional AbortSignal; rejects with AbortError when aborted.
+  //
+  // Resolves with the parsed JSON payload on the first non-503 response.
+  // Throws on network error, 5xx (other than 503), or non-JSON-shaped failures.
+  async function waitForSession(opts) {
+    var o = opts || {};
+    var url = o.url || '/api/session';
+    var intervalMs = (typeof o.intervalMs === 'number') ? o.intervalMs : 200;
+    var maxWaitMs = (typeof o.maxWaitMs === 'number') ? o.maxWaitMs : 0;
+    var onProgress = (typeof o.onProgress === 'function') ? o.onProgress : null;
+    var signal = o.signal;
+    var start = Date.now();
+
+    function aborted() {
+      return signal && signal.aborted;
+    }
+    function abortError() {
+      var e = new Error('Aborted');
+      e.name = 'AbortError';
+      return e;
+    }
+
+    while (true) {
+      if (aborted()) throw abortError();
+      var elapsed = Date.now() - start;
+      if (maxWaitMs > 0 && elapsed > maxWaitMs) {
+        throw new Error('waitForSession: timed out after ' + maxWaitMs + 'ms');
+      }
+
+      var fetchOpts = signal ? { signal: signal } : undefined;
+      var r = await fetch(url, fetchOpts);
+      if (r.status !== 503) {
+        if (!r.ok) {
+          var err = new Error('waitForSession: HTTP ' + r.status);
+          err.status = r.status;
+          err.response = r;
+          throw err;
+        }
+        return await r.json();
+      }
+      if (onProgress) onProgress(elapsed);
+      await new Promise(function (resolve, reject) {
+        var t = setTimeout(function () {
+          if (signal) signal.removeEventListener('abort', onAbort);
+          resolve();
+        }, intervalMs);
+        function onAbort() {
+          clearTimeout(t);
+          reject(abortError());
+        }
+        if (signal) signal.addEventListener('abort', onAbort, { once: true });
+      });
+    }
+  }
+
+  // ===== installSidebarResize =====
+  // Shared sidebar/panel pointer-drag resize helper. Used by code-review
+  // (app.js: file-tree handle, comments-panel handle) and live-mode
+  // (panel-render: comments-panel handle).
+  //
+  // Owns all the bits the bare-bones live-mode implementation was missing:
+  //   - Pointer capture (drag survives leaving the handle / window).
+  //   - body.sidebar-resizing class — locks the cursor and disables text
+  //     selection page-wide so the cursor doesn't flicker when the pointer
+  //     leaves the strip mid-drag (style.css owns the rules).
+  //   - Persistence on pointerup via setSetting(settingKey, width).
+  //   - Min clamp (no upper bound — overflow is a horizontal scrollbar).
+  //   - Keyboard a11y: ArrowLeft / ArrowRight nudges by 16px.
+  //
+  // Args:
+  //   handle — the resize handle element (gets pointer events).
+  //   panel  — the panel whose width is being changed.
+  //   opts:
+  //     settingKey — string. hunkyard-settings key for persistence (required for save).
+  //     min        — number. Minimum width in px (default 200).
+  //     edge       — 'left' | 'right'. Which edge of the panel the handle sits on.
+  //                  'right' (default): handle on panel's right edge, drag-right grows.
+  //                  'left':  handle on panel's left edge,  drag-left  grows.
+  //
+  // Returns a teardown function that removes the listeners and clears state.
+  //
+  // Pure helper exposed alongside (computeResizeDelta) so tests can exercise
+  // the math without a DOM.
+  function computeResizeDelta(startWidth, startX, currentX, edge, min) {
+    if (typeof min !== 'number' || min < 0) min = 200;
+    var dir = edge === 'left' ? -1 : 1;
+    var delta = (currentX - startX) * dir;
+    var w = startWidth + delta;
+    if (w < min) w = min;
+    return w;
+  }
+
+  function installSidebarResize(handle, panel, opts) {
+    if (!handle || !panel) return function () {};
+    var o = opts || {};
+    var settingKey = o.settingKey || null;
+    var min = (typeof o.min === 'number') ? o.min : 200;
+    var edge = (o.edge === 'left') ? 'left' : 'right';
+
+    // Apply persisted width on install.
+    if (settingKey) {
+      var saved = getSetting(settingKey, null);
+      if (typeof saved === 'number' && saved >= min) {
+        panel.style.width = saved + 'px';
+      }
+    }
+
+    var activePointerId = null;
+    var startX = 0;
+    var startW = 0;
+    var lastWidth = 0;
+
+    function onMove(ev) {
+      if (ev.pointerId !== activePointerId) return;
+      var w = computeResizeDelta(startW, startX, ev.clientX, edge, min);
+      panel.style.width = w + 'px';
+      lastWidth = w;
+    }
+    function onEnd(ev) {
+      if (ev.pointerId !== activePointerId) return;
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onEnd);
+      handle.removeEventListener('pointercancel', onEnd);
+      try { handle.releasePointerCapture(activePointerId); } catch (_) {}
+      activePointerId = null;
+      handle.classList.remove('dragging');
+      document.body.classList.remove('sidebar-resizing');
+      if (settingKey) {
+        try { setSetting(settingKey, Math.round(lastWidth)); } catch (_) {}
+      }
+    }
+    function onDown(e) {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      activePointerId = e.pointerId;
+      startX = e.clientX;
+      startW = panel.getBoundingClientRect().width;
+      lastWidth = startW;
+      try { handle.setPointerCapture(e.pointerId); } catch (_) {}
+      handle.classList.add('dragging');
+      document.body.classList.add('sidebar-resizing');
+      handle.addEventListener('pointermove', onMove);
+      handle.addEventListener('pointerup', onEnd);
+      handle.addEventListener('pointercancel', onEnd);
+    }
+    function onKey(e) {
+      if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+      e.preventDefault();
+      var dir = edge === 'left' ? -1 : 1;
+      var sign = e.key === 'ArrowRight' ? 1 : -1;
+      var current = panel.getBoundingClientRect().width;
+      var w = Math.max(min, current + sign * dir * 16);
+      panel.style.width = w + 'px';
+      if (settingKey) {
+        try { setSetting(settingKey, Math.round(w)); } catch (_) {}
+      }
+    }
+
+    handle.addEventListener('pointerdown', onDown);
+    handle.addEventListener('keydown', onKey);
+
+    return function teardown() {
+      handle.removeEventListener('pointerdown', onDown);
+      handle.removeEventListener('keydown', onKey);
+      handle.removeEventListener('pointermove', onMove);
+      handle.removeEventListener('pointerup', onEnd);
+      handle.removeEventListener('pointercancel', onEnd);
+      if (activePointerId !== null) {
+        try { handle.releasePointerCapture(activePointerId); } catch (_) {}
+      }
+      handle.classList.remove('dragging');
+      document.body.classList.remove('sidebar-resizing');
+    };
+  }
+
+  // ===== Image upload (paste + drag-drop) for comment textareas =====
+  var pendingImageSeq = 0;
+
+  function insertAtCursor(textarea, text) {
+    var start = textarea.selectionStart;
+    var end = textarea.selectionEnd;
+    var before = textarea.value.substring(0, start);
+    var after = textarea.value.substring(end);
+    textarea.value = before + text + after;
+    var cursor = start + text.length;
+    textarea.selectionStart = textarea.selectionEnd = cursor;
+    textarea.focus();
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function replaceInTextarea(textarea, needle, replacement) {
+    var idx = textarea.value.indexOf(needle);
+    if (idx === -1) return;
+    var selStart = textarea.selectionStart;
+    var selEnd = textarea.selectionEnd;
+    textarea.value = textarea.value.substring(0, idx) + replacement + textarea.value.substring(idx + needle.length);
+    var delta = replacement.length - needle.length;
+    if (selStart > idx + needle.length) {
+      textarea.selectionStart = selStart + delta;
+      textarea.selectionEnd = selEnd + delta;
+    } else if (selStart >= idx) {
+      textarea.selectionStart = textarea.selectionEnd = idx + replacement.length;
+    }
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function uploadAndInsertImage(textarea, file) {
+    var seq = ++pendingImageSeq;
+    var placeholder = '![uploading…](hunkyard-pending-' + seq + ')';
+    insertAtCursor(textarea, placeholder);
+    var formData = new FormData();
+    formData.append('file', file, file.name || '');
+    fetch('/api/attachments', { method: 'POST', body: formData })
+      .then(function (res) {
+        if (!res.ok) return res.text().then(function (msg) { throw new Error(msg || 'Upload failed: ' + res.status); });
+        return res.json();
+      })
+      .then(function (data) {
+        if (!data || !data.url) throw new Error('Malformed upload response');
+        var alt = (data.original_filename || '').trim();
+        replaceInTextarea(textarea, placeholder, '![' + alt + '](' + data.url + ')');
+      })
+      .catch(function (err) {
+        console.error('Image paste upload failed:', err);
+        replaceInTextarea(textarea, placeholder, '_[image upload failed]_');
+      });
+  }
+
+  function attachImagePaste(textarea) {
+    textarea.addEventListener('paste', function (event) {
+      var clipboard = event.clipboardData;
+      if (!clipboard) return;
+      var items = clipboard.items;
+      if (!items || items.length === 0) return;
+      var images = [];
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].kind === 'file' && items[i].type && items[i].type.indexOf('image/') === 0) {
+          var f = items[i].getAsFile();
+          if (f) images.push(f);
+        }
+      }
+      if (images.length === 0) return;
+      event.preventDefault();
+      images.forEach(function (file) { uploadAndInsertImage(textarea, file); });
+    });
+  }
+
+  function attachImageDragDrop(textarea) {
+    function hasFiles(event) {
+      var dt = event.dataTransfer;
+      return !!(dt && dt.types && Array.prototype.indexOf.call(dt.types, 'Files') !== -1);
+    }
+    textarea.addEventListener('dragenter', function (event) {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      textarea.classList.add('drag-active');
+    });
+    textarea.addEventListener('dragover', function (event) {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      textarea.classList.add('drag-active');
+    });
+    textarea.addEventListener('dragleave', function (event) {
+      if (event.target === textarea) textarea.classList.remove('drag-active');
+    });
+    textarea.addEventListener('drop', function (event) {
+      var dt = event.dataTransfer;
+      if (!dt || !dt.files || dt.files.length === 0) { textarea.classList.remove('drag-active'); return; }
+      var images = [];
+      for (var i = 0; i < dt.files.length; i++) {
+        var file = dt.files[i];
+        if (file && file.type && file.type.indexOf('image/') === 0) images.push(file);
+      }
+      if (images.length === 0) { textarea.classList.remove('drag-active'); return; }
+      event.preventDefault();
+      textarea.classList.remove('drag-active');
+      textarea.focus();
+      images.forEach(function (file) { uploadAndInsertImage(textarea, file); });
+    });
+  }
+
+  function attachImageUploads(textarea) {
+    attachImagePaste(textarea);
+    attachImageDragDrop(textarea);
+  }
+
+  // Set once the daemon announced server-shutdown; the page is read only from
+  // then on, so nothing may re-enable finishing.
+  var serverStopped = false;
+
+  // Shows the finish button as a disabled "Session complete" once the server
+  // has stopped. Returns true when it did, so callers skip their own label.
+  function lockFinishBtnIfStopped(btn) {
+    if (!serverStopped || !btn) return false;
+    btn.textContent = 'Session complete';
+    btn.disabled = true;
+    btn.classList.remove('btn-primary');
+    return true;
+  }
+
+  function showDisconnected() {
+    serverStopped = true;
+    lockFinishBtnIfStopped(document.getElementById('finishBtn'));
+    if (document.querySelector('.disconnected-banner')) return;
+    var header = document.querySelector('.header');
+    if (!header) return;
+    var banner = document.createElement('div');
+    banner.className = 'disconnected-banner';
+    banner.setAttribute('role', 'status');
+    banner.setAttribute('aria-live', 'polite');
+    var pill = document.createElement('div');
+    pill.className = 'disconnected-pill';
+    pill.innerHTML = '<svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true"><circle cx="7" cy="7" r="6" fill="currentColor" opacity="0.18"/><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.25"/><path d="M4.5 7.1 L6.3 8.9 L9.5 5.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>Session complete';
+    var text = document.createElement('span');
+    text.className = 'disconnected-text';
+    text.textContent = 'Server stopped — your review is now read only. Safe to close this tab.';
+    banner.appendChild(pill);
+    banner.appendChild(text);
+    header.insertAdjacentElement('afterend', banner);
+    var setHeaderVar = function () {
+      document.documentElement.style.setProperty('--hunkyard-header-height', header.offsetHeight + 'px');
+    };
+    setHeaderVar();
+    if (typeof ResizeObserver !== 'undefined') {
+      new ResizeObserver(setHeaderVar).observe(header);
+    } else {
+      window.addEventListener('resize', setHeaderVar);
+    }
+  }
+
+  // pathCompare — byte-order string compare matching Go sort.Strings and GitHub
+  // PR file order. localeCompare puts '_' before '.' (foo_test.go before foo.go).
+  function pathCompare(a, b) {
+    const min = Math.min(a.length, b.length);
+    for (let i = 0; i < min; i++) {
+      const diff = a.charCodeAt(i) - b.charCodeAt(i);
+      if (diff !== 0) return diff;
+    }
+    return a.length - b.length;
+  }
+
+  // ===== project prompt trust =====
+
+  var AGENT_PROMPTS_GUIDE_URL = 'https://github.com/BSH2409/hunkyard/blob/main/docs/agent-prompts.md';
+
+  var activeProjectPromptTrustResolve = null;
+
+  function showProjectPromptTrustDialog(cfg) {
+    return new Promise(function (resolve) {
+      var existing = document.getElementById('projectPromptTrustOverlay');
+      if (existing) {
+        if (activeProjectPromptTrustResolve) {
+          activeProjectPromptTrustResolve(false);
+          activeProjectPromptTrustResolve = null;
+        }
+        existing.remove();
+      }
+      activeProjectPromptTrustResolve = resolve;
+
+      var sources = (cfg && cfg.project_prompt_sources) || [];
+      var preview = (cfg && cfg.project_prompt_preview) || '';
+      var sourcesHtml = sources.length
+        ? '<ul class="ppt-sources">' + sources.map(function (s) {
+            return '<li><code>' + escapeHTML(s) + '</code></li>';
+          }).join('') + '</ul>'
+        : '';
+
+      var overlay = document.createElement('div');
+      overlay.id = 'projectPromptTrustOverlay';
+      overlay.className = 'ppt-overlay';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-labelledby', 'projectPromptTrustTitle');
+      overlay.innerHTML =
+        '<div class="ppt-dialog">' +
+          '<h3 id="projectPromptTrustTitle" class="ppt-headline">Trust project prompts?</h3>' +
+          '<p class="ppt-sub">This repository defines custom agent instructions. ' +
+            'Review the rendered previews below before finishing. ' +
+            '<a href="' + escapeHTML(AGENT_PROMPTS_GUIDE_URL) + '" target="_blank" rel="noopener">Agent prompts guide</a>.</p>' +
+          sourcesHtml +
+          '<pre class="ppt-preview" id="projectPromptPreview" aria-label="Rendered prompt previews"></pre>' +
+          '<div class="ppt-actions">' +
+            '<button type="button" class="ppt-link-btn" id="pptUseDefaultsBtn">Use Hunkyard defaults</button>' +
+            '<button type="button" class="ppt-link-btn" id="pptTrustAlwaysBtn">Always trust this project</button>' +
+            '<button type="button" class="ppt-primary-btn" id="pptTrustUntilChangeBtn">Trust until prompts change</button>' +
+          '</div>' +
+        '</div>';
+
+      document.body.appendChild(overlay);
+      var previewEl = overlay.querySelector('#projectPromptPreview');
+      if (previewEl) previewEl.textContent = preview;
+
+      function close(result) {
+        overlay.remove();
+        if (activeProjectPromptTrustResolve === resolve) {
+          activeProjectPromptTrustResolve = null;
+        }
+        resolve(result);
+      }
+
+      function trustButtons() {
+        return [
+          overlay.querySelector('#pptUseDefaultsBtn'),
+          overlay.querySelector('#pptTrustUntilChangeBtn'),
+          overlay.querySelector('#pptTrustAlwaysBtn'),
+        ].filter(Boolean);
+      }
+
+      function setTrustButtonsDisabled(disabled) {
+        trustButtons().forEach(function (btn) { btn.disabled = disabled; });
+      }
+
+      async function postTrust(mode) {
+        try {
+          var r = await fetch('/api/project-prompts/trust', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ mode: mode }),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+          if (cfg) cfg.project_prompts_untrusted = false;
+          return true;
+        } catch (e) {
+          console.error('Failed to record prompt trust:', e);
+          if (window.hunkyard && window.hunkyard.shared && window.hunkyard.shared.showToast) {
+            window.hunkyard.shared.showToast('Failed to save trust choice', { kind: 'error' });
+          }
+          return false;
+        }
+      }
+
+      async function onTrustClick(mode) {
+        setTrustButtonsDisabled(true);
+        if (await postTrust(mode)) close(true);
+        else setTrustButtonsDisabled(false);
+      }
+
+      overlay.querySelector('#pptUseDefaultsBtn').addEventListener('click', function () {
+        onTrustClick('defaults');
+      });
+      overlay.querySelector('#pptTrustUntilChangeBtn').addEventListener('click', function () {
+        onTrustClick('until_change');
+      });
+      overlay.querySelector('#pptTrustAlwaysBtn').addEventListener('click', function () {
+        onTrustClick('always');
+      });
+    });
+  }
+
+  async function ensureProjectPromptTrust(cfg) {
+    if (!cfg || !cfg.project_prompts_untrusted) return true;
+    return showProjectPromptTrustDialog(cfg);
+  }
+
+  function applyProjectPromptTrustUI(cfg, finishBtn) {
+    if (!finishBtn || !cfg) return;
+    if (lockFinishBtnIfStopped(finishBtn)) return;
+    if (cfg.project_prompts_untrusted) {
+      // The trust dialog is opened by the finish button's click handler.
+      // Keep the button actionable so the user can make that trust choice;
+      // /api/finish remains guarded server-side until they do.
+      finishBtn.title = 'Review project prompts before finishing';
+      if (finishBtn.textContent !== 'Waiting...') {
+        finishBtn.disabled = false;
+      }
+      return;
+    }
+    finishBtn.title = '';
+    // Re-enable after trust; skip if finish flow already moved to waiting state.
+    if (finishBtn.textContent !== 'Waiting...') {
+      finishBtn.disabled = false;
+    }
+  }
+
+  window.hunkyard = window.hunkyard || {};
+  window.hunkyard.shared = {
+    pathCompare,
+    escapeHTML,
+    fetchJSON,
+    getCookie,
+    setCookie,
+    readThemeFromSettings,
+    applyThemeFromCookie,
+    applyDisplayAttributes,
+    getSetting,
+    setSetting,
+    CODE_FONT_PRESETS,
+    sanitizeCodeFont,
+    applyCodeFont,
+    applyCodeFontFromCookie,
+    setCodeFont,
+    updateCommentCountIndicator,
+    showToast,
+    runFinishReview,
+    scheduleAutoClose,
+    clearAutoCloseTimers,
+    waitForSession,
+    installSidebarResize,
+    computeResizeDelta,
+    attachImageUploads,
+    showDisconnected,
+    lockFinishBtnIfStopped,
+    ensureProjectPromptTrust,
+    applyProjectPromptTrustUI,
+  };
+})();

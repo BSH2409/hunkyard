@@ -1,0 +1,328 @@
+package comment
+
+import (
+	"errors"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/BSH2409/hunkyard/internal/clicmd"
+	"github.com/BSH2409/hunkyard/internal/daemon"
+	"github.com/BSH2409/hunkyard/internal/review"
+)
+
+func loadOutputReview(t *testing.T, dataRoot string) HunkyardJSON {
+	t.Helper()
+	hunkyardPath, err := review.ResolveReviewPath(dataRoot)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cj, err := loadHunkyardJSON(hunkyardPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cj
+}
+
+func TestRunComment_MissingArgs(t *testing.T) {
+	err := RunComment([]string{})
+	if err == nil {
+		t.Fatal("expected usage error")
+	}
+	var exitErr clicmd.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T: %v", err, err)
+	}
+}
+
+func TestRunComment_InvalidLocation(t *testing.T) {
+	err := RunComment([]string{"noColonHere", "some body"})
+	if err == nil {
+		t.Fatal("expected error for invalid location")
+	}
+	if !strings.Contains(err.Error(), "invalid location") {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestRunComment_InvalidLineNumber(t *testing.T) {
+	err := RunComment([]string{"file.go:abc", "some body"})
+	if err == nil {
+		t.Fatal("expected error for invalid line number")
+	}
+}
+
+func TestRunComment_ReviewLevel(t *testing.T) {
+	tmp := t.TempDir()
+	if err := RunComment([]string{"--output", tmp, "--author", "TestBot", "overall looks good"}); err != nil {
+		t.Fatalf("RunComment: %v", err)
+	}
+	cj := loadOutputReview(t, tmp)
+	if len(cj.ReviewComments) != 1 || cj.ReviewComments[0].Body != "overall looks good" {
+		t.Errorf("review comment not saved: %+v", cj.ReviewComments)
+	}
+}
+
+func TestRunComment_FileLevel(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	path := filepath.Join(tmp, "test.go")
+	if err := os.WriteFile(path, []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunComment([]string{"--output", tmp, "--author", "Bot", "test.go", "file comment"}); err != nil {
+		t.Fatalf("RunComment: %v", err)
+	}
+	cj := loadOutputReview(t, tmp)
+	if len(cj.Files["test.go"].Comments) != 1 {
+		t.Fatalf("expected file comment, got %+v", cj.Files)
+	}
+}
+
+func TestRunComment_LineLevel(t *testing.T) {
+	tmp := t.TempDir()
+	if err := RunComment([]string{"--output", tmp, "--author", "Bot", "main.go:42", "line comment"}); err != nil {
+		t.Fatalf("RunComment: %v", err)
+	}
+	cj := loadOutputReview(t, tmp)
+	c := cj.Files["main.go"].Comments[0]
+	if c.StartLine != 42 || c.EndLine != 42 {
+		t.Errorf("lines = %d-%d, want 42-42", c.StartLine, c.EndLine)
+	}
+}
+
+func TestRunComment_RangeLine(t *testing.T) {
+	tmp := t.TempDir()
+	if err := RunComment([]string{"--output", tmp, "--author", "Bot", "test.go:10-25", "range body"}); err != nil {
+		t.Fatalf("RunComment: %v", err)
+	}
+	cj := loadOutputReview(t, tmp)
+	c := cj.Files["test.go"].Comments[0]
+	if c.StartLine != 10 || c.EndLine != 25 {
+		t.Errorf("lines = %d-%d, want 10-25", c.StartLine, c.EndLine)
+	}
+}
+
+func TestRunComment_InvalidRange(t *testing.T) {
+	err := RunComment([]string{"file.go:10-abc", "some body"})
+	if err == nil {
+		t.Fatal("expected error for invalid range")
+	}
+}
+
+func TestRunComment_Clear(t *testing.T) {
+	tmp := t.TempDir()
+	t.Chdir(tmp)
+	cwd, err := daemon.ResolvedCWD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := daemon.SessionKey(cwd, "", nil)
+	reviewPath := filepath.Join(tmp, "reviews", key)
+	if err := saveHunkyardJSON(reviewPath, HunkyardJSON{Files: map[string]HunkyardJSONFile{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RunComment([]string{"--output", tmp, "--clear"}); err != nil {
+		t.Fatalf("RunComment --clear: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(reviewPath, "review.json")); !os.IsNotExist(err) {
+		t.Fatalf("expected review cleared, stat err = %v", err)
+	}
+}
+
+func TestRunComment_ReplyUsesResolvedReviewPath(t *testing.T) {
+	outputDir := t.TempDir()
+	t.Chdir(outputDir)
+	cwd, err := daemon.ResolvedCWD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := daemon.SessionKey(cwd, "", nil)
+	reviewPath := filepath.Join(outputDir, "reviews", key)
+	if err := saveHunkyardJSON(reviewPath, HunkyardJSON{
+		ReviewComments: []Comment{{ID: "r_reply", Body: "parent", Scope: "review"}},
+		Files:          map[string]HunkyardJSONFile{},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RunComment([]string{
+		"--output", outputDir,
+		"--reply-to", "r_reply",
+		"--author", "bot",
+		"done",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	cj, err := loadHunkyardJSON(reviewPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cj.ReviewComments) != 1 || len(cj.ReviewComments[0].Replies) != 1 {
+		t.Fatalf("review comments = %+v, want one reply", cj.ReviewComments)
+	}
+	if cj.ReviewComments[0].Replies[0].Body != "done" {
+		t.Fatalf("reply body = %q, want done", cj.ReviewComments[0].Replies[0].Body)
+	}
+}
+
+func TestRunComment_InvalidReviewReturnsErrors(t *testing.T) {
+	projectDir := t.TempDir()
+	t.Chdir(projectDir)
+	if err := os.WriteFile(filepath.Join(projectDir, "file.go"), []byte("package main\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	outputDir := filepath.Join(projectDir, "output")
+	cwd, err := daemon.ResolvedCWD()
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := daemon.SessionKey(cwd, "", nil)
+	reviewPath := filepath.Join(outputDir, "reviews", key)
+	if err := os.MkdirAll(reviewPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(reviewPath, "review.json"), []byte("{"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		args []string
+	}{
+		{name: "review comment", args: []string{"body"}},
+		{name: "file comment", args: []string{"file.go", "body"}},
+		{name: "line comment", args: []string{"file.go:1", "body"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := append([]string{"--output", outputDir}, tt.args...)
+			if err := RunComment(args); err == nil {
+				t.Fatal("expected invalid review error")
+			}
+		})
+	}
+}
+
+func TestRunCommentRejectsLiveReviewByForm(t *testing.T) {
+	tests := []struct {
+		name string
+		args []string
+		want string
+	}{
+		{"line", []string{"file.go:1", "body"}, "a line comment (hunkyard comment <path>:<line> <body>) is not supported for live reviews"},
+		{"file", []string{"file.go", "body"}, "a file comment (hunkyard comment <path> <body>) is not supported for live reviews"},
+		{"review", []string{"overall"}, "a review-level comment (hunkyard comment <body>) is not supported for live reviews"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dir := t.TempDir()
+			seedPinReview(t, dir, HunkyardJSON{ReviewType: "live", Files: map[string]HunkyardJSONFile{}})
+			err := RunComment(append([]string{"--output", dir}, tt.args...))
+			if err == nil || !strings.Contains(err.Error(), tt.want) || !strings.Contains(err.Error(), "--selector") {
+				t.Fatalf("error = %v, want %q and a --selector hint", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestRunCommentBareOnLiveReviewPrintsUsage(t *testing.T) {
+	dir := t.TempDir()
+	seedPinReview(t, dir, HunkyardJSON{ReviewType: "live", Files: map[string]HunkyardJSONFile{}})
+	err := RunComment([]string{"--output", dir})
+	var exitErr clicmd.ExitError
+	if !errors.As(err, &exitErr) || strings.Contains(err.Error(), "not supported") {
+		t.Fatalf("error = %v, want usage error", err)
+	}
+}
+
+func TestRunComment_ReplyMissingBody(t *testing.T) {
+	err := RunComment([]string{"--reply-to", "c_abc"})
+	if err == nil {
+		t.Fatal("expected usage error")
+	}
+	var exitErr clicmd.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("expected ExitError, got %T", err)
+	}
+}
+
+func TestRunComment_PlanAndOutputConflict(t *testing.T) {
+	err := RunComment([]string{"--plan", "my-plan", "--output", "/tmp/x", "body"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "cannot be used together") {
+		t.Errorf("got %v", err)
+	}
+}
+
+func TestRunComment_JSONAndReplyToConflict(t *testing.T) {
+	err := RunComment([]string{"--json", "--reply-to", "c_6ab5c4", "--author", "Codex", "Added hunkyard install prompts"})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "--json and --reply-to cannot be used together") {
+		t.Errorf("got %v", err)
+	}
+	if !strings.Contains(err.Error(), "hunkyard comment --reply-to <id>") {
+		t.Errorf("expected reply usage hint, got %v", err)
+	}
+}
+
+func TestRunCommentJSONScoped_CountsCommentsAndReplies(t *testing.T) {
+	tmp := t.TempDir()
+	// Seed a comment to reply to.
+	cj := HunkyardJSON{
+		Files: map[string]HunkyardJSONFile{
+			"a.go": {Comments: []Comment{{ID: "c1", Body: "orig"}}},
+		},
+	}
+	hunkyardPath, err := review.ResolveReviewPath(tmp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := saveHunkyardJSON(hunkyardPath, cj); err != nil {
+		t.Fatal(err)
+	}
+
+	jsonPath := filepath.Join(tmp, "bulk.json")
+	payload := `[{"file":"b.go","line":1,"body":"new"},{"reply_to":"c1","body":"reply"}]`
+	if err := os.WriteFile(jsonPath, []byte(payload), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := RunComment([]string{"--json", "--file", jsonPath, "--output", tmp, "--author", "bot"}); err != nil {
+		t.Fatalf("RunComment --json: %v", err)
+	}
+	loaded := loadOutputReview(t, tmp)
+	if len(loaded.Files["b.go"].Comments) != 1 {
+		t.Errorf("expected line comment in b.go, got %+v", loaded.Files)
+	}
+	if len(loaded.Files["a.go"].Comments[0].Replies) != 1 {
+		t.Errorf("expected reply on c1, got %+v", loaded.Files["a.go"].Comments)
+	}
+}
+
+func TestCommentFormNames(t *testing.T) {
+	if got := commentFormFor([]string{"body"}); got != formReviewComment {
+		t.Errorf("review form = %q", got)
+	}
+	if got := commentFormFor([]string{"a.go:3-4", "body"}); got != formLineComment {
+		t.Errorf("line form = %q", got)
+	}
+	if got := commentFormFor([]string{"a.go", "body"}); got != formFileComment {
+		t.Errorf("file form = %q", got)
+	}
+	if got := bulkEntryForm(BulkCommentEntry{Body: "b"}); got != formReviewComment {
+		t.Errorf("bulk review form = %q", got)
+	}
+	if got := bulkEntryForm(BulkCommentEntry{Path: "a.go", Body: "b"}); got != formFileComment {
+		t.Errorf("bulk file form = %q", got)
+	}
+	if got := bulkEntryForm(BulkCommentEntry{File: "a.go", LineSpec: "2", Body: "b"}); got != formLineComment {
+		t.Errorf("bulk line form = %q", got)
+	}
+}

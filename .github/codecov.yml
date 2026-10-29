@@ -1,0 +1,22 @@
+codecov:
+  notify:
+    after_n_builds: 2
+    wait_for_ci: true
+
+coverage:
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+    patch:
+      default:
+        target: 80%
+
+ignore:
+  - "web/"
+  - "test/e2e/"
+  - "node_modules/"
+  - "integrations/"
+  - "cmd/hunkyard/gen_integration_hashes.go"
+  - "cmd/hunkyard/integration_hashes_gen.go"

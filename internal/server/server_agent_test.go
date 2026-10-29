@@ -1,0 +1,417 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"log"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func TestHandleAgentRequest_NoAgentConfigured(t *testing.T) {
+	s, _ := newTestServer(t)
+	// agentCmd is "" by default in newTestServer
+	body := `{"comment_id":"c1"}`
+	req := httptest.NewRequest("POST", "/api/agent/request", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleAgentRequest_CommentNotFound(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.agentCmd = "echo test"
+	body := `{"comment_id":"nonexistent"}`
+	req := httptest.NewRequest("POST", "/api/agent/request", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d: %s", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleAgentRequest_Success(t *testing.T) {
+	s, session := newTestServer(t)
+	s.agentCmd = "echo test"
+
+	// Add a comment to the test file
+	session.Lock()
+	session.Files[0].Comments = []Comment{
+		{
+			ID:        "c1",
+			StartLine: 1,
+			EndLine:   2,
+			Body:      "Please fix this",
+			Author:    "reviewer",
+			Scope:     "line",
+		},
+	}
+	session.Unlock()
+
+	body := `{"comment_id":"c1","file_path":"test.md"}`
+	req := httptest.NewRequest("POST", "/api/agent/request", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+	if ct := w.Result().Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("committed Content-Type = %q, want application/json", ct)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "accepted" {
+		t.Errorf("status = %v, want accepted", resp["status"])
+	}
+
+	// Verify the comment is marked as live
+	comments := session.GetComments("test.md")
+	if len(comments) == 0 {
+		t.Fatal("expected comment to exist")
+	}
+	if !comments[0].Live {
+		t.Error("expected comment Live to be true after agent request")
+	}
+}
+
+// Review-level comments carry no file path and must still reach the agent.
+func TestHandleAgentRequest_ReviewLevelComment(t *testing.T) {
+	s, session := newTestServer(t)
+	s.agentCmd = "echo test"
+
+	c := session.AddReviewComment("Describe the problem and how we fix it", "reviewer")
+
+	body := `{"comment_id":"` + c.ID + `","file_path":""}`
+	req := httptest.NewRequest("POST", "/api/agent/request", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "accepted" {
+		t.Errorf("status = %v, want accepted", resp["status"])
+	}
+	if resp["file_path"] != "" {
+		t.Errorf("file_path = %v, want empty for a review-level comment", resp["file_path"])
+	}
+
+	comments := session.GetReviewComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 review comment, got %d", len(comments))
+	}
+	if !comments[0].Live {
+		t.Error("expected review comment Live to be true after agent request")
+	}
+}
+
+// The answer must land in the review thread; there is no file to fall back on.
+func TestRunAgentCmd_ReviewLevelReply(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "test.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, session := newTestServer(t)
+	session.RepoRoot = dir
+	s.agentCmd = "echo {prompt}"
+
+	c := session.AddReviewComment("general feedback", "reviewer")
+
+	s.runAgentCmd("hello review level", c.ID, "")
+
+	comments := session.GetReviewComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 review comment, got %d", len(comments))
+	}
+	replies := comments[0].Replies
+	if len(replies) == 0 {
+		t.Fatal("expected a reply from agent on the review-level comment, got none")
+	}
+	if !strings.Contains(replies[0].Body, "hello review level") {
+		t.Errorf("reply body = %q, want it to contain the prompt text", replies[0].Body)
+	}
+	if replies[0].Author != "echo" {
+		t.Errorf("reply author = %q, want 'echo'", replies[0].Author)
+	}
+}
+
+// With no file path the prompt must not claim the comment sits on a file.
+func TestBuildAgentPrompt_ReviewLevel(t *testing.T) {
+	c := Comment{ID: "r_1", Body: "tighten the summary", Author: "reviewer", Scope: "review"}
+	got := buildAgentPrompt(c, "")
+	if strings.Contains(got, "comment on :") || strings.Contains(got, "comment on \n") {
+		t.Errorf("prompt names an empty file path:\n%s", got)
+	}
+	if !strings.Contains(got, "tighten the summary") {
+		t.Errorf("prompt is missing the comment body:\n%s", got)
+	}
+	if !strings.Contains(got, "review") {
+		t.Errorf("prompt does not say the comment is about the review as a whole:\n%s", got)
+	}
+}
+
+// Empty file_path still resolves a normal file comment via the all-files scan
+// before the review-level fallback.
+func TestHandleAgentRequest_EmptyPathFindsFileComment(t *testing.T) {
+	s, session := newTestServer(t)
+	s.agentCmd = "echo test"
+
+	session.Lock()
+	session.Files[0].Comments = []Comment{
+		{ID: "c_file1", StartLine: 1, EndLine: 1, Body: "file note", Author: "reviewer", Scope: "line"},
+	}
+	session.Unlock()
+
+	body := `{"comment_id":"c_file1","file_path":""}`
+	req := httptest.NewRequest("POST", "/api/agent/request", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d: %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["file_path"] == "" {
+		t.Error("expected resolved file_path for a file comment even when request path was empty")
+	}
+	if !session.Files[0].Comments[0].Live {
+		t.Error("expected file comment Live after agent request")
+	}
+}
+
+// Deliberate ID collision: AddReply scans file comments before the review
+// fallback. Production IDs are namespaced (c_ vs r_); this locks prefer-file.
+func TestRunAgentCmd_IDCollisionPrefersFileComment(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "test.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, session := newTestServer(t)
+	session.RepoRoot = dir
+	s.agentCmd = "echo collision-reply"
+
+	rc := session.AddReviewComment("review side", "reviewer")
+	session.Lock()
+	session.Files[0].Comments = []Comment{
+		{ID: rc.ID, StartLine: 1, EndLine: 1, Body: "file side", Author: "reviewer", Scope: "line"},
+	}
+	session.Unlock()
+
+	s.runAgentCmd("hello collision", rc.ID, "")
+
+	if len(session.Files[0].Comments[0].Replies) == 0 {
+		t.Fatal("expected reply on the file comment (prefer-file on collision)")
+	}
+	if !strings.Contains(session.Files[0].Comments[0].Replies[0].Body, "collision-reply") {
+		t.Errorf("file reply body = %q", session.Files[0].Comments[0].Replies[0].Body)
+	}
+	rcs := session.GetReviewComments()
+	if len(rcs) != 1 {
+		t.Fatalf("expected 1 review comment, got %d", len(rcs))
+	}
+	if len(rcs[0].Replies) != 0 {
+		t.Errorf("review thread unexpectedly got %d replies on ID collision", len(rcs[0].Replies))
+	}
+}
+
+func TestAgentName_Codex(t *testing.T) {
+	tests := []struct {
+		cmd  string
+		want string
+	}{
+		{"codex exec", "codex"},
+		{"codex exec {prompt}", "codex"},
+		{"/usr/local/bin/codex exec", "codex"},
+		{"claude -p", "claude"},
+		{"", "agent"},
+	}
+	for _, tc := range tests {
+		got := agentName(tc.cmd)
+		if got != tc.want {
+			t.Errorf("agentName(%q) = %q, want %q", tc.cmd, got, tc.want)
+		}
+	}
+}
+
+func TestRunAgentCmd_PromptPlaceholder(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.md")
+	os.WriteFile(testFile, []byte("hello"), 0o644)
+
+	s, session := newTestServer(t)
+	session.RepoRoot = dir
+
+	// With {prompt}, the prompt is passed as an argument (not stdin).
+	s.agentCmd = "echo {prompt}"
+
+	session.Lock()
+	session.Files[0].Comments = []Comment{
+		{ID: "c1", StartLine: 1, EndLine: 1, Body: "test comment", Author: "reviewer", Scope: "line"},
+	}
+	session.Unlock()
+
+	s.runAgentCmd("hello from placeholder", "c1", session.Files[0].Path)
+
+	// runAgentCmd is synchronous — reply is already added when it returns.
+	session.Lock()
+	replies := session.Files[0].Comments[0].Replies
+	session.Unlock()
+	if len(replies) == 0 {
+		t.Fatal("expected a reply from agent, got none")
+	}
+	if !strings.Contains(replies[0].Body, "hello from placeholder") {
+		t.Errorf("reply body = %q, want it to contain the prompt text", replies[0].Body)
+	}
+	if replies[0].Author != "echo" {
+		t.Errorf("reply author = %q, want 'echo'", replies[0].Author)
+	}
+}
+
+func TestRunAgentCmd_StdinFallback(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.md")
+	os.WriteFile(testFile, []byte("hello"), 0o644)
+
+	s, session := newTestServer(t)
+	session.RepoRoot = dir
+
+	// "cat" reads from stdin and prints to stdout — no {prompt} placeholder
+	s.agentCmd = "cat"
+
+	session.Lock()
+	session.Files[0].Comments = []Comment{
+		{ID: "c1", StartLine: 1, EndLine: 1, Body: "test comment", Author: "reviewer", Scope: "line"},
+	}
+	session.Unlock()
+
+	s.runAgentCmd("hello from stdin", "c1", session.Files[0].Path)
+
+	session.Lock()
+	replies := session.Files[0].Comments[0].Replies
+	session.Unlock()
+	if len(replies) == 0 {
+		t.Fatal("expected a reply from agent, got none")
+	}
+	if !strings.Contains(replies[0].Body, "hello from stdin") {
+		t.Errorf("reply body = %q, want it to contain the prompt text", replies[0].Body)
+	}
+	if replies[0].Author != "cat" {
+		t.Errorf("reply author = %q, want 'cat'", replies[0].Author)
+	}
+}
+
+// TestRunAgentCmd_CancelledByShutdownCtx verifies that the agent subprocess
+// is terminated when the daemon's shutdown ctx is cancelled — regression
+// guard for the orphaned-subprocess bug.
+func TestRunAgentCmd_CancelledByShutdownCtx(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "test.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	s, session := newTestServer(t)
+	session.RepoRoot = dir
+	// Sleep longer than the test timeout would tolerate; we'll cancel mid-run.
+	s.agentCmd = "sleep 30"
+
+	session.Lock()
+	session.Files[0].Comments = []Comment{
+		{ID: "c1", StartLine: 1, EndLine: 1, Body: "test", Author: "reviewer", Scope: "line"},
+	}
+	session.Unlock()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s.SetShutdownCtx(ctx)
+
+	done := make(chan struct{})
+	go func() {
+		s.runAgentCmd("prompt", "c1", session.Files[0].Path)
+		close(done)
+	}()
+
+	// Give the subprocess a moment to spawn, then cancel.
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+
+	select {
+	case <-done:
+		// Good: cancel killed the subprocess and runAgentCmd returned promptly.
+	case <-time.After(5 * time.Second):
+		t.Fatal("runAgentCmd did not return within 5s of shutdown ctx cancel — subprocess orphaned")
+	}
+}
+
+// TestWaitBackground_TimesOut verifies WaitBackground returns false when
+// background goroutines exceed the timeout, and true on clean drain.
+func TestWaitBackground_TimesOut(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	// Clean drain: no work outstanding.
+	if !s.WaitBackground(50 * time.Millisecond) {
+		t.Error("WaitBackground returned false with no outstanding work")
+	}
+
+	// Wedged goroutine: should time out.
+	release := make(chan struct{})
+	s.bgWG.Add(1)
+	go func() {
+		defer s.bgWG.Done()
+		<-release
+	}()
+	if s.WaitBackground(50 * time.Millisecond) {
+		t.Error("WaitBackground returned true while a goroutine was still running")
+	}
+	close(release)
+	if !s.WaitBackground(time.Second) {
+		t.Error("WaitBackground did not drain after the goroutine exited")
+	}
+}
+
+func TestRunAgentCmd_MissingCommentLogs(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "test.md"), []byte("hello"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var buf bytes.Buffer
+	prev := log.Writer()
+	log.SetOutput(&buf)
+	t.Cleanup(func() { log.SetOutput(prev) })
+
+	s, session := newTestServer(t)
+	session.RepoRoot = dir
+	s.agentCmd = "echo agent-miss"
+
+	s.runAgentCmd("hello", "missing_review", "")
+	if !strings.Contains(buf.String(), "not found as review-level comment") {
+		t.Fatalf("log = %q, want review-level miss message", buf.String())
+	}
+
+	buf.Reset()
+	s.runAgentCmd("hello", "missing_file", "test.md")
+	if !strings.Contains(buf.String(), `not found in file "test.md"`) {
+		t.Fatalf("log = %q, want file miss message", buf.String())
+	}
+}

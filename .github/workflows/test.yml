@@ -1,0 +1,483 @@
+name: Test
+
+on:
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install jj
+        run: |
+          JJ_VERSION=0.40.0
+          mkdir -p /tmp/jj-install
+          curl -fsSL "https://github.com/jj-vcs/jj/releases/download/v${JJ_VERSION}/jj-v${JJ_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar xz -C /tmp/jj-install
+          sudo install /tmp/jj-install/jj /usr/local/bin/jj
+          jj --version
+
+      - name: Install sapling
+        run: |
+          SL_VERSION="0.2.20260317-201835+0234c21f"
+          SL_VERSION_ENC="${SL_VERSION//+/%2B}"
+          sudo mkdir -p /opt/sapling
+          curl -fsSL "https://github.com/facebook/sapling/releases/download/${SL_VERSION_ENC}/sapling-${SL_VERSION}-linux-x64.tar.xz" \
+            | sudo tar xJ -C /opt/sapling
+          sudo ln -sf /opt/sapling/sl /usr/local/bin/sl
+          sl --version
+
+      - name: Cache Go build cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/*.go', 'go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-
+
+      - name: Check gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::Files not formatted with gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Check integration hashes are up to date
+        run: |
+          go run ./cmd/hunkyard/gen_integration_hashes.go
+          if ! git diff --exit-code -- cmd/hunkyard/integration_hashes_gen.go; then
+            echo "::error::integration_hashes_gen.go is out of sync with integrations/."
+            echo "::error::Run 'go run ./cmd/hunkyard/gen_integration_hashes.go' and commit the result."
+            exit 1
+          fi
+
+      - name: Install and run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+  lint-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Verify embedded frontend assets
+        run: make verify-assets
+      - name: ESLint
+        run: npx eslint web/app.js
+      - name: Stylelint
+        run: npx stylelint "web/*.css"
+      - name: CSS variable validation
+        run: bash scripts/check-css-vars.sh
+
+  test-frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+      - name: Run frontend smoke tests
+        run: make test-frontend
+      - name: Run frontend perf microbenchmarks
+        run: npm run test:perf
+
+  asset-budget:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+
+      - name: Check embedded asset + binary size budgets
+        run: bash scripts/check-asset-budget.sh
+
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go build cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/*.go', 'go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-
+
+      - name: Install benchstat
+        # x/perf ships no versioned releases, so @latest tracks the Go
+        # toolchain; benchstat's comparison output format is stable.
+        run: go install golang.org/x/perf/cmd/benchstat@latest
+
+      - name: Run benchmarks (PR head)
+        run: go test -run='^$' -bench=. -benchmem -count=6 ./internal/diff/ ./internal/session/ | tee bench-new.txt
+
+      - name: Run benchmarks (base)
+        id: base
+        # Resolve the base commit directly: on fork PRs origin/$BASE_REF may
+        # not exist, but the base SHA is always present in a full clone.
+        # A missing baseline fails the job — a silently-skipped gate is worse
+        # than a noisy one, and this step only fails on real infra problems.
+        run: |
+          BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$BASE_SHA" ] || ! git rev-parse --verify "$BASE_SHA^{commit}" >/dev/null 2>&1; then
+            BASE_REF="${{ github.base_ref }}"
+            [ -z "$BASE_REF" ] && BASE_REF="main"
+            git fetch origin "$BASE_REF" 2>/dev/null || true
+            BASE_SHA="origin/$BASE_REF"
+          fi
+          git worktree add /tmp/hunkyard-base "$BASE_SHA"
+          cd /tmp/hunkyard-base
+          go test -run='^$' -bench=. -benchmem -count=6 ./internal/diff/ ./internal/session/ > "$GITHUB_WORKSPACE/bench-old.txt"
+
+      - name: Remove base worktree
+        if: always()
+        run: git worktree remove --force /tmp/hunkyard-base || true
+
+      - name: Self-test the bench gate
+        # The gate can't detect its own parser regressions — lock the contract.
+        run: python3 scripts/bench-compare_test.py
+
+      - name: Compare with benchstat
+        run: |
+          benchstat bench-old.txt bench-new.txt | tee benchstat.txt
+          python3 scripts/bench-compare.py benchstat.txt
+
+  nix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: DeterminateSystems/nix-installer-action@main
+
+      - name: Check Nix package build
+        run: ./scripts/check-nix-build.sh
+
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Install jj
+        run: |
+          JJ_VERSION=0.40.0
+          mkdir -p /tmp/jj-install
+          curl -fsSL "https://github.com/jj-vcs/jj/releases/download/v${JJ_VERSION}/jj-v${JJ_VERSION}-x86_64-unknown-linux-musl.tar.gz" \
+            | tar xz -C /tmp/jj-install
+          sudo install /tmp/jj-install/jj /usr/local/bin/jj
+          jj --version
+
+      - name: Install sapling
+        run: |
+          SL_VERSION="0.2.20260317-201835+0234c21f"
+          SL_VERSION_ENC="${SL_VERSION//+/%2B}"
+          sudo mkdir -p /opt/sapling
+          curl -fsSL "https://github.com/facebook/sapling/releases/download/${SL_VERSION_ENC}/sapling-${SL_VERSION}-linux-x64.tar.xz" \
+            | sudo tar xJ -C /opt/sapling
+          sudo ln -sf /opt/sapling/sl /usr/local/bin/sl
+          sl --version
+
+      - name: Cache Go build cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/*.go', 'go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-
+
+      - name: Run tests with coverage
+        run: |
+          PKGS=$(go list ./... | grep -v /node_modules/)
+          go test -coverprofile=coverage.out -covermode=atomic $PKGS
+
+  live-cdp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - uses: browser-actions/setup-chrome@v2
+
+      - name: Run live CDP integration tests
+        run: go test -tags integration -run TestLiveCDPIntegration -v -count=1 ./internal/live/...
+
+  unit-windows:
+    runs-on: windows-2025-vs2026
+    # Windows pays a per-process tax (git, go build, hunkyard.exe spawns) on every
+    # package. Whole packages per shard, never split, so no shared-state risk.
+    # Shards are balanced by measured Windows time (CI medians, 2026-10):
+    # internal/session alone was ~133s of ~392s, so it gets a shard to itself.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard-index: [0, 1, 2]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Exclude CI paths from Defender scans
+        # Best-effort speedup: Defender real-time scanning taxes every file
+        # write and fresh binary exec (go builds, test binaries, spawned
+        # hunkyard.exe/daemons). Ephemeral VM, so the gap is safe. Must never
+        # fail the build (Defender may be off) — the Get- line shows in logs
+        # whether exclusions applied.
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, "$env:LOCALAPPDATA\go-build"
+          Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      # jj is intentionally not installed on Windows; JJ backend tests skip
+      # when `jj` is not on PATH. Linux coverage is provided by the unit job.
+
+      # Best-effort speedup only — a flaky restore must not skip tests.
+      - name: Cache Go build cache
+        continue-on-error: true
+        uses: actions/cache@v6
+        with:
+          path: ~/AppData/Local/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/*.go', 'go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-
+
+      - name: Run tests
+        shell: bash
+        # Coverage is uploaded because //go:build windows files never appear in
+        # the Linux unit profile, so Codecov patch stays at 0% for those lines
+        # even when these shards exercise them.
+        run: |
+          SHARD=${{ matrix.shard-index }}
+          ALL=$(go list ./... | grep -v /node_modules/ | sort)
+          # Explicit groups, not NR%3: a new package must not reshuffle every
+          # shard. Shard 2 is the complement, so nothing is ever left out.
+          M=github.com/BSH2409/hunkyard
+          G0="^$M/internal/session\$"
+          G1="^$M/internal/(server|comment|live|review|focus|preview)\$"
+          case "$SHARD" in
+            0) PKGS=$(echo "$ALL" | grep -E "$G0") ;;
+            1) PKGS=$(echo "$ALL" | grep -E "$G1") ;;
+            2) PKGS=$(echo "$ALL" | grep -vE "$G0|$G1") ;;
+          esac
+          echo "$(echo "$PKGS" | wc -l) packages in shard $SHARD"
+          go test -coverprofile="coverage-windows-${SHARD}.out" -covermode=atomic $PKGS
+        env:
+          MSYS_NO_PATHCONV: 1
+
+      - name: Kill leftover hunkyard daemons
+        if: always()
+        shell: cmd
+        run: taskkill /F /IM hunkyard.exe /T 2>nul || exit /b 0
+
+  e2e:
+    runs-on: ubuntu-latest
+    # Normal run ~12-14 min. A hung fixture or test must not burn the 6h
+    # default (run.sh also fails fast when a fixture dies or never readies).
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go build cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/*.go', 'go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: test/e2e/package-lock.json
+
+      - name: Install npm dependencies
+        working-directory: test/e2e
+        run: npm ci --ignore-scripts
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cache/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('test/e2e/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: test/e2e
+        run: npx playwright install chromium
+
+      - name: Install Playwright system dependencies
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: test/e2e
+        run: npx playwright install-deps chromium
+
+      - name: Build hunkyard with coverage instrumentation
+        run: |
+          mkdir -p /tmp/hunkyard-coverdir
+          go build -cover -o /tmp/hunkyard-cover-bin ./cmd/hunkyard
+
+      - name: Run E2E tests
+        working-directory: test/e2e
+        run: bash run.sh
+        env:
+          HUNKYARD_BIN: /tmp/hunkyard-cover-bin
+          GOCOVERDIR: /tmp/hunkyard-coverdir
+
+      - name: Convert E2E coverage data
+        if: always()
+        run: |
+          if [ -d /tmp/hunkyard-coverdir ] && ls /tmp/hunkyard-coverdir/*.* >/dev/null 2>&1; then
+            go tool covdata textfmt -i=/tmp/hunkyard-coverdir -o=e2e-coverage.out
+          fi
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-test-results
+          path: test/e2e/test-results/
+          retention-days: 7
+
+  e2e-windows:
+    runs-on: windows-2025-vs2026
+    # Slowest shard runs ~15-17 min; see the e2e job's timeout note.
+    timeout-minutes: 35
+    # Split across two VMs: git-mode shards are the long pole (~19min of the
+    # ~24min job on Windows). Each shard runs one git half plus a subset of
+    # the other projects — every test still runs somewhere (see E2E_SHARD in
+    # test/e2e/run.sh). fail-fast: false so a red shard doesn't kill the
+    # other's signal.
+    strategy:
+      fail-fast: false
+      matrix:
+        shard-index: [1, 2]
+    env:
+      # Stop Git Bash from auto-converting POSIX-looking arguments to Windows
+      # paths when invoking native binaries (hunkyard.exe, taskkill, powershell).
+      MSYS_NO_PATHCONV: 1
+      E2E_SHARD: ${{ matrix.shard-index }}/2
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Exclude CI paths from Defender scans
+        # Best-effort speedup: Defender real-time scanning taxes every file
+        # write and fresh binary exec (npm ci extraction, go build -cover,
+        # fixture generation, each test-spawned hunkyard.exe/Chromium). Ephemeral
+        # VM, so the gap is safe. Must never fail the build (Defender may be
+        # off) — the Get- line shows in logs whether exclusions applied.
+        continue-on-error: true
+        shell: powershell
+        run: |
+          Add-MpPreference -ExclusionPath $env:GITHUB_WORKSPACE, $env:RUNNER_TEMP, $env:TEMP, "$env:LOCALAPPDATA\go-build", "$env:LOCALAPPDATA\ms-playwright"
+          Get-MpPreference | Select-Object -ExpandProperty ExclusionPath
+
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+
+      - name: Cache Go build cache
+        uses: actions/cache@v6
+        with:
+          path: ~/AppData/Local/go-build
+          key: go-build-${{ runner.os }}-${{ hashFiles('**/*.go', 'go.sum') }}
+          restore-keys: go-build-${{ runner.os }}-
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: test/e2e/package-lock.json
+
+      - name: Install npm dependencies
+        working-directory: test/e2e
+        run: npm ci --ignore-scripts
+
+      - name: Cache Playwright browsers
+        id: playwright-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/AppData/Local/ms-playwright
+          key: playwright-${{ runner.os }}-${{ hashFiles('test/e2e/package-lock.json') }}
+
+      - name: Install Playwright browsers
+        if: steps.playwright-cache.outputs.cache-hit != 'true'
+        working-directory: test/e2e
+        run: npx playwright install chromium
+
+      - name: Build hunkyard with coverage instrumentation
+        shell: bash
+        run: |
+          mkdir -p "${RUNNER_TEMP}/hunkyard-coverdir"
+          go build -cover -o hunkyard-cover-bin.exe ./cmd/hunkyard
+
+      - name: Run E2E tests
+        working-directory: test/e2e
+        shell: bash
+        run: bash run.sh
+        env:
+          HUNKYARD_BIN: ${{ github.workspace }}/hunkyard-cover-bin.exe
+          GOCOVERDIR: ${{ runner.temp }}/hunkyard-coverdir
+
+      - name: Convert E2E coverage data
+        if: always()
+        shell: bash
+        run: |
+          if [ -d "${RUNNER_TEMP}/hunkyard-coverdir" ] && ls "${RUNNER_TEMP}"/hunkyard-coverdir/*.* >/dev/null 2>&1; then
+            go tool covdata textfmt -i="${RUNNER_TEMP}/hunkyard-coverdir" -o=e2e-coverage.out
+          fi
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-test-results-windows-${{ matrix.shard-index }}
+          path: test/e2e/test-results/
+          retention-days: 7
+
+      # Some tests spawn `hunkyard.exe` daemons that may outlive the test process
+      # by a few seconds. If they're still alive when actions/setup-* post
+      # steps pack their caches, the cache step fails because the binary is
+      # locked. Kill any leftover processes before the implicit post-cache
+      # steps run. Mirrors the unit-windows job pattern.
+      - name: Kill leftover hunkyard daemons
+        if: always()
+        shell: cmd
+        run: taskkill /F /IM hunkyard.exe /T 2>nul || exit /b 0

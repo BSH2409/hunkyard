@@ -1,0 +1,650 @@
+/* style-live.css — live-mode chrome layout. Loaded only when
+   pathname is /live (bootstrap fork in index.html).
+
+   R1: <html class="hunkyard-mode-live"> hides code-review-only chrome but
+       keeps the existing .header and #settingsOverlay alive.
+   R3: viewport / mode toggles inject into the existing .header-right
+       using .scope-toggle / .diff-mode-toggle classes from style.css.
+   R5: comment list reuses .comments-panel / .comment-card.
+
+   Class prefix: .hunkyard-live-*. Do not collide with .hunkyard-*, .line-*. */
+
+/* Hide code-review chunks. Settings overlay survives (R6).
+   M12/M13/M15 (Phase F): keep #commentNavGroup (toggle + count badge) and
+   #commentsPanelResizer (resize handle for comments panel) visible in live
+   mode — JS wiring shipped in Phase D, but the chrome was still hidden. Only
+   the file-tree sidebar resizer (#fileTreeResizer) needs hiding. */
+.hunkyard-mode-live .file-tree-panel,
+.hunkyard-mode-live #fileTreeResizer,
+.hunkyard-mode-live .main-content,
+.hunkyard-mode-live #filesContainer,
+.hunkyard-mode-live .pr-panel,
+.hunkyard-mode-live .toc,
+.hunkyard-mode-live .compare-rail,
+.hunkyard-mode-live #scopeToggle,
+.hunkyard-mode-live #diffToggle,
+.hunkyard-mode-live #diffModeToggle,
+.hunkyard-mode-live #prToggle,
+.hunkyard-mode-live #tocToggle,
+.hunkyard-mode-live #fileTreeToggle,
+.hunkyard-mode-live #updateBtn { display: none !important; }
+
+/* The comments-panel survives but is shown for live-mode comments.
+   The base stylesheet hides .comments-panel for code-review boot via an
+   inline `.comments-panel-hidden` class; we need to undo that for live
+   mode while still letting the user toggle it via #commentCount. So we
+   only force display:flex when the panel is NOT marked hidden — that way
+   `.comments-panel-hidden` (margin-right slide + visibility) still wins. */
+.hunkyard-mode-live .comments-panel:not(.comments-panel-hidden) {
+  display: flex !important;
+}
+
+/* M12/M13/M15: comments toggle (#commentNavGroup, #commentCount) and
+   resizer (#commentsPanelResizer) are wired by live-mode.js but the
+   index.html template inlines `style="display:none"` on commentNavGroup
+   for code-review boot. Override here so the navbar comments-panel toggle
+   + count badge render in live mode. */
+.hunkyard-mode-live #commentNavGroup { display: inline-flex !important; }
+/* Hide the prev/next nav arrows in live mode — live pins don't have
+   the same in-document navigation flow. Keep only the count toggle. */
+.hunkyard-mode-live #commentNavGroup #commentNavPrev,
+.hunkyard-mode-live #commentNavGroup #commentNavNext { display: none !important; }
+/* The base .sidebar-resize-handle uses position:sticky with top:var(--header-height)
+   and height:calc(100vh - var(--header-height)). That's correct in code-review
+   where .main-layout starts at the top of the page and the body scrolls. In
+   live mode .main-layout is itself a fixed-height flex child below the
+   header (`height: calc(100vh - var(--hunkyard-header-height))`), so the sticky
+   `top` offset shifts the handle DOWN by 49px inside an already-clipped
+   container — the visible drag strip ends up offset below where the user
+   expects it (or partially clipped off-screen), and the panel "doesn't
+   resize" because the user is hitting the iframe pane, not the handle.
+   Override to a plain stretching flex child so the 4px strip aligns with
+   the panel's left edge across the full pane height. */
+.hunkyard-mode-live #commentsPanelResizer {
+  display: block !important;
+  position: relative;
+  top: auto;
+  height: 100%;
+  align-self: stretch;
+}
+
+/* main-layout becomes live-mode container: header on top (existing),
+   then iframe pane + comments panel side-by-side. */
+.hunkyard-mode-live .main-layout {
+  display: flex;
+  flex-direction: row;
+  height: calc(100vh - var(--hunkyard-header-height, 56px));
+}
+
+/* Iframe pane sits as a sibling of .comments-panel inside .main-layout. */
+.hunkyard-live-iframe-pane {
+  flex: 1;
+  position: relative;
+  overflow: auto;
+  background: var(--hunkyard-live-iframe-bg);
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Full-bleed context strips (mode hint / unavailable Flash). */
+.hunkyard-mode-live {
+  --hunkyard-live-flash-bg: color-mix(in srgb, var(--hunkyard-red) 12%, var(--hunkyard-bg-card, var(--hunkyard-editor-bg-elevated)));
+}
+[data-theme="light"] .hunkyard-mode-live,
+html[data-theme="light"] .hunkyard-mode-live {
+  --hunkyard-live-flash-bg: color-mix(in srgb, var(--hunkyard-red) 8%, #ffffff);
+}
+
+.hunkyard-live-context {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  padding: 6px 14px;
+  border-bottom: 1px solid var(--hunkyard-border);
+  background: var(--hunkyard-editor-bg-elevated);
+  color: var(--hunkyard-editor-fg-secondary);
+  font-size: 12px;
+  line-height: 1.35;
+}
+.hunkyard-live-context[hidden] {
+  display: none;
+}
+.hunkyard-live-context[data-kind="hint"][data-mode="pin"] {
+  background: var(--hunkyard-brand-subtle);
+  color: var(--hunkyard-brand);
+  border-bottom-color: color-mix(in srgb, var(--hunkyard-brand) 28%, var(--hunkyard-border));
+}
+.hunkyard-live-context[data-kind="flash"] {
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  background: var(--hunkyard-live-flash-bg);
+  color: var(--hunkyard-red);
+  border-bottom-color: color-mix(in srgb, var(--hunkyard-red) 28%, var(--hunkyard-border));
+}
+.hunkyard-live-context-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1 1 auto;
+}
+.hunkyard-live-context-primary strong {
+  font-weight: 600;
+  color: inherit;
+}
+.hunkyard-live-context-help {
+  flex: 1 1 100%;
+  margin: 0;
+  color: var(--hunkyard-editor-fg-secondary);
+  font-size: 12px;
+}
+.hunkyard-live-context-guide {
+  color: inherit;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.hunkyard-live-context-guide:hover {
+  opacity: 0.85;
+}
+.hunkyard-live-context kbd,
+#liveModeToggle kbd {
+  display: inline-flex;
+  align-items: center;
+  padding: 0 4px;
+  border: 1px solid currentColor;
+  border-radius: 3px;
+  font: inherit;
+  font-weight: 700;
+  line-height: 1.4;
+  opacity: 0.85;
+}
+.hunkyard-live-context-dismiss {
+  appearance: none;
+  flex: 0 0 auto;
+  margin-left: auto;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, currentColor 35%, transparent);
+  border-radius: var(--hunkyard-r-sm, 4px);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.hunkyard-live-context-dismiss:hover {
+  background: color-mix(in srgb, currentColor 8%, transparent);
+}
+
+/* Navbar connection chip — connecting / unavailable only (ready is silent). */
+.hunkyard-live-conn-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px 0 8px;
+  border-radius: 7px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--hunkyard-editor-fg-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+.hunkyard-live-conn-status[hidden] {
+  display: none;
+}
+.hunkyard-live-conn-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  flex: 0 0 auto;
+}
+.hunkyard-live-conn-status[data-state="connecting"] {
+  color: var(--hunkyard-editor-fg-secondary);
+}
+.hunkyard-live-conn-status[data-state="connecting"] .hunkyard-live-conn-status-dot {
+  animation: hunkyard-live-conn-pulse 1.1s ease-in-out infinite;
+}
+.hunkyard-live-conn-status[data-state="unavailable"] {
+  color: var(--hunkyard-red);
+  border-color: color-mix(in srgb, var(--hunkyard-red) 35%, transparent);
+  background: var(--hunkyard-live-flash-bg);
+}
+@keyframes hunkyard-live-conn-pulse {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* Comment keeps a kbd sibling; match shared .toggle-btn.active lift otherwise. */
+.hunkyard-mode-live #liveModeToggle .toggle-btn[data-mode="pin"] {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.hunkyard-mode-live #liveModeToggle .toggle-btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.hunkyard-live-iframe-pane-inner {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  min-width: 100%;
+  width: max-content;
+  flex: 1 1 auto;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.hunkyard-live-iframe-frame {
+  position: relative;
+  background: #fff; /* iframe-frame-literal-ok: a page's default background */
+  border: 1px solid var(--hunkyard-live-iframe-frame);
+  border-radius: var(--hunkyard-r-md);
+  box-shadow: var(--hunkyard-shadow);
+  flex: 0 0 auto;
+}
+
+.hunkyard-live-iframe-frame iframe {
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: var(--hunkyard-r-md);
+}
+
+.hunkyard-live-iframe-resizer {
+  position: absolute;
+  top: 0; right: -3px; bottom: 0;
+  width: 6px;
+  cursor: ew-resize;
+  background: transparent;
+  z-index: 2;
+}
+.hunkyard-live-iframe-resizer::after {
+  content: '';
+  position: absolute;
+  top: 50%; left: 50%;
+  width: 2px; height: 36px;
+  margin: -18px 0 0 -1px;
+  background: var(--hunkyard-pill-border);
+  border-radius: 1px;
+  transition: background var(--hunkyard-dur-fast) var(--hunkyard-ease);
+}
+.hunkyard-live-iframe-resizer:hover::after,
+.hunkyard-live-iframe-resizer:active::after {
+  background: var(--hunkyard-focus, var(--hunkyard-brand));
+}
+
+/* Breadcrumb chip (header-chip) — colour comes from existing pill tokens. */
+.hunkyard-mode-live #liveRouteName {
+  font-family: var(--hunkyard-font-mono);
+  font-size: 12px;
+}
+
+/* Drift tray heading colour reserved for Phase D — use --hunkyard-yellow. */
+
+/* a11y: visually hidden live region. */
+.hunkyard-live-sr-only {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0;
+  border: 0;
+  clip: rect(0,0,0,0);
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+/* Iframe load-error banner. */
+.hunkyard-live-iframe-error {
+  position: absolute;
+  inset: 16px;
+  background: var(--hunkyard-bg-card);
+  border: 1px dashed var(--hunkyard-red);
+  color: var(--hunkyard-fg-primary);
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  border-radius: var(--hunkyard-r-md);
+}
+.hunkyard-live-iframe-error button {
+  appearance: none;
+  background: var(--hunkyard-brand-cta);
+  color: var(--hunkyard-fg-on-brand);
+  border: 0;
+  padding: 6px 14px;
+  border-radius: var(--hunkyard-r-sm);
+  cursor: pointer;
+}
+
+/* Cross-origin redirect notice. */
+.hunkyard-live-redirect-notice {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--hunkyard-bg-card);
+  color: var(--hunkyard-fg-primary);
+  border: 1px solid var(--hunkyard-border, var(--hunkyard-pill-border));
+  padding: 8px 12px;
+  border-radius: var(--hunkyard-r-md);
+  box-shadow: var(--hunkyard-shadow);
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  font-size: 12px;
+}
+.hunkyard-live-redirect-notice code {
+  font-family: var(--hunkyard-font-mono);
+  background: var(--hunkyard-editor-code-bg);
+  padding: 0 4px;
+  border-radius: var(--hunkyard-r-sm);
+}
+.hunkyard-live-redirect-notice button {
+  appearance: none;
+  background: transparent;
+  color: var(--hunkyard-brand);
+  border: 1px solid var(--hunkyard-pill-border);
+  padding: 2px 8px;
+  border-radius: var(--hunkyard-r-sm);
+  cursor: pointer;
+}
+
+/* Comment-card live-route hint (R5): re-uses .comment-card chrome. */
+.hunkyard-mode-live .comment-card[data-live-route] {
+  cursor: pointer;
+}
+
+@media (max-width: 900px) {
+  .hunkyard-mode-live .main-layout {
+    flex-direction: column;
+  }
+}
+
+/* ============================================================
+ * Phase C: composer, ancestor menu, toast, mode toggle, comment row
+ * ============================================================ */
+.hunkyard-live-composer-host {
+  padding: 8px;
+}
+/* Capture composer — mirrors code-review's `.comment-form` chrome:
+   brand-colored border + subtle outer ring + brand header strip,
+   borderless integrated textarea, top-bordered actions row. */
+.hunkyard-live-composer {
+  position: relative;
+  display: block;
+  margin: 0;
+  background: var(--hunkyard-editor-comment-bg);
+  border: 1px solid var(--hunkyard-brand);
+  border-radius: var(--hunkyard-r-md);
+  overflow: hidden;
+  box-shadow: 0 0 0 2px var(--hunkyard-brand-subtle);
+}
+.hunkyard-live-composer-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px 0;
+  font-size: 11px;
+  color: var(--hunkyard-editor-fg-muted);
+}
+.hunkyard-live-composer-chip {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--hunkyard-r-sm);
+  background: var(--hunkyard-editor-code-bg);
+  color: var(--hunkyard-editor-fg);
+  font-size: 12px;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hunkyard-live-composer-body {
+  display: block;
+  width: 100%;
+  min-height: 80px;
+  margin-top: 8px;
+  padding: 10px 14px;
+  border: none;
+  background: var(--hunkyard-editor-comment-bg);
+  color: var(--hunkyard-editor-fg);
+  font-family: var(--hunkyard-font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: none;
+  field-sizing: content;
+  outline: none;
+}
+.hunkyard-live-composer-body::placeholder {
+  color: var(--hunkyard-editor-fg-muted);
+}
+.hunkyard-live-composer-error {
+  padding: 0 14px 8px;
+  font-size: 12px;
+  color: var(--hunkyard-live-composer-error-fg);
+}
+.hunkyard-live-composer-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--hunkyard-live-composer-border);
+}
+.hunkyard-live-ancestor-menu-host {
+  pointer-events: auto;
+}
+.hunkyard-live-ancestor-menu {
+  display: flex;
+  flex-direction: column;
+  background: var(--hunkyard-live-ancestor-menu-bg);
+  color: var(--hunkyard-live-ancestor-menu-fg);
+  border: 1px solid var(--hunkyard-pill-border);
+  border-radius: var(--hunkyard-r-md);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.25);
+  min-width: 160px;
+  padding: 4px 0;
+  opacity: 0;
+  transform: translateY(-2px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.hunkyard-live-ancestor-menu-item {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 4px 10px;
+  cursor: pointer;
+}
+.hunkyard-live-ancestor-menu-item:hover,
+.hunkyard-live-ancestor-menu-item:focus {
+  background: var(--hunkyard-live-ancestor-menu-hover-bg);
+}
+
+/* Phase D parity: live pin rows mount the shared `.comment-card` chrome
+   from style.css (border, header bar, body padding). The `.hunkyard-live-comment-row`
+   marker class stays so composer/edit selectors keep targeting live pins,
+   but it adds NO chrome of its own — that's the source of the prior
+   "card-in-a-card" mismatch with code-review. */
+.hunkyard-live-comment-row {
+  /* intentionally empty marker class */
+}
+
+/* Hide-resolved parity: the base rule in style.css excludes
+   .panel-comment-block (because code-review's panel reflects the inline
+   list). Live pins live ONLY in the panel, so we need an explicit
+   companion rule keyed on the live-row marker class. */
+body.hide-resolved .hunkyard-live-comment-row-wrap:has(.resolved-card) {
+  display: none;
+}
+
+.hunkyard-live-comment-chip {
+  display: inline-block;
+  max-width: 18ch;
+  padding: 1px 6px;
+  border-radius: var(--hunkyard-r-sm);
+  background: var(--hunkyard-editor-code-bg);
+  color: var(--hunkyard-editor-fg);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Per-reply Edit/Delete affordance buttons inside live replies inherit
+   the shared `.reply-actions button` chrome — no overrides needed. The
+   class hooks `.hunkyard-live-reply-edit` / `.hunkyard-live-reply-delete` are
+   here purely so future event delegation in live-mode.js can target
+   them without colliding with code-review's reply edit/delete. */
+/* Reply + edit composers — mirror code-review's expanded `.reply-form`
+   chrome: flush textarea on the comment-card surface, borderless, with a
+   top border separating the actions row. The composer sits inside an
+   existing card, so it should not introduce its own outer border or
+   rounded corners. */
+.hunkyard-live-reply-composer,
+.hunkyard-live-edit-composer {
+  display: block;
+  margin: 8px -8px 0; /* extend to card edges (.hunkyard-live-comment-row has 8px padding) */
+  padding: 0;
+  background: var(--hunkyard-editor-comment-bg);
+  border-top: 1px solid var(--hunkyard-live-composer-border);
+}
+.hunkyard-live-reply-textarea,
+.hunkyard-live-edit-textarea {
+  display: block;
+  width: 100%;
+  min-height: 60px;
+  padding: 10px 14px;
+  border: none;
+  background: var(--hunkyard-editor-comment-bg);
+  color: var(--hunkyard-editor-fg);
+  font-family: var(--hunkyard-font-body);
+  font-size: 14px;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+}
+.hunkyard-live-reply-textarea::placeholder,
+.hunkyard-live-edit-textarea::placeholder {
+  color: var(--hunkyard-editor-fg-muted);
+}
+.hunkyard-live-reply-error,
+.hunkyard-live-edit-error {
+  padding: 0 14px 6px;
+  font-size: 12px;
+  color: var(--hunkyard-live-composer-error-fg);
+}
+.hunkyard-live-reply-actions,
+.hunkyard-live-edit-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 14px;
+  border-top: 1px solid var(--hunkyard-live-composer-border);
+}
+
+/* Resolved styling now reuses code-review's `.comment-card.resolved`
+   rule from style.css (greyed bg + reduced opacity). The bespoke
+   strikethrough/opacity override that lived here was a half-baked
+   replacement and led to inconsistent visuals between modes. */
+
+.hunkyard-live-reanchor-btn {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid var(--hunkyard-border-strong);
+  background: var(--hunkyard-bg-elevated);
+  color: var(--hunkyard-fg-primary);
+  cursor: pointer;
+}
+.hunkyard-live-reanchor-btn:hover {
+  background: var(--hunkyard-pill-bg-hover);
+}
+.hunkyard-live-reanchor-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+.hunkyard-live-thread-highlight {
+  outline: 2px solid var(--hunkyard-live-marker-focus-ring);
+  outline-offset: 2px;
+  transition: outline-color 200ms;
+}
+
+/* ---- Phase E: aria-live + skip-link ---- */
+.hunkyard-live-skip-link {
+  position: absolute; left: -9999px; top: 8px;
+  background: var(--hunkyard-live-tooltip-bg);
+  color: var(--hunkyard-live-tooltip-fg);
+  padding: 8px 12px; border-radius: 6px;
+  z-index: 2147483600;
+  text-decoration: none;
+}
+.hunkyard-live-skip-link:focus,
+.hunkyard-live-skip-link:focus-visible {
+  left: 8px;
+  outline: 2px solid var(--hunkyard-live-focus-ring);
+  outline-offset: 2px;
+}
+
+/* ---- Phase E: marker flash animation ---- */
+.hunkyard-live-marker--flash {
+  animation: hunkyard-live-marker-flash 1.5s ease-out;
+}
+@keyframes hunkyard-live-marker-flash {
+  0%   { box-shadow: 0 0 0 0 var(--hunkyard-live-marker-flash-bg); }
+  70%  { box-shadow: 0 0 0 14px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+
+/* ---- Phase E: round-counter tooltip ---- */
+.hunkyard-live-round-tooltip {
+  position: fixed;
+  max-width: 320px;
+  padding: 8px 10px;
+  background: var(--hunkyard-live-tooltip-bg);
+  color: var(--hunkyard-live-tooltip-fg);
+  border: 1px solid var(--hunkyard-live-tooltip-border);
+  border-radius: 6px;
+  font-size: 12px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 2147483600;
+}
+.hunkyard-live-round-tooltip--open { opacity: 1; }
+
+/* ---- Phase E: ancestor menu polish (fade + active row) ---- */
+.hunkyard-live-ancestor-menu.hunkyard-live-ancestor-menu--open {
+  opacity: 1;
+  transform: translateY(0);
+}
+.hunkyard-live-ancestor-menu-item--active {
+  background: var(--hunkyard-live-menu-highlight-bg);
+  color: var(--hunkyard-live-menu-highlight-fg);
+}
+
+/* ---- Phase E: :focus-visible across all interactive live-mode elements ---- */
+.hunkyard-live-thread button:focus-visible,
+.hunkyard-live-thread [tabindex="0"]:focus-visible,
+.hunkyard-live-ancestor-menu-item:focus-visible,
+.hunkyard-live-skip-link:focus-visible,
+.hunkyard-live-reanchor-btn:focus-visible,
+#liveRoundCounter:focus-visible,
+.hunkyard-live-iframe-resizer:focus-visible {
+  outline: 2px solid var(--hunkyard-live-focus-ring);
+  outline-offset: 2px;
+  border-radius: 4px;
+}

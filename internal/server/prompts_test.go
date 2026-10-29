@@ -1,0 +1,167 @@
+package server
+
+import (
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/BSH2409/hunkyard/internal/session"
+	"github.com/BSH2409/hunkyard/internal/testutil"
+)
+
+func TestHandleFinish_BlockedWithoutPromptTrust(t *testing.T) {
+	s, session := newTestServer(t)
+	dir := session.RepoRoot
+	os.WriteFile(filepath.Join(dir, ".hunkyard.config.json"), []byte(`{
+		"prompts": { "on_finish_approved": "inline:Trusted custom approve text" }
+	}`), 0644)
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestHandleFinish_CustomProjectPrompt(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	s, session := newTestServer(t)
+	s.homeDir = home
+	dir := session.RepoRoot
+	s.projectDir = dir
+
+	os.WriteFile(filepath.Join(dir, ".hunkyard.config.json"), []byte(`{
+		"prompts": { "on_finish_approved": "inline:Proceed with the custom playbook." }
+	}`), 0644)
+
+	req := httptest.NewRequest("POST", "/api/project-prompts/trust", strings.NewReader(`{"mode":"always"}`))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("trust status = %d body=%s", w.Code, w.Body.String())
+	}
+
+	req = httptest.NewRequest("POST", "/api/finish", nil)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("finish status = %d body=%s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["prompt"] != "Proceed with the custom playbook." {
+		t.Fatalf("prompt = %v", resp["prompt"])
+	}
+}
+
+func TestBuildPromptContext_StoryModeWhenSessionHasStory(t *testing.T) {
+	s, sess := newTestServer(t)
+	sess.Mode = "git"
+	sess.SetStory(&session.Story{Version: 1})
+
+	ctx := s.buildPromptContext(sess, false, nil)
+	if ctx.Mode != "story" {
+		t.Fatalf("mode = %q, want story", ctx.Mode)
+	}
+}
+
+func TestHandleConfig_ProjectPromptUntrusted(t *testing.T) {
+	s, session := newTestServer(t)
+	dir := session.RepoRoot
+	os.WriteFile(filepath.Join(dir, ".hunkyard.config.json"), []byte(`{
+		"prompts": { "on_finish_unresolved": "inline:Do the thing" }
+	}`), 0644)
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["project_prompts_untrusted"] != true {
+		t.Fatalf("untrusted = %v", resp["project_prompts_untrusted"])
+	}
+}
+
+func TestRenderProjectPromptPreview_DiscoveredOnly(t *testing.T) {
+	s, session := newTestServer(t)
+	dir := session.RepoRoot
+	promptDir := filepath.Join(dir, ".hunkyard", "prompts")
+	if err := os.MkdirAll(promptDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(promptDir, "on_finish_approved.md"), []byte("Custom discovered approve text."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	preview := s.renderProjectPromptPreview(session)
+	if !strings.Contains(preview, "Custom discovered approve text.") {
+		t.Fatalf("preview = %q, want discovered prompt text", preview)
+	}
+}
+
+func TestRenderProjectPromptPreview_SkipsStockFallback(t *testing.T) {
+	s, session := newTestServer(t)
+	dir := session.RepoRoot
+	promptDir := filepath.Join(dir, ".hunkyard", "prompts")
+	if err := os.MkdirAll(promptDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(promptDir, "on_finish_approved.md"), []byte("Only project approved."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	preview := s.renderProjectPromptPreview(session)
+	if strings.Contains(preview, "The review finished with") {
+		t.Fatalf("preview should not include stock unresolved fallback: %q", preview)
+	}
+	if !strings.Contains(preview, "Only project approved.") {
+		t.Fatalf("preview = %q, want project approved text", preview)
+	}
+}
+
+func TestRenderProjectPromptPreview_ConfigPrompts(t *testing.T) {
+	s, session := newTestServer(t)
+	dir := session.RepoRoot
+	os.WriteFile(filepath.Join(dir, ".hunkyard.config.json"), []byte(`{
+		"prompts": {
+			"on_finish_approved": "inline:Config approved prompt.",
+			"on_finish_unresolved": "inline:Config unresolved prompt."
+		}
+	}`), 0644)
+
+	preview := s.renderProjectPromptPreview(session)
+	if !strings.Contains(preview, "Config approved prompt.") {
+		t.Fatalf("preview = %q, want approved config text", preview)
+	}
+	if !strings.Contains(preview, "Config unresolved prompt.") {
+		t.Fatalf("preview = %q, want unresolved config text", preview)
+	}
+}
+
+func TestRenderProjectPromptPreview_DiscoveredUnresolved(t *testing.T) {
+	s, session := newTestServer(t)
+	dir := session.RepoRoot
+	promptDir := filepath.Join(dir, ".hunkyard", "prompts")
+	if err := os.MkdirAll(promptDir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(promptDir, "on_finish_unresolved.md"), []byte("Discovered unresolved hook."), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	preview := s.renderProjectPromptPreview(session)
+	if !strings.Contains(preview, "Discovered unresolved hook.") {
+		t.Fatalf("preview = %q, want discovered unresolved text", preview)
+	}
+}

@@ -1,0 +1,8 @@
+{
+  "name": "hunkyard",
+  "version": "1.0.0",
+  "description": "Local browser diff review and feedback for the launching Claude CLI session.",
+  "author": {
+    "name": "BSH2409"
+  }
+}

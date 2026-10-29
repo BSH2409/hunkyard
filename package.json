@@ -1,0 +1,28 @@
+{
+  "name": "hunkyard",
+  "private": true,
+  "dependencies": {
+    "@pierre/diffs": "1.5.2",
+    "@sanity/diff-match-patch": "3.2.1",
+    "dompurify": "3.4.16",
+    "gemoji": "8.1.0",
+    "katex": "0.19.0",
+    "markdown-it": "15.0.2",
+    "mermaid": "12.1.0"
+  },
+  "scripts": {
+    "update-deps": "node copy-deps.js",
+    "record-assets": "node scripts/record-vendored-assets.mjs",
+    "verify-assets": "node scripts/verify-vendored-assets.mjs",
+    "verify-assets:installed": "node scripts/verify-vendored-assets.mjs --installed",
+    "verify-assets:npm": "node scripts/verify-vendored-assets.mjs --npm",
+    "test:frontend": "node --test web/__tests__/*.test.js",
+    "test:perf": "node --test web/__tests__/perf/*.perf.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "0.28.2",
+    "eslint": "10.12.0",
+    "shiki": "4.5.0",
+    "stylelint": "17.16.0"
+  }
+}

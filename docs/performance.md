@@ -1,0 +1,192 @@
+# Performance: benchmarks, budgets, and guardrails
+
+hunkyard has no production profiler running anywhere — it's a localhost CLI — so
+perf is guarded by benchmarks and budgets in CI, not by dashboards. This doc
+lists what exists, how to run it, and when to recalibrate.
+
+## Go benchmarks
+
+Located next to the code they cover; all use `b.Loop()` + `b.ReportAllocs()`.
+
+| Benchmark | File | What it covers |
+| --- | --- | --- |
+| `BenchmarkComputeLineDiff` (100–10k lines) | `internal/diff/diff_test.go` | Myers/Hirschberg diff over plan-sized inputs |
+| `BenchmarkDiffEntriesToHunks` | `internal/diff/diff_test.go` | Hunk grouping over 10k entries / ~500 hunks |
+| `BenchmarkReviewSaveLoad` (10×10, 50×50) | `internal/session/review_bench_test.go` | Full review-file roundtrip (marshal + atomic write + read + unmarshal) on every debounced save |
+| `BenchmarkCarryForward` | `internal/session/review_bench_test.go` | Round-complete comment remap for one 10k-line plan + 50 comments (diff + anchor remap, on the server before `file-changed`) |
+| `BenchmarkVisibleInFocus` (n=10–1000) | `internal/session/focus_test.go` | Comment visibility filter behind every `GetComments` call |
+
+Run:
+
+```bash
+make bench   # count=6, ./internal/diff/ ./internal/session/
+```
+
+Compare a branch against a base (same machine, back to back):
+
+```bash
+git worktree add /tmp/hunkyard-base origin/main
+(cd /tmp/hunkyard-base && go test -run='^$' -bench=. -benchmem -count=6 ./internal/diff/ ./internal/session/ > ../bench-old.txt)
+go test -run='^$' -bench=. -benchmem -count=6 ./internal/diff/ ./internal/session/ > bench-new.txt
+make bench-compare   # benchstat + scripts/bench-compare.py gating
+```
+
+Reference numbers (M4 Max, 2026-09; CI runners are slower — never gate on
+absolute ns/op, only on deltas):
+
+- `ComputeLineDiff/10000_lines`: ~250ms/op — the worst-case large-plan cost.
+- `ReviewSaveLoad/50x50`: ~13ms/op — per debounced save at 2500 comments.
+- `CarryForward`: ~370ms/op — per 10k-line plan on round-complete (stacks with N large plans).
+- `VisibleInFocus/n=1000`: ~15µs/op, 2 allocs (one hoisted focus-key format).
+
+### CI `bench` job
+
+`.github/workflows/test.yml` runs head-vs-base on the same runner and fails
+only on (see `scripts/bench-compare.py`):
+
+- time/op: statistically significant slowdown **≥ 20%** (benchstat `~` rows
+  ignored). Rows where either side reports variance **≥ 25%** are ignored
+  with a warning — shared runners produce ±70–90% noise on I/O benches like
+  `ReviewSaveLoad`, and benchstat can still mark those "significant".
+- allocs/op: **any** significant increase on a real benchmark row — allocs are
+  deterministic, so 0→N means a heap escape worth a look. B/op regressions
+  are reported, not gated.
+- Package `geomean` summary rows are never gated (they amplify one noisy bench
+  and float-round into tiny false alloc deltas).
+
+New benchmarks appear in the comparison with no baseline — they report without
+gating until they exist on both sides. A missing baseline fails the job
+rather than skipping the gate. The gate's own parser is locked by
+`scripts/bench-compare_test.py` (run as a CI step before comparing).
+
+## Frontend perf microbenchmarks
+
+`web/__tests__/perf/*.perf.test.mjs`, run with `npm run test:perf` (also in the
+`test-frontend` CI job). Deterministic seeded fixtures, median-of-5, generous
+budgets (10–50× measured) that only fail on algorithmic regressions:
+
+- markdown-it parse + `buildLineBlocks` on a 10k-line plan fixture.
+- Fenced-code highlighting: Shiki runs in Pierre's workers, so the bench covers
+  the main-thread half, turning a 2000-line fence's tokens into HTML
+  (`code-highlight.perf.test.mjs`, ~5ms; Shiki on the main thread took
+  ~350ms for the same fence, which is why it doesn't run there).
+- `bestWordDiffPairing` (capped 4×4) + `wordDiff` (capped ~500-char lines),
+  used by the files-mode rendered markdown diff.
+
+Each bench asserts its fixture does real work (e.g. `wordDiff` returns
+non-null) so budgets can't silently assert against an early-out path.
+
+## Playwright perf specs
+
+The review list is Pierre's `CodeView` (see `docs/frontend-js.md`), so the
+invariants are about what Pierre mounts, not Hunkyard DOM.
+
+`test/e2e/tests/large-review.perf.spec.ts` (project `perf`, port 3134,
+fixture `test/e2e/setup-fixtures-perf.sh`: 300 files / ~9k changed lines +
+one large markdown). Asserts structural invariants, not wall clock:
+
+| Invariant | Budget | Measured (M4 Max, 2026-09) |
+| --- | --- | --- |
+| Mounted Pierre items (`diffs-container`) | ≤ 15 | 3 at load, ≤ 7 while scrolling |
+| Rendered code rows (`[data-line]`) | ≤ 400 | 33 at load, ≤ 84 while scrolling |
+| DOM nodes, shadow roots included | < 12,000 | ~3.4k at load, ~3.8k scrolling |
+| Files loaded after load / after a full scroll | ≤ 30 / < 100 | 25 / 40 |
+| Longtask TBT, load and full scroll | < 4,000ms | 36ms load (≈700ms at 6× CPU throttle), 0ms scroll |
+| Tree jump to the deepest file | header holds within 2px while it settles | — |
+
+The large markdown is never fetched unless scrolled to. A "mount
+everything" or "load everything" regression breaks these by an order of
+magnitude.
+
+`test/e2e/tests/deep-scroll.huge.spec.ts` (project `huge`, port 3136,
+`setup-fixtures-huge.sh`: ~2,500 files, list taller than 2^22px) guards deep
+navigation where GPU-composited Chrome once stopped painting: deep tree jumps
+land, settle and hit-test; the bottom paints; after deep jumps ≤ 40 items
+are mounted (measured 2) and the page stays under 60k nodes (the 2,500-row
+file tree is most of the ~20k measured); a reload after the server has
+loaded every file keeps in-flight `/api/file` requests ≤ 100 (measured 76)
+with none failing. Paint assertions only bite headed
+(`bash run.sh --project=huge --headed`).
+
+## Asset + binary budgets
+
+hunkyard embeds all of `web/` in the binary, so a vendor bump inflates page
+weight and binary size together. Caps live in `asset-budget.json`
+(~15–20% above measured); `scripts/check-asset-budget.sh` enforces them in
+the `asset-budget` CI job:
+
+- per-file gzip caps (mermaid, app.js, live-mode.js, style.css,
+  markdown-it, the Pierre entry and worker, …),
+- `web/pierre` total (entry, worker and every Shiki grammar chunk, stored
+  gzipped),
+- glob totals (`web/hunkyard-*.js` shared modules),
+- total `web/*.js` gzip cap,
+- linux/amd64 binary cap (trimpath, `-s -w`).
+
+If growth is intentional (e.g. a vendor major bump), run the script, verify
+the delta, and update the caps in `asset-budget.json`.
+
+## Lint
+
+- `perfsprint` is enabled in `.golangci.yml` (Sprintf→concat/Itoa,
+  hex formatting, concat-in-loop). Its `error-format` check is excluded as
+  style churn with zero perf value.
+- No ESLint perf plugins: nothing published applies to vanilla DOM code.
+  The rule that matters is architectural — event listeners are delegated per
+  container (`attachDiffMouseHandler`, `attachDocGutterMouseHandler`), never
+  per line — and it is covered by the perf E2E spec, not by lint.
+
+## Known hot paths and past fixes
+
+- Focus-key formatting is hoisted out of per-comment loops
+  (`visibleInFocusKey`; `BenchmarkVisibleInFocus` locks the assumption).
+  Don't call `focusKeyFor` per comment.
+- Document-view comment gutters use one delegated mousedown per container
+  (same bug class as #657 for diff buttons: ~10k listeners on a 10k-line file).
+- `highlightQuotesInSection` indexes content elements once per mount instead
+  of scanning the section per quoted line.
+- `getFormsForFile` results are threaded down from top-level renders, not
+  recomputed per block/line/drag-frame.
+- `ComputeLineDiff` at 10k lines costs ~250ms: keep large-markdown work off
+  the critical render path (lazy bodies already do this).
+
+## Deferred follow-ups (reviewed, not yet done)
+
+From external review of this branch; each needs its own PR with measurements:
+
+1. **Full document re-render on gutter mousedown.** Delegation removed the
+   listener cost, but the first click on a 10k-line plan still re-renders the
+   whole rendered document to start a selection (`beginDocGutterDrag` →
+   `renderFileByPath` → `refreshPierreDocument`). Highest remaining
+   interaction cost for large markdown — update drag visuals without a full
+   re-render, or defer non-selection work.
+2. **Diagrams on mount paths.** `renderPluggableBlocks()` runs after many
+   remounts. It renders only targets that are new or were rendered in
+   another theme, and `mermaid.min.js` loads only when the first diagram
+   renders, but the first render of many diagrams on a large plan can
+   dominate TBT. Consider
+   rendering targets as they scroll into view, and a perf-E2E fixture with
+   diagrams.
+3. **Session-init bench.** Myers and review JSON are benched; `NewSessionFromGit`
+   / `RefreshFileList` (eager ×25 + numstat for N files, gating daemon
+   readiness) is not. Needs a temp-git-repo fixture — keep it out of the
+   hermetic bench set until readiness latency shows up in practice.
+4. **Rendered markdown is not virtualized inside the document.** Pierre
+   virtualizes the list and every diff's rows, but a Document-view markdown
+   file is one annotation element, fully mounted while any of it is on
+   screen (as before Pierre). A 10k-line plan in Document view is the
+   largest single DOM in a review.
+5. **`file-changed` full reload.** The handler re-fetches everything; lazy
+   stubs soften it, but nothing asserts files past the threshold stay
+   `lazy: true` after round-complete. A Go unit test on the refresh path
+   (no new browser minutes) is the cheap guardrail.
+
+## Recalibration
+
+- Budgets: quarterly, or after an intentional vendor bump / feature that
+  legitimately moves them. Measure on `main`, set caps ~1.2× measured,
+  note the reason in the PR.
+- The `bench` CI job starts strict from day one on allocs (deterministic)
+  and ≥20%-significant on time. If it ever false-positives on a PR, don't
+  bump the threshold silently — link the run in `docs/performance.md` or the
+  PR and adjust with evidence.

@@ -1,0 +1,19 @@
+# Send only the source needed to build the embedded CLI.
+*
+!go.mod
+!go.sum
+!cmd/
+!internal/
+!integrations/
+!web/
+
+**/node_modules/
+**/.agents/
+**/.codex/
+**/.claude/
+**/.hunkyard/
+**/.hunkyard/
+**/.env
+**/.env.*
+**/.hunkyard.config.json
+**/.hunkyard.config.json

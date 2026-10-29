@@ -1,0 +1,5013 @@
+package server
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"reflect"
+	"strconv"
+	"strings"
+	"testing"
+	"time"
+
+	sesspkg "github.com/BSH2409/hunkyard/internal/session"
+	"github.com/BSH2409/hunkyard/internal/testutil"
+	"github.com/BSH2409/hunkyard/internal/vcs"
+)
+
+func init() {
+	AvailableIntegrationsFn = func() []string {
+		return []string{"github", "linear"}
+	}
+}
+
+func newTestServer(t *testing.T) (*Server, *Session) {
+	t.Helper()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.md")
+	if err := os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	session := &Session{
+		Mode:        "files",
+		SessionKey:  "abcd1234ef01",
+		RepoRoot:    dir,
+		ReviewRound: 1,
+		Files: []*FileEntry{
+			{
+				Path:     "test.md",
+				AbsPath:  path,
+				Status:   "added",
+				FileType: "markdown",
+				Content:  "line1\nline2\nline3\n",
+				FileHash: "sha256:testhash",
+				Comments: []Comment{},
+			},
+		},
+	}
+	session.InitTestChannels()
+	// AddComment/AddReply arm a 200ms debounced disk write to RepoRoot/.hunkyard.
+	// Quiesce before t.TempDir's cleanup so a delayed WriteFiles doesn't race
+	// with RemoveAll — on Windows that manifests as "directory is not empty"
+	// (seen on TestRunAgentCmd_IDCollisionPrefersFileComment in unit-windows).
+	t.Cleanup(session.QuiesceForTest)
+
+	s, err := NewServer(session, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.projectDir = dir
+	s.homeDir = t.TempDir()
+	return s, session
+}
+
+func waitForSubscriberCount(t *testing.T, session *Session, want int) {
+	t.Helper()
+	ticker := time.NewTicker(time.Millisecond)
+	defer ticker.Stop()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		if got := session.SubscriberCountForTest(); got == want {
+			return
+		}
+		select {
+		case <-ticker.C:
+		case <-timer.C:
+			t.Fatalf("subscriber count = %d, want %d", session.SubscriberCountForTest(), want)
+		}
+	}
+}
+
+type notifyingResponseRecorder struct {
+	*httptest.ResponseRecorder
+	writes chan string
+}
+
+func newNotifyingResponseRecorder() *notifyingResponseRecorder {
+	return &notifyingResponseRecorder{
+		ResponseRecorder: httptest.NewRecorder(),
+		writes:           make(chan string, 4),
+	}
+}
+
+func (w *notifyingResponseRecorder) Write(p []byte) (int, error) {
+	n, err := w.ResponseRecorder.Write(p)
+	w.writes <- string(p)
+	return n, err
+}
+
+func (w *notifyingResponseRecorder) waitForWrite(t *testing.T, want string) {
+	t.Helper()
+	timer := time.NewTimer(time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case got := <-w.writes:
+			if strings.Contains(got, want) {
+				return
+			}
+		case <-timer.C:
+			t.Fatalf("response never wrote %q", want)
+		}
+	}
+}
+
+func TestGetSession(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp SessionInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Mode != "files" {
+		t.Errorf("mode = %q, want files", resp.Mode)
+	}
+	if len(resp.Files) != 1 {
+		t.Errorf("expected 1 file, got %d", len(resp.Files))
+	}
+	if resp.Files[0].Path != "test.md" {
+		t.Errorf("file path = %q", resp.Files[0].Path)
+	}
+}
+
+func TestHostCheck(t *testing.T) {
+	tests := []struct {
+		name       string
+		listenHost string
+		reqHost    string
+		wantCode   int
+	}{
+		// No listenHost set (test/default): all requests pass through.
+		{"no listen host, no req host", "", "", 200},
+		{"no listen host, evil.com", "", "evil.com", 200},
+
+		// listenHost is loopback: only loopback Host headers allowed.
+		{"loopback listen, localhost", "127.0.0.1", "localhost:3000", 200},
+		{"loopback listen, 127.0.0.1", "127.0.0.1", "127.0.0.1:3000", 200},
+		{"loopback listen, ::1 with port", "127.0.0.1", "[::1]:3000", 200},
+		{"loopback listen, ::1 bare", "127.0.0.1", "[::1]", 200},
+		{"loopback listen, evil.com", "127.0.0.1", "evil.com", 403},
+		{"loopback listen, evil.com no port", "127.0.0.1", "evil.com:80", 403},
+		{"loopback listen, tailscale host allowed with public URL", "127.0.0.1", "mymac.ts.net", 200},
+		{"loopback listen, tailscale host with port", "127.0.0.1", "mymac.ts.net:443", 200},
+
+		// listenHost is non-loopback (user opted into LAN exposure): no check.
+		{"lan listen, evil.com", "0.0.0.0", "evil.com", 200},
+		{"lan listen, localhost", "0.0.0.0", "localhost:3000", 200},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _ := newTestServer(t)
+			s.SetListenHost(tt.listenHost)
+			if strings.Contains(tt.name, "tailscale") {
+				s.SetPublicURL("https://mymac.ts.net")
+			}
+			req := httptest.NewRequest("GET", "/api/session", nil)
+			if tt.reqHost != "" {
+				req.Host = tt.reqHost
+			}
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantCode)
+			}
+		})
+	}
+}
+
+// TestHostCheckForbiddenMessage pins that a Host-header mismatch must name
+// the offending Host and point at --public-url (or say it isn't set), so a
+// reverse-proxy misconfig doesn't look like a silent networking failure.
+func TestHostCheckForbiddenMessage(t *testing.T) {
+	t.Run("no public-url configured", func(t *testing.T) {
+		s, _ := newTestServer(t)
+		s.SetListenHost("127.0.0.1")
+		req := httptest.NewRequest("GET", "/api/session", nil)
+		req.Host = "machine.ts.net"
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", w.Code)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, `Host "machine.ts.net"`) {
+			t.Errorf("body missing Host quote: %q", body)
+		}
+		if !strings.Contains(body, "--public-url") {
+			t.Errorf("body missing --public-url hint: %q", body)
+		}
+		if strings.TrimSpace(body) == "Forbidden" {
+			t.Errorf("body is bare Forbidden with no reason: %q", body)
+		}
+	})
+	t.Run("public-url set but Host mismatches", func(t *testing.T) {
+		s, _ := newTestServer(t)
+		s.SetListenHost("127.0.0.1")
+		s.SetPublicURL("https://correct.ts.net")
+		req := httptest.NewRequest("GET", "/api/session", nil)
+		req.Host = "wrong.ts.net"
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+		if w.Code != http.StatusForbidden {
+			t.Fatalf("status = %d, want 403", w.Code)
+		}
+		body := w.Body.String()
+		if !strings.Contains(body, `Host "wrong.ts.net"`) {
+			t.Errorf("body missing Host quote: %q", body)
+		}
+		if !strings.Contains(body, "correct.ts.net") {
+			t.Errorf("body missing configured --public-url host: %q", body)
+		}
+	})
+}
+
+// TestSecFetchSiteForbiddenMessage pins #788 for the CSRF gate: rejected
+// cross-site POSTs must name Sec-Fetch-Site rather than a bare "Forbidden".
+func TestSecFetchSiteForbiddenMessage(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.SetListenHost("127.0.0.1")
+	req := httptest.NewRequest(http.MethodPost, "/api/file/comments?path=test.md", strings.NewReader(`{}`))
+	req.Host = "127.0.0.1:9"
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "Sec-Fetch-Site") {
+		t.Errorf("body missing Sec-Fetch-Site: %q", body)
+	}
+	if !strings.Contains(body, "cross-site") {
+		t.Errorf("body missing cross-site value: %q", body)
+	}
+	if strings.TrimSpace(body) == "Forbidden" {
+		t.Errorf("body is bare Forbidden with no reason: %q", body)
+	}
+}
+
+func TestIsLoopbackHost(t *testing.T) {
+	tests := []struct {
+		host string
+		want bool
+	}{
+		{"localhost", true},
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"127.0.0.2", true},
+		{"0.0.0.0", false},
+		{"evil.com", false},
+		{"192.168.1.1", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isLoopbackHost(tt.host); got != tt.want {
+			t.Errorf("isLoopbackHost(%q) = %v, want %v", tt.host, got, tt.want)
+		}
+	}
+}
+
+// TestHostCheckLoopbackWiring verifies that a loopback override arms the DNS-rebinding guard.
+func TestHostCheckLoopbackWiring(t *testing.T) {
+	effectiveHost := resolveHost("", "127.0.0.1")
+	if !isLoopbackHost(effectiveHost) {
+		t.Fatalf("default host %q is not loopback — guard would not be armed", effectiveHost)
+	}
+
+	s, _ := newTestServer(t)
+	s.SetListenHost(effectiveHost)
+
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	req.Host = "evil.com"
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 403 {
+		t.Errorf("default wiring: Host: evil.com got status %d, want 403", w.Code)
+	}
+
+	req2 := httptest.NewRequest("GET", "/api/session", nil)
+	req2.Host = "localhost:3000"
+	w2 := httptest.NewRecorder()
+	s.ServeHTTP(w2, req2)
+	if w2.Code != 200 {
+		t.Errorf("default wiring: Host: localhost:3000 got status %d, want 200", w2.Code)
+	}
+}
+
+func TestCheckSecFetchSite(t *testing.T) {
+	tests := []struct {
+		name   string
+		method string
+		site   string // empty = omit header
+		want   bool
+	}{
+		{"GET ignores cross-site", http.MethodGet, "cross-site", true},
+		{"HEAD ignores cross-site", http.MethodHead, "cross-site", true},
+		{"OPTIONS ignores cross-site", http.MethodOptions, "cross-site", true},
+		{"POST missing header (CLI)", http.MethodPost, "", true},
+		{"PUT missing header (CLI)", http.MethodPut, "", true},
+		{"DELETE missing header (CLI)", http.MethodDelete, "", true},
+		{"POST same-origin (UI)", http.MethodPost, "same-origin", true},
+		{"PUT same-origin (UI)", http.MethodPut, "same-origin", true},
+		{"DELETE same-origin (UI)", http.MethodDelete, "same-origin", true},
+		{"POST cross-site (CSRF)", http.MethodPost, "cross-site", false},
+		{"PUT cross-site (CSRF)", http.MethodPut, "cross-site", false},
+		{"PATCH cross-site (CSRF)", http.MethodPatch, "cross-site", false},
+		{"DELETE cross-site (CSRF)", http.MethodDelete, "cross-site", false},
+		{"POST same-site rejected", http.MethodPost, "same-site", false},
+		{"POST none rejected", http.MethodPost, "none", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest(tt.method, "/api/finish", nil)
+			if tt.site != "" {
+				req.Header.Set("Sec-Fetch-Site", tt.site)
+			}
+			if got := checkSecFetchSite(req); got != tt.want {
+				t.Errorf("checkSecFetchSite = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestSecFetchSiteCSRF_RejectsCrossSiteCommentPOST pins Vector A: a browser on
+// evil.com POSTing to 127.0.0.1 with Host: loopback (so checkHost passes) must
+// still be rejected when Sec-Fetch-Site is cross-site. The comment must not
+// be written.
+func TestSecFetchSiteCSRF_RejectsCrossSiteCommentPOST(t *testing.T) {
+	s, session := newTestServer(t)
+	s.SetListenHost("127.0.0.1")
+	before := len(session.GetComments("test.md"))
+
+	body := `{"start_line":1,"end_line":1,"body":"run attacker command","author":"evil"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/file/comments?path=test.md", strings.NewReader(body))
+	req.Host = "127.0.0.1:9"
+	req.Header.Set("Content-Type", "text/plain") // simple-request CSRF shape
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403; body=%s", w.Code, w.Body.String())
+	}
+	if got := len(session.GetComments("test.md")); got != before {
+		t.Fatalf("comment count = %d, want %d (cross-site POST must not write)", got, before)
+	}
+}
+
+func TestSecFetchSiteCSRF_AllowsSameOriginAndCLI(t *testing.T) {
+	s, session := newTestServer(t)
+	s.SetListenHost("127.0.0.1")
+
+	post := func(t *testing.T, site string) {
+		t.Helper()
+		body := `{"start_line":1,"end_line":1,"body":"ok","author":"me"}`
+		req := httptest.NewRequest(http.MethodPost, "/api/file/comments?path=test.md", strings.NewReader(body))
+		req.Host = "127.0.0.1:9"
+		req.Header.Set("Content-Type", "application/json")
+		if site != "" {
+			req.Header.Set("Sec-Fetch-Site", site)
+		}
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+		if w.Code != http.StatusCreated {
+			t.Fatalf("site=%q status = %d, want 201; body=%s", site, w.Code, w.Body.String())
+		}
+	}
+
+	before := len(session.GetComments("test.md"))
+	post(t, "")            // CLI / curl
+	post(t, "same-origin") // Hunkyard UI
+	if got := len(session.GetComments("test.md")); got != before+2 {
+		t.Fatalf("comment count = %d, want %d", got, before+2)
+	}
+}
+
+func TestSetPublicURL(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.SetPublicURL("https://mymac.ts.net/design")
+	s.SetListenHost("127.0.0.1")
+
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	req.Host = "mymac.ts.net"
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+
+	s.SetPublicURL("")
+	req2 := httptest.NewRequest("GET", "/api/session", nil)
+	req2.Host = "mymac.ts.net"
+	w2 := httptest.NewRecorder()
+	s.ServeHTTP(w2, req2)
+	if w2.Code != 403 {
+		t.Errorf("after clearing public URL, status = %d, want 403", w2.Code)
+	}
+}
+
+func TestGetSession_MethodNotAllowed(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/session", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestGetFile(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/file?path=test.md", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["path"] != "test.md" {
+		t.Errorf("path = %q", resp["path"])
+	}
+	if !strings.Contains(resp["content"].(string), "line1") {
+		t.Error("content missing")
+	}
+}
+
+func TestGetFile_NotFound(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/file?path=nonexistent.go", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestGetFile_MissingPath(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/file", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestPostFileComment(t *testing.T) {
+	s, session := newTestServer(t)
+	body := `{"start_line":1,"end_line":2,"body":"Fix this"}`
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 201 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if ct := w.Result().Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("committed Content-Type = %q, want application/json", ct)
+	}
+	var c Comment
+	if err := json.Unmarshal(w.Body.Bytes(), &c); err != nil {
+		t.Fatal(err)
+	}
+	if c.Body != "Fix this" || c.StartLine != 1 || c.EndLine != 2 {
+		t.Errorf("unexpected comment: %+v", c)
+	}
+	if len(session.GetComments("test.md")) != 1 {
+		t.Error("comment not persisted")
+	}
+}
+
+// TestPostFileComment_NormalizesSide verifies that GitHub-style "RIGHT"/"LEFT"
+// side values on the wire are normalized to hunkyard's internal representation
+// ("" for new, "old" for deletion). Without this normalization the frontend's
+// diff renderer keys comments by "lineNumber:side" and would falsely flag
+// fresh range-mode comments (seeded with side="RIGHT") as "outdated" because
+// the diff hunk lines key with side="" instead of "RIGHT". Regression for
+// the issue where Instance 5 (range mode) seeded comments rendered with the
+// "outdated" badge on first page load.
+func TestPostFileComment_NormalizesSide(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"RIGHT to empty", "RIGHT", ""},
+		{"right to empty", "right", ""},
+		{"LEFT to old", "LEFT", "old"},
+		{"left to old", "left", "old"},
+		{"old stays old", "old", "old"},
+		{"empty stays empty", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, session := newTestServer(t)
+			body := `{"start_line":1,"end_line":1,"side":"` + tc.input + `","body":"x"}`
+			req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code != 201 {
+				t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+			}
+			var c Comment
+			if err := json.Unmarshal(w.Body.Bytes(), &c); err != nil {
+				t.Fatal(err)
+			}
+			if c.Side != tc.want {
+				t.Errorf("Side = %q, want %q", c.Side, tc.want)
+			}
+			stored := session.GetComments("test.md")
+			if len(stored) != 1 {
+				t.Fatalf("stored %d comments, want 1", len(stored))
+			}
+			if stored[0].Side != tc.want {
+				t.Errorf("stored Side = %q, want %q", stored[0].Side, tc.want)
+			}
+		})
+	}
+}
+
+func TestPostFileComment_EmptyBody(t *testing.T) {
+	s, _ := newTestServer(t)
+	body := `{"start_line":1,"end_line":1,"body":""}`
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestPostFileComment_InvalidLineRange(t *testing.T) {
+	s, _ := newTestServer(t)
+	tests := []struct {
+		name string
+		body string
+	}{
+		{"zero start", `{"start_line":0,"end_line":1,"body":"x"}`},
+		{"end before start", `{"start_line":3,"end_line":1,"body":"x"}`},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", strings.NewReader(tc.body))
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code != 400 {
+				t.Errorf("status = %d, want 400", w.Code)
+			}
+		})
+	}
+}
+
+func TestPostFileComment_InvalidJSON(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestPostFileComment_FileNotFound(t *testing.T) {
+	s, _ := newTestServer(t)
+	body := `{"start_line":1,"end_line":1,"body":"test"}`
+	req := httptest.NewRequest("POST", "/api/file/comments?path=nonexistent.go", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestGetFileComments(t *testing.T) {
+	s, session := newTestServer(t)
+	session.AddComment("test.md", 1, 1, "", "one", "", "")
+	session.AddComment("test.md", 2, 2, "", "two", "", "")
+
+	req := httptest.NewRequest("GET", "/api/file/comments?path=test.md", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var comments []Comment
+	if err := json.Unmarshal(w.Body.Bytes(), &comments); err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 2 {
+		t.Errorf("got %d comments, want 2", len(comments))
+	}
+}
+
+func TestAPIUpdateComment(t *testing.T) {
+	s, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+
+	body := `{"body":"updated"}`
+	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"?path=test.md", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if session.GetComments("test.md")[0].Body != "updated" {
+		t.Error("comment not updated")
+	}
+}
+
+func TestAPIUpdateComment_NotFound(t *testing.T) {
+	s, _ := newTestServer(t)
+	body := `{"body":"x"}`
+	req := httptest.NewRequest("PUT", "/api/comment/nonexistent?path=test.md", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestAPIDeleteComment(t *testing.T) {
+	s, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "to delete", "", "")
+
+	req := httptest.NewRequest("DELETE", "/api/comment/"+c.ID+"?path=test.md", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	if len(session.GetComments("test.md")) != 0 {
+		t.Error("comment not deleted")
+	}
+}
+
+func TestAPIDeleteComment_NotFound(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("DELETE", "/api/comment/nonexistent?path=test.md", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestClearAllComments(t *testing.T) {
+	s, session := newTestServer(t)
+	session.AddComment("test.md", 1, 1, "", "comment 1", "", "")
+	session.AddComment("test.md", 2, 2, "", "comment 2", "", "")
+
+	if len(session.GetComments("test.md")) != 2 {
+		t.Fatal("expected 2 comments before clear")
+	}
+
+	req := httptest.NewRequest("DELETE", "/api/comments", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	if len(session.GetComments("test.md")) != 0 {
+		t.Error("comments not cleared")
+	}
+}
+
+func TestReviewComments_MethodNotAllowed(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("PATCH", "/api/comments", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestFinish(t *testing.T) {
+	s, session := newTestServer(t)
+	session.AddComment("test.md", 1, 1, "", "note", "", "")
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "finished" {
+		t.Errorf("status = %q", resp["status"])
+	}
+	if resp["prompt"] == "" {
+		t.Error("expected prompt when comments exist")
+	}
+	if resp["approved"] != false {
+		t.Errorf("expected approved=false with unresolved comments, got %v", resp["approved"])
+	}
+}
+
+func TestFinish_NoComments(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["prompt"] != approvedNoCommentsPrompt {
+		t.Errorf("expected approval prompt, got %q", resp["prompt"])
+	}
+	if resp["approved"] != true {
+		t.Errorf("expected approved=true with no comments, got %v", resp["approved"])
+	}
+}
+
+func TestFinish_IncludesStructuredComments(t *testing.T) {
+	s, session := newTestServer(t)
+	session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resp["review_file"]; ok {
+		t.Error("finish response should not include review_file")
+	}
+	comments, ok := resp["comments"].([]any)
+	if !ok || len(comments) != 1 {
+		t.Fatalf("expected 1 comment in comments array, got: %v", resp["comments"])
+	}
+	c0 := comments[0].(map[string]any)
+	if c0["body"] != "fix this" {
+		t.Errorf("comment body = %v, want fix this", c0["body"])
+	}
+	prompt, _ := resp["prompt"].(string)
+	if !strings.Contains(prompt, "fix this") {
+		t.Errorf("expected comment body in finish prompt, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "Address each comment") {
+		t.Errorf("expected instructions in prompt, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "1 unresolved comment") {
+		t.Errorf("prompt should summarize comment count, got: %s", prompt)
+	}
+	wantCommentsCmd := buildCommentsListCommand(session)
+	if strings.Contains(prompt, wantCommentsCmd) {
+		t.Errorf("prompt should embed comments inline, not %q, got: %s", wantCommentsCmd, prompt)
+	}
+	if strings.Contains(prompt, "Next review round") {
+		t.Errorf("prompt should not use legacy next review round heading, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "When you're done, run:") {
+		t.Errorf("prompt should include a single next-command instruction, got: %s", prompt)
+	}
+	if strings.Contains(prompt, "When done run:") {
+		t.Errorf("prompt should not duplicate next-command wording, got: %s", prompt)
+	}
+	if _, ok := resp["copy_prompt"]; ok {
+		t.Error("finish response should not include legacy copy_prompt field")
+	}
+	nextCmd, _ := resp["next_command"].(string)
+	if nextCmd != "hunkyard --session abcd1234ef01" {
+		t.Errorf("next_command = %q, want hunkyard --session abcd1234ef01", nextCmd)
+	}
+}
+
+func TestFinish_PromptApproved(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.cliArgs = []string{"preview", "/tmp/page.html"}
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	prompt, _ := resp["prompt"].(string)
+	if !strings.Contains(prompt, "Review approved") {
+		t.Errorf("prompt = %q", prompt)
+	}
+	if strings.Contains(prompt, "Next review round") {
+		t.Errorf("approved prompt should not mention next review round, got: %s", prompt)
+	}
+	if strings.Contains(prompt, "hunkyard comments") {
+		t.Errorf("approved prompt should not mention hunkyard comments, got: %s", prompt)
+	}
+}
+
+func TestFinish_PromptIncludesFileArgs(t *testing.T) {
+	s, session := newTestServer(t)
+	session.CLIArgs = []string{"test.md"}
+	session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	prompt, _ := resp["prompt"].(string)
+	if !strings.Contains(prompt, "hunkyard --session abcd1234ef01") {
+		t.Errorf("expected prompt to contain session reconnect command, got: %s", prompt)
+	}
+	if !strings.Contains(prompt, "When you're done, run:") {
+		t.Errorf("expected prompt to include reconnect heading, got: %s", prompt)
+	}
+}
+
+func TestFinish_PromptBareGitMode(t *testing.T) {
+	s, session := newTestServer(t)
+	session.Mode = "git"
+	session.SessionKey = ""
+	// CLIArgs stays nil — git mode
+	session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	prompt, _ := resp["prompt"].(string)
+	if !strings.Contains(prompt, "When you're done, run:") || !strings.Contains(prompt, "hunkyard") {
+		t.Errorf("expected prompt to include bare git reconnect, got: %s", prompt)
+	}
+}
+
+func TestFinish_UnresolvedReturnsPromptWithInstructions(t *testing.T) {
+	s, session := newTestServer(t)
+	session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["prompt"] == "" {
+		t.Error("expected non-empty prompt when there are unresolved comments")
+	}
+	if resp["approved"] != false {
+		t.Errorf("expected approved=false, got %v", resp["approved"])
+	}
+}
+
+func TestReviewCycle_ApproveReturnsEmptyPrompt(t *testing.T) {
+	s, session := newTestServer(t)
+	session.SetAwaitingFirstReview(true)
+
+	// Start review-cycle in background (it blocks until finish event)
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest("POST", "/api/review-cycle", nil)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+		done <- w
+	}()
+
+	waitForSubscriberCount(t, session, 1)
+
+	// Trigger finish with no comments (approve)
+	finishReq := httptest.NewRequest("POST", "/api/finish", nil)
+	s.ServeHTTP(httptest.NewRecorder(), finishReq)
+
+	select {
+	case w := <-done:
+		var resp map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp["prompt"] != approvedNoCommentsPrompt {
+			t.Errorf("expected approval prompt for approve via review-cycle, got: %s", resp["prompt"])
+		}
+		if resp["approved"] != true {
+			t.Errorf("expected approved=true via review-cycle, got %v", resp["approved"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("review-cycle did not return in time")
+	}
+}
+
+func TestReviewCycle_UnresolvedReturnsPrompt(t *testing.T) {
+	s, session := newTestServer(t)
+	session.SetAwaitingFirstReview(true)
+	session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+
+	done := make(chan *httptest.ResponseRecorder, 1)
+	go func() {
+		req := httptest.NewRequest("POST", "/api/review-cycle", nil)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+		done <- w
+	}()
+
+	waitForSubscriberCount(t, session, 1)
+
+	finishReq := httptest.NewRequest("POST", "/api/finish", nil)
+	s.ServeHTTP(httptest.NewRecorder(), finishReq)
+
+	select {
+	case w := <-done:
+		var resp map[string]any
+		if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+			t.Fatal(err)
+		}
+		if resp["prompt"] == "" {
+			t.Error("expected non-empty prompt when there are unresolved comments")
+		}
+		if resp["approved"] != false {
+			t.Errorf("expected approved=false via review-cycle, got %v", resp["approved"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Error("review-cycle did not return in time")
+	}
+}
+
+func TestReviewCycle_NextCommand(t *testing.T) {
+	tests := []struct {
+		name       string
+		sessionKey string
+		want       string
+	}{
+		{"with session key", "839f3b4cd5d6", "hunkyard --session 839f3b4cd5d6"},
+		{"empty session key falls back", "", "hunkyard"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, session := newTestServer(t)
+			session.SessionKey = tc.sessionKey
+			session.SetAwaitingFirstReview(true)
+
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				req := httptest.NewRequest("POST", "/api/review-cycle", nil)
+				w := httptest.NewRecorder()
+				s.ServeHTTP(w, req)
+				done <- w
+			}()
+
+			waitForSubscriberCount(t, session, 1)
+
+			finishReq := httptest.NewRequest("POST", "/api/finish", nil)
+			s.ServeHTTP(httptest.NewRecorder(), finishReq)
+
+			select {
+			case w := <-done:
+				var resp map[string]any
+				if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+					t.Fatal(err)
+				}
+				got, ok := resp["next_command"].(string)
+				if !ok {
+					t.Fatalf("next_command missing or not a string: %v", resp["next_command"])
+				}
+				if got != tc.want {
+					t.Errorf("next_command = %q, want %q", got, tc.want)
+				}
+			case <-time.After(2 * time.Second):
+				t.Error("review-cycle did not return in time")
+			}
+		})
+	}
+}
+
+// ===== Path Traversal Tests =====
+
+func TestHandleFiles_PathTraversal(t *testing.T) {
+	s, _ := newTestServer(t)
+	tests := []struct {
+		name string
+		path string
+		code int
+	}{
+		{"dotdot", "/files/../../../etc/passwd", 400},
+		{"dotdot encoded", "/files/..%2F..%2Fetc%2Fpasswd", 400},
+		{"empty path", "/files/", 400},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", tc.path, nil)
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code == 200 {
+				t.Errorf("path %q should be blocked, got 200", tc.path)
+			}
+		})
+	}
+}
+
+func TestHandleFiles_SymlinkTraversal(t *testing.T) {
+	s, session := newTestServer(t)
+
+	// Create a file outside the repo root
+	outsideDir := t.TempDir()
+	secretPath := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("secret data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Create a symlink inside repo root pointing outside
+	linkPath := filepath.Join(session.RepoRoot, "escape")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/files/escape/secret.txt", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code == 200 {
+		t.Errorf("symlink traversal should be blocked, got 200 with body: %s", w.Body.String())
+	}
+}
+
+func TestHandleFiles_Subdirectory(t *testing.T) {
+	s, session := newTestServer(t)
+
+	subdir := filepath.Join(session.RepoRoot, "images")
+	if err := os.Mkdir(subdir, 0755); err != nil {
+		t.Fatal(err)
+	}
+	imgPath := filepath.Join(subdir, "diagram.png")
+	if err := os.WriteFile(imgPath, []byte("fake png"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/files/images/diagram.png", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if w.Body.String() != "fake png" {
+		t.Errorf("body = %q", w.Body.String())
+	}
+}
+
+func TestHandleFiles_ValidFile(t *testing.T) {
+	s, session := newTestServer(t)
+
+	imgPath := filepath.Join(session.RepoRoot, "image.png")
+	if err := os.WriteFile(imgPath, []byte("fake png"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/files/image.png", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if w.Body.String() != "fake png" {
+		t.Errorf("body = %q", w.Body.String())
+	}
+}
+
+func TestHandleFiles_MethodNotAllowed(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/files/test.md", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestApiConfig_DefaultMarkdownView(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.cfg.DefaultMarkdownView = "document"
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var body map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if body["default_markdown_view"] != "document" {
+		t.Errorf("got default_markdown_view=%v, want document", body["default_markdown_view"])
+	}
+}
+
+func TestAPICodeFonts_CachesCodeFontDiscovery(t *testing.T) {
+	s, _ := newTestServer(t)
+	calls := 0
+	// The injected discovery function keeps this independent of local fonts.
+	s.codeFontDiscovery = func() ([]string, error) {
+		calls++
+		return []string{"Example Mono", "Sample Code Mono"}, nil
+	}
+
+	for range 2 {
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, httptest.NewRequest("GET", "/api/code-fonts", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("status = %d", w.Code)
+		}
+		var body struct {
+			CodeFonts []string `json:"code_fonts"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &body); err != nil {
+			t.Fatal(err)
+		}
+		if got, want := body.CodeFonts, []string{"Example Mono", "Sample Code Mono"}; !reflect.DeepEqual(got, want) {
+			t.Errorf("code_fonts = %v, want %v", got, want)
+		}
+	}
+	if calls != 1 {
+		t.Errorf("font discovery calls = %d, want 1", calls)
+	}
+}
+
+func TestAPIConfig_DoesNotDiscoverCodeFonts(t *testing.T) {
+	s, _ := newTestServer(t)
+	calls := 0
+	s.codeFontDiscovery = func() ([]string, error) { calls++; return []string{"Ignored"}, nil }
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("GET", "/api/config", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d", w.Code)
+	}
+	if calls != 0 {
+		t.Errorf("font discovery calls = %d, want 0", calls)
+	}
+	if strings.Contains(w.Body.String(), "code_fonts") {
+		t.Error("/api/config unexpectedly includes code_fonts")
+	}
+}
+
+func TestAPICodeFontsRetriesAfterDiscoveryFails(t *testing.T) {
+	s, _ := newTestServer(t)
+	calls := 0
+	s.codeFontDiscovery = func() ([]string, error) {
+		calls++
+		if calls == 1 {
+			return nil, errors.New("font scanner unavailable")
+		}
+		return []string{"Recovered Mono"}, nil
+	}
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("GET", "/api/code-fonts", nil))
+	if w.Code != http.StatusServiceUnavailable {
+		t.Fatalf("first status = %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest("GET", "/api/code-fonts", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("second status = %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"code_fonts":["Recovered Mono"]`) {
+		t.Errorf("response = %s, want recovered font", w.Body.String())
+	}
+	if calls != 2 {
+		t.Errorf("font discovery calls = %d, want 2", calls)
+	}
+}
+
+func TestAPICodeFontsCachesEmptyDiscoveryResult(t *testing.T) {
+	for _, tt := range []struct {
+		name      string
+		discovery func() ([]string, error)
+	}{
+		{name: "nil result", discovery: func() ([]string, error) { return nil, nil }},
+		{name: "nil discovery function", discovery: nil},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			s, _ := newTestServer(t)
+			s.codeFontDiscovery = tt.discovery
+			for range 2 {
+				w := httptest.NewRecorder()
+				s.ServeHTTP(w, httptest.NewRequest("GET", "/api/code-fonts", nil))
+				if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"code_fonts":[]`) {
+					t.Fatalf("status = %d, response = %s", w.Code, w.Body.String())
+				}
+			}
+		})
+	}
+}
+
+func TestGetConfig(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.currentVersion = "v1.2.3"
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["version"] != "v1.2.3" {
+		t.Errorf("version = %v, want v1.2.3", resp["version"])
+	}
+	if resp["latest_version"] != "" {
+		t.Errorf("latest_version should be empty before update check, got %v", resp["latest_version"])
+	}
+	if resp["installation_source"] == "" {
+		t.Error("installation_source should always be present")
+	}
+}
+
+func TestCheckForUpdates(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/BSH2409/hunkyard/releases/latest" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"tag_name":"v9.9.9"}`)
+	}))
+	defer gh.Close()
+
+	s, _ := newTestServer(t)
+	s.currentVersion = "v1.0.0"
+	s.githubAPIURL = gh.URL
+
+	s.CheckForUpdates()
+
+	s.versionMu.RLock()
+	got := s.latestVersion
+	s.versionMu.RUnlock()
+	if got != "v9.9.9" {
+		t.Errorf("latestVersion = %q, want v9.9.9", got)
+	}
+
+	// Verify config API reflects it
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	var cfg map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
+		t.Fatal(err)
+	}
+	if cfg["latest_version"] != "v9.9.9" {
+		t.Errorf("config latest_version = %v, want v9.9.9", cfg["latest_version"])
+	}
+}
+
+func TestCheckForUpdates_SkipsDevVersion(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.currentVersion = "dev"
+	s.CheckForUpdates()
+
+	s.versionMu.RLock()
+	got := s.latestVersion
+	s.versionMu.RUnlock()
+	if got != "" {
+		t.Errorf("latestVersion should be empty for dev builds, got %q", got)
+	}
+}
+
+func TestCheckForUpdates_HandlesServerError(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer gh.Close()
+
+	s, _ := newTestServer(t)
+	s.currentVersion = "v1.0.0"
+	s.githubAPIURL = gh.URL
+	s.CheckForUpdates()
+
+	s.versionMu.RLock()
+	got := s.latestVersion
+	s.versionMu.RUnlock()
+	if got != "" {
+		t.Errorf("latestVersion should be empty on server error, got %q", got)
+	}
+}
+
+func TestGetConfig_MethodNotAllowed(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestRoundComplete(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	req := httptest.NewRequest("POST", "/api/round-complete", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var resp map[string]string
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["status"] != "ok" {
+		t.Errorf("status = %q, want ok", resp["status"])
+	}
+}
+
+func TestRoundComplete_MethodNotAllowed(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/round-complete", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestGetFileDiff_CodeFile(t *testing.T) {
+	s, session := newTestServer(t)
+	// Add a code file with diff hunks
+	session.Lock()
+	session.Files = append(session.Files, &FileEntry{
+		Path:     "main.go",
+		AbsPath:  "/tmp/main.go",
+		Status:   "modified",
+		FileType: "code",
+		Content:  "package main",
+		Comments: []Comment{},
+		DiffHunks: []DiffHunk{
+			{OldStart: 1, OldCount: 3, NewStart: 1, NewCount: 4, Header: "@@ -1,3 +1,4 @@"},
+		},
+	})
+	session.Unlock()
+
+	req := httptest.NewRequest("GET", "/api/file/diff?path=main.go", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp struct {
+		Hunks []DiffHunk `json:"hunks"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Hunks) != 1 {
+		t.Errorf("expected 1 hunk, got %d", len(resp.Hunks))
+	}
+}
+
+func TestGetFileDiff_MarkdownFilesMode(t *testing.T) {
+	s, session := newTestServer(t)
+	// Set previous content for the markdown file
+	session.Lock()
+	session.Files[0].PreviousContent = "old content"
+	session.Files[0].Content = "new content"
+	session.Unlock()
+
+	req := httptest.NewRequest("GET", "/api/file/diff?path=test.md", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp struct {
+		Hunks []DiffHunk `json:"hunks"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if len(resp.Hunks) == 0 {
+		t.Error("expected non-empty diff hunks")
+	}
+}
+
+func TestGetFileDiff_NotFound(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/file/diff?path=nonexistent.go", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestGetFileDiff_MissingPath(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/file/diff", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestCommentByID_MissingPath(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("PUT", "/api/comment/c1", strings.NewReader(`{"body":"x"}`))
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// ===== Scope Query Parameter Tests =====
+
+func TestGetSession_IncludesAvailableScopes(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	scopes, ok := resp["available_scopes"]
+	if !ok {
+		t.Fatal("response missing available_scopes field")
+	}
+	scopeList, ok := scopes.([]any)
+	if !ok {
+		t.Fatalf("available_scopes is not an array: %T", scopes)
+	}
+	// Test server is not in a real git repo, so only "all" is available
+	// (git commands to detect staged/unstaged will fail)
+	if len(scopeList) < 1 {
+		t.Errorf("expected at least 1 scope, got %d: %v", len(scopeList), scopeList)
+	}
+	if scopeList[0] != "all" {
+		t.Errorf("first scope = %q, want all", scopeList[0])
+	}
+}
+
+func TestGetSession_ScopeAll_SameAsNoScope(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	// No scope
+	req1 := httptest.NewRequest("GET", "/api/session", nil)
+	w1 := httptest.NewRecorder()
+	s.ServeHTTP(w1, req1)
+
+	// scope=all
+	req2 := httptest.NewRequest("GET", "/api/session?scope=all", nil)
+	w2 := httptest.NewRecorder()
+	s.ServeHTTP(w2, req2)
+
+	if w1.Code != 200 || w2.Code != 200 {
+		t.Fatalf("status codes: %d, %d", w1.Code, w2.Code)
+	}
+
+	var resp1, resp2 SessionInfo
+	if err := json.Unmarshal(w1.Body.Bytes(), &resp1); err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(w2.Body.Bytes(), &resp2); err != nil {
+		t.Fatal(err)
+	}
+	if resp1.Mode != resp2.Mode {
+		t.Errorf("mode mismatch: %q vs %q", resp1.Mode, resp2.Mode)
+	}
+	if len(resp1.Files) != len(resp2.Files) {
+		t.Errorf("file count mismatch: %d vs %d", len(resp1.Files), len(resp2.Files))
+	}
+}
+
+func TestGetFileDiff_ScopeAll_SameAsNoScope(t *testing.T) {
+	s, session := newTestServer(t)
+	// Add a code file with diff hunks
+	session.Lock()
+	session.Files = append(session.Files, &FileEntry{
+		Path:     "main.go",
+		AbsPath:  "/tmp/main.go",
+		Status:   "modified",
+		FileType: "code",
+		Content:  "package main",
+		Comments: []Comment{},
+		DiffHunks: []DiffHunk{
+			{OldStart: 1, OldCount: 3, NewStart: 1, NewCount: 4, Header: "@@ -1,3 +1,4 @@"},
+		},
+	})
+	session.Unlock()
+
+	// No scope
+	req1 := httptest.NewRequest("GET", "/api/file/diff?path=main.go", nil)
+	w1 := httptest.NewRecorder()
+	s.ServeHTTP(w1, req1)
+
+	// scope=all
+	req2 := httptest.NewRequest("GET", "/api/file/diff?path=main.go&scope=all", nil)
+	w2 := httptest.NewRecorder()
+	s.ServeHTTP(w2, req2)
+
+	if w1.Code != 200 || w2.Code != 200 {
+		t.Fatalf("status codes: %d, %d", w1.Code, w2.Code)
+	}
+	if w1.Body.String() != w2.Body.String() {
+		t.Errorf("scope=all response differs from no-scope response")
+	}
+}
+
+func TestGetFileDiff_ScopeStaged_ValidResponse(t *testing.T) {
+	s, session := newTestServer(t)
+	// Add a code file with diff hunks to the session
+	session.Lock()
+	session.Files = append(session.Files, &FileEntry{
+		Path:     "app.go",
+		AbsPath:  "/tmp/app.go",
+		Status:   "modified",
+		FileType: "code",
+		Content:  "package main",
+		Comments: []Comment{},
+		DiffHunks: []DiffHunk{
+			{OldStart: 1, OldCount: 3, NewStart: 1, NewCount: 4, Header: "@@ -1,3 +1,4 @@"},
+		},
+	})
+	session.Unlock()
+
+	// scope=staged — even though this is not a real git repo,
+	// the handler should return a valid response (empty hunks from failed git call)
+	req := httptest.NewRequest("GET", "/api/file/diff?path=app.go&scope=staged", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp struct {
+		Hunks []DiffHunk `json:"hunks"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	// Should parse as valid JSON with a hunks field (may be empty without real git)
+	if resp.Hunks == nil {
+		t.Error("hunks should not be nil (should be empty array)")
+	}
+}
+
+func TestGetFileDiff_ScopeNotFound(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/file/diff?path=nonexistent.go&scope=staged", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// TestGetFile_NotInSession_FallbackToDisk tests the scenario where switching
+// scopes (e.g. from "all" to "unstaged") returns files that weren't in the
+// session's original file list. The /api/file endpoint should fall back to
+// reading from disk instead of returning 404 (which caused the frontend to hang).
+func TestGetFile_NotInSession_FallbackToDisk(t *testing.T) {
+	s, session := newTestServer(t)
+
+	// Create a file on disk that is NOT in session.Files
+	extraPath := filepath.Join(session.RepoRoot, "extra.go")
+	if err := os.WriteFile(extraPath, []byte("package main\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Verify it's not in the session's file list
+	session.RLock()
+	found := session.FileByPathForTest("extra.go")
+	session.RUnlock()
+	if found != nil {
+		t.Fatal("extra.go should NOT be in session files for this test")
+	}
+
+	// Request it via /api/file — before the fix this returned 404
+	req := httptest.NewRequest("GET", "/api/file?path=extra.go", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200 (file exists on disk but not in session)", w.Code)
+	}
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["path"] != "extra.go" {
+		t.Errorf("path = %q, want extra.go", resp["path"])
+	}
+	if resp["content"] != "package main\n" {
+		t.Errorf("content = %q, want file content from disk", resp["content"])
+	}
+	if resp["file_type"] != "code" {
+		t.Errorf("file_type = %q, want code", resp["file_type"])
+	}
+}
+
+// TestGetFile_NotInSession_PathTraversal verifies the disk fallback
+// still blocks path traversal attempts.
+func TestGetFile_NotInSession_PathTraversal(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	for _, path := range []string{"../etc/passwd", "foo/../../etc/passwd"} {
+		req := httptest.NewRequest("GET", "/api/file?path="+path, nil)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+
+		if w.Code != 404 {
+			t.Errorf("path %q: status = %d, want 404", path, w.Code)
+		}
+	}
+}
+
+// TestGetFile_NotInSession_SymlinkTraversal verifies the disk fallback
+// resolves symlinks and refuses paths that escape the repo root.
+func TestGetFile_NotInSession_SymlinkTraversal(t *testing.T) {
+	s, session := newTestServer(t)
+
+	outsideDir := t.TempDir()
+	secretPath := filepath.Join(outsideDir, "secret.txt")
+	if err := os.WriteFile(secretPath, []byte("secret data"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	linkPath := filepath.Join(session.RepoRoot, "escape")
+	if err := os.Symlink(outsideDir, linkPath); err != nil {
+		t.Skipf("symlinks not supported: %v", err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/file?path=escape/secret.txt", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code == 200 {
+		t.Errorf("symlink traversal should be blocked, got 200 with body: %s", w.Body.String())
+	}
+}
+
+func TestHandleFinish_PromptIncludesAuthor(t *testing.T) {
+	srv, session := newTestServer(t)
+	session.AddComment(session.Files[0].Path, 1, 1, "", "fix this", "", "")
+
+	req := httptest.NewRequest(http.MethodPost, "/api/finish", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	var resp map[string]any
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	prompt, _ := resp["prompt"].(string)
+	if !strings.Contains(prompt, "--author") {
+		t.Errorf("expected prompt to mention --author, got: %s", prompt)
+	}
+}
+
+func TestHandleFinishEmitsSSEEvent(t *testing.T) {
+	srv, session := newTestServer(t)
+	session.AddComment(session.Files[0].Path, 1, 1, "", "test", "", "")
+
+	// Subscribe before triggering finish
+	ch := session.Subscribe()
+	defer session.Unsubscribe(ch)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/finish", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	select {
+	case event := <-ch:
+		if event.Type != "finish" {
+			t.Errorf("expected finish event, got %s", event.Type)
+		}
+		if event.Content == "" {
+			t.Error("expected non-empty content in finish event")
+		}
+		// Verify the event content is structured JSON with prompt and approved fields
+		var data map[string]any
+		if err := json.Unmarshal([]byte(event.Content), &data); err != nil {
+			t.Errorf("expected JSON content in finish event, got: %s", event.Content)
+		}
+		if data["prompt"] == "" {
+			t.Error("expected non-empty prompt in finish event data")
+		}
+		if data["approved"] != false {
+			t.Errorf("expected approved=false with unresolved comments, got %v", data["approved"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("no finish event received")
+	}
+}
+
+func TestWaitForEventReturnsOnFinish(t *testing.T) {
+	srv, session := newTestServer(t)
+	session.AddComment(session.Files[0].Path, 1, 1, "", "test", "", "")
+
+	var resp *httptest.ResponseRecorder
+	done := make(chan struct{})
+	go func() {
+		req := httptest.NewRequest(http.MethodGet, "/api/wait-for-event", nil)
+		resp = httptest.NewRecorder()
+		srv.ServeHTTP(resp, req)
+		close(done)
+	}()
+
+	waitForSubscriberCount(t, session, 1)
+
+	finishReq := httptest.NewRequest(http.MethodPost, "/api/finish", nil)
+	finishW := httptest.NewRecorder()
+	srv.ServeHTTP(finishW, finishReq)
+
+	select {
+	case <-done:
+		if resp.Code != 200 {
+			t.Fatalf("expected 200, got %d", resp.Code)
+		}
+		var event map[string]string
+		json.NewDecoder(resp.Body).Decode(&event)
+		if event["type"] != "finish" {
+			t.Errorf("expected finish event, got %s", event["type"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("long-poll did not return after finish")
+	}
+}
+
+func TestWaitForEventIgnoresOtherEvents(t *testing.T) {
+	srv, session := newTestServer(t)
+	session.AddComment(session.Files[0].Path, 1, 1, "", "test", "", "")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var resp *httptest.ResponseRecorder
+	done := make(chan struct{})
+	go func() {
+		req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/wait-for-event", nil)
+		resp = httptest.NewRecorder()
+		srv.ServeHTTP(resp, req)
+		close(done)
+	}()
+
+	waitForSubscriberCount(t, session, 1)
+
+	session.Notify(SSEEvent{Type: "comments-changed"})
+	session.Notify(SSEEvent{Type: "finish"})
+	select {
+	case <-done:
+		if resp.Code != http.StatusOK {
+			t.Fatalf("status = %d, want 200", resp.Code)
+		}
+		var event SSEEvent
+		if err := json.NewDecoder(resp.Body).Decode(&event); err != nil {
+			t.Fatal(err)
+		}
+		if event.Type != "finish" {
+			t.Fatalf("event type = %q, want finish", event.Type)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("long-poll did not return after finish event")
+	}
+}
+
+func TestWaitForEventRespectsCancel(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	req := httptest.NewRequestWithContext(ctx, http.MethodGet, "/api/wait-for-event", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusGatewayTimeout {
+		t.Errorf("expected 504, got %d", w.Code)
+	}
+}
+
+func TestWaitForEvent_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/wait-for-event", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+// TestGetFile_NotInSession_NotOnDisk verifies that files not in session
+// AND not on disk still return 404.
+func TestGetFile_NotInSession_NotOnDisk(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	req := httptest.NewRequest("GET", "/api/file?path=doesnotexist.go", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// ===== File List Endpoint Tests =====
+
+func TestGetFilesList(t *testing.T) {
+	dir := testutil.InitTestRepo(t)
+	testutil.WriteFile(t, filepath.Join(dir, "src/main.go"), "package main")
+	testutil.Git(t, dir, "add", ".")
+	testutil.Git(t, dir, "commit", "-m", "add file")
+
+	session := &Session{
+		Mode:        "git",
+		RepoRoot:    dir,
+		ReviewRound: 1,
+		Files:       []*FileEntry{},
+	}
+	session.InitTestChannels()
+
+	srv, err := NewServer(session, frontendFS, "", "", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("no query returns capped results", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/files/list", nil)
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+
+		if w.Code != 200 {
+			t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+		}
+
+		var files []string
+		if err := json.NewDecoder(w.Body).Decode(&files); err != nil {
+			t.Fatal(err)
+		}
+
+		if len(files) == 0 {
+			t.Fatal("expected at least 1 file")
+		}
+		if len(files) > 10 {
+			t.Fatalf("expected at most 10 files, got %d", len(files))
+		}
+	})
+
+	t.Run("query filters by fuzzy match", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/api/files/list?q=main", nil)
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+
+		var files []string
+		json.NewDecoder(w.Body).Decode(&files)
+
+		found := false
+		for _, f := range files {
+			if f == "src/main.go" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected src/main.go in filtered results, got: %v", files)
+		}
+	})
+}
+
+func TestGetFilesList_RespectsIgnorePatterns(t *testing.T) {
+	dir := testutil.InitTestRepo(t)
+	testutil.WriteFile(t, filepath.Join(dir, "main.go"), "package main")
+	testutil.WriteFile(t, filepath.Join(dir, "debug.log"), "log data")
+	testutil.Git(t, dir, "add", ".")
+	testutil.Git(t, dir, "commit", "-m", "add files")
+
+	session := &Session{
+		Mode:           "git",
+		RepoRoot:       dir,
+		ReviewRound:    1,
+		IgnorePatterns: []string{"*.log"},
+		Files:          []*FileEntry{},
+	}
+	session.InitTestChannels()
+
+	srv, err := NewServer(session, frontendFS, "", "", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/api/files/list", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	var files []string
+	json.NewDecoder(w.Body).Decode(&files)
+
+	for _, f := range files {
+		if f == "debug.log" {
+			t.Error("ignored file debug.log should not appear")
+		}
+	}
+}
+
+func TestGetFilesList_FilesMode(t *testing.T) {
+	dir := t.TempDir()
+	testutil.WriteFile(t, filepath.Join(dir, "app.js"), "console.log('hi')")
+	testutil.WriteFile(t, filepath.Join(dir, "lib/util.js"), "module.exports = {}")
+	// node_modules should be excluded by WalkFiles
+	testutil.WriteFile(t, filepath.Join(dir, "node_modules/pkg/index.js"), "module")
+
+	session := &Session{
+		Mode:        "files",
+		RepoRoot:    dir,
+		ReviewRound: 1,
+		Files:       []*FileEntry{},
+	}
+	session.InitTestChannels()
+
+	srv, err := NewServer(session, frontendFS, "", "", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/api/files/list", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	var files []string
+	json.NewDecoder(w.Body).Decode(&files)
+
+	found := false
+	for _, f := range files {
+		if f == "app.js" {
+			found = true
+		}
+		if strings.HasPrefix(f, "node_modules/") {
+			t.Errorf("node_modules file should not appear: %s", f)
+		}
+	}
+	if !found {
+		t.Errorf("expected app.js in file list, got: %v", files)
+	}
+}
+
+func TestHealthEndpoint(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest("GET", "/api/health", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("GET /api/health: got %d, want 200", w.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode health response: %v", err)
+	}
+	if resp["status"] != "ok" {
+		t.Errorf("status = %v, want ok", resp["status"])
+	}
+	if resp["api_version"] != float64(APIVersion) {
+		t.Errorf("api_version = %v, want %d", resp["api_version"], APIVersion)
+	}
+}
+
+// Regression: /api/review-cycle is POST-only. The frontend used to GET it
+// for round-counter init, which 405'd; live-mode.js now reads
+// review_round from /api/session instead. Lock the contract so future
+// frontend pulls on the wrong verb fail loudly.
+func TestReviewCycle_GETMethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete} {
+		req := httptest.NewRequest(method, "/api/review-cycle", nil)
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		if w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("%s /api/review-cycle: got %d, want %d", method, w.Code, http.StatusMethodNotAllowed)
+		}
+	}
+}
+
+func TestReviewCycleFirstRound(t *testing.T) {
+	srv, session := newTestServer(t)
+
+	done := make(chan int)
+	go func() {
+		req := httptest.NewRequest("POST", "/api/review-cycle", nil)
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		done <- w.Code
+	}()
+
+	waitForSubscriberCount(t, session, 1)
+
+	// Simulate user clicking "Finish Review"
+	session.WriteFiles()
+	session.Notify(SSEEvent{Type: "finish", Content: "test feedback"})
+
+	select {
+	case code := <-done:
+		if code != http.StatusOK {
+			t.Errorf("POST /api/review-cycle: got %d, want 200", code)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("review-cycle did not return after finish event")
+	}
+}
+
+func TestGetFilesList_MethodNotAllowed(t *testing.T) {
+	session := &Session{
+		Files: []*FileEntry{},
+	}
+	session.InitTestChannels()
+	srv, _ := NewServer(session, frontendFS, "", "", 0, "")
+	req := httptest.NewRequest("POST", "/api/files/list", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 405 {
+		t.Fatalf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestSessionIncludesReviewComments(t *testing.T) {
+	srv, sess := newTestServer(t)
+	sess.AddReviewComment("general note", "")
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	var result map[string]any
+	json.Unmarshal(w.Body.Bytes(), &result)
+	rc, ok := result["review_comments"].([]any)
+	if !ok {
+		t.Fatal("expected review_comments array in session response")
+	}
+	if len(rc) != 1 {
+		t.Errorf("expected 1 review comment, got %d", len(rc))
+	}
+}
+
+func TestFinishPromptIncludesAllScopesInComments(t *testing.T) {
+	srv, sess := newTestServer(t)
+	sess.AddReviewComment("address all issues", "")
+	if _, ok := sess.AddFileComment("test.md", "restructure this file", ""); !ok {
+		t.Fatal("AddFileComment failed")
+	}
+	if _, ok := sess.AddComment("test.md", 1, 1, "", "bug here", "", ""); !ok {
+		t.Fatal("AddComment failed")
+	}
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	comments, ok := resp["comments"].([]any)
+	if !ok || len(comments) != 3 {
+		t.Fatalf("expected 3 comments, got: %v", resp["comments"])
+	}
+	bodies := make([]string, len(comments))
+	for i, c := range comments {
+		bodies[i] = c.(map[string]any)["body"].(string)
+	}
+	for _, want := range []string{"address all issues", "restructure this file", "bug here"} {
+		if !contains(bodies, want) {
+			t.Errorf("comments should include %q, got bodies %v", want, bodies)
+		}
+	}
+}
+
+func contains(ss []string, want string) bool {
+	for _, s := range ss {
+		if s == want {
+			return true
+		}
+	}
+	return false
+}
+
+func TestReviewCommentsAPI(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// POST — create review comment
+	body := strings.NewReader(`{"body": "general note"}`)
+	req := httptest.NewRequest("POST", "/api/comments", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var c Comment
+	json.Unmarshal(w.Body.Bytes(), &c)
+	if c.Scope != "review" {
+		t.Errorf("expected scope 'review', got %q", c.Scope)
+	}
+
+	// GET — list review comments
+	req = httptest.NewRequest("GET", "/api/comments", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET expected 200, got %d", w.Code)
+	}
+	var comments []Comment
+	json.Unmarshal(w.Body.Bytes(), &comments)
+	if len(comments) != 1 {
+		t.Fatalf("expected 1, got %d", len(comments))
+	}
+
+	// PUT — update review comment
+	body = strings.NewReader(`{"body": "updated note"}`)
+	req = httptest.NewRequest("PUT", "/api/review-comment/"+c.ID, body)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// DELETE — single review comment
+	req = httptest.NewRequest("DELETE", "/api/review-comment/"+c.ID, nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DELETE expected 204, got %d", w.Code)
+	}
+
+	// GET — verify empty
+	req = httptest.NewRequest("GET", "/api/comments", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	json.Unmarshal(w.Body.Bytes(), &comments)
+	if len(comments) != 0 {
+		t.Errorf("expected 0 after delete, got %d", len(comments))
+	}
+}
+
+func TestReviewCommentRepliesAPI(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Create a review comment first
+	body := strings.NewReader(`{"body": "general note", "author": "reviewer"}`)
+	req := httptest.NewRequest("POST", "/api/comments", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST comment expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var c Comment
+	json.Unmarshal(w.Body.Bytes(), &c)
+
+	// POST reply
+	body = strings.NewReader(`{"body": "I will fix this", "author": "agent"}`)
+	req = httptest.NewRequest("POST", "/api/review-comment/"+c.ID+"/replies", body)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST reply expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var reply Reply
+	json.Unmarshal(w.Body.Bytes(), &reply)
+	if reply.Body != "I will fix this" {
+		t.Errorf("expected reply body 'I will fix this', got %q", reply.Body)
+	}
+	if reply.Author != "agent" {
+		t.Errorf("expected reply author 'agent', got %q", reply.Author)
+	}
+
+	// PUT reply — update
+	body = strings.NewReader(`{"body": "updated reply"}`)
+	req = httptest.NewRequest("PUT", "/api/review-comment/"+c.ID+"/replies/"+reply.ID, body)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT reply expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var updatedReply Reply
+	json.Unmarshal(w.Body.Bytes(), &updatedReply)
+	if updatedReply.Body != "updated reply" {
+		t.Errorf("expected updated body 'updated reply', got %q", updatedReply.Body)
+	}
+
+	// DELETE reply
+	req = httptest.NewRequest("DELETE", "/api/review-comment/"+c.ID+"/replies/"+reply.ID, nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("DELETE reply expected 204, got %d: %s", w.Code, w.Body.String())
+	}
+
+	// Verify reply is gone by checking the comment
+	comments := srv.session.Load().GetReviewComments()
+	if len(comments) != 1 {
+		t.Fatalf("expected 1 comment, got %d", len(comments))
+	}
+	if len(comments[0].Replies) != 0 {
+		t.Errorf("expected 0 replies after delete, got %d", len(comments[0].Replies))
+	}
+}
+
+func TestReviewCommentReplyNotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// POST reply to nonexistent comment
+	body := strings.NewReader(`{"body": "reply", "author": "agent"}`)
+	req := httptest.NewRequest("POST", "/api/review-comment/nonexistent/replies", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestPostFileScopedComment(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"body": "this file needs restructuring", "scope": "file"}`)
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var c Comment
+	json.Unmarshal(w.Body.Bytes(), &c)
+	if c.Scope != "file" {
+		t.Errorf("expected scope 'file', got %q", c.Scope)
+	}
+	if c.StartLine != 0 || c.EndLine != 0 {
+		t.Errorf("expected zero lines, got %d-%d", c.StartLine, c.EndLine)
+	}
+}
+
+func TestPostFileScopedCommentRequiresBody(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"scope": "file"}`)
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", w.Code)
+	}
+}
+
+func TestResolveReviewCommentAPI(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	// Create a review comment
+	body := strings.NewReader(`{"body": "needs fixing"}`)
+	req := httptest.NewRequest("POST", "/api/comments", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("POST expected 201, got %d: %s", w.Code, w.Body.String())
+	}
+	var c Comment
+	json.Unmarshal(w.Body.Bytes(), &c)
+
+	// Resolve it
+	body = strings.NewReader(`{"resolved": true}`)
+	req = httptest.NewRequest("PUT", "/api/review-comment/"+c.ID+"/resolve", body)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT resolve expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var resolved Comment
+	json.Unmarshal(w.Body.Bytes(), &resolved)
+	if !resolved.Resolved {
+		t.Error("expected comment to be resolved")
+	}
+
+	// Unresolve it
+	body = strings.NewReader(`{"resolved": false}`)
+	req = httptest.NewRequest("PUT", "/api/review-comment/"+c.ID+"/resolve", body)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("PUT unresolve expected 200, got %d: %s", w.Code, w.Body.String())
+	}
+	var unresolved Comment
+	json.Unmarshal(w.Body.Bytes(), &unresolved)
+	if unresolved.Resolved {
+		t.Error("expected comment to be unresolved")
+	}
+
+	// Not found
+	body = strings.NewReader(`{"resolved": true}`)
+	req = httptest.NewRequest("PUT", "/api/review-comment/nonexistent/resolve", body)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+func TestHandleConfig_AgentCmdEnabled(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	var data map[string]any
+	json.Unmarshal(w.Body.Bytes(), &data)
+	if data["agent_cmd_enabled"] != false {
+		t.Fatal("expected agent_cmd_enabled=false when not configured")
+	}
+	s.agentCmd = "claude -p"
+	w2 := httptest.NewRecorder()
+	s.ServeHTTP(w2, httptest.NewRequest("GET", "/api/config", nil))
+	json.Unmarshal(w2.Body.Bytes(), &data)
+	if data["agent_cmd_enabled"] != true {
+		t.Fatal("expected agent_cmd_enabled=true when configured")
+	}
+}
+
+func TestHandleConfig_IntegrationFields(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.projectDir = t.TempDir()
+	s.homeDir = t.TempDir()
+	s.reviewPath = "/tmp/test-review.json"
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	// Review path
+	if resp["review_path"] != "/tmp/test-review.json" {
+		t.Errorf("review_path = %v, want /tmp/test-review.json", resp["review_path"])
+	}
+
+	// Integration fields
+	avail, ok := resp["integrations_available"].([]any)
+	if !ok || len(avail) == 0 {
+		t.Error("integrations_available should be a non-empty array")
+	}
+	if _, ok := resp["integrations"]; !ok {
+		t.Error("integrations field should be present")
+	}
+	if _, ok := resp["any_integration_installed"]; !ok {
+		t.Error("any_integration_installed field should be present")
+	}
+
+	// Config pass-throughs
+	if resp["no_integration_check"] != false {
+		t.Errorf("no_integration_check = %v, want false", resp["no_integration_check"])
+	}
+	if resp["no_update_check"] != false {
+		t.Errorf("no_update_check = %v, want false", resp["no_update_check"])
+	}
+}
+
+func TestHandleConfig_CloseOnApproveAfterMs_OmittedWhenUnset(t *testing.T) {
+	s, _ := newTestServer(t)
+	// s.cfg.CloseOnApproveAfterMs is nil by default (zero value Config).
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resp["close_on_approve_after_ms"]; ok {
+		t.Errorf("close_on_approve_after_ms = %v, want omitted when unset", resp["close_on_approve_after_ms"])
+	}
+}
+
+func TestHandleConfig_CloseOnApproveAfterMs_IncludedWhenSet(t *testing.T) {
+	s, _ := newTestServer(t)
+	ms := 2500
+	s.cfg = Config{CloseOnApproveAfterMs: &ms}
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	got, ok := resp["close_on_approve_after_ms"].(float64)
+	if !ok || int(got) != 2500 {
+		t.Errorf("close_on_approve_after_ms = %v, want 2500", resp["close_on_approve_after_ms"])
+	}
+}
+
+func TestHandleConfig_CloseOnApproveAfterMs_OmittedWhenNegative(t *testing.T) {
+	s, _ := newTestServer(t)
+	ms := -1
+	s.cfg = Config{CloseOnApproveAfterMs: &ms}
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := resp["close_on_approve_after_ms"]; ok {
+		t.Errorf("close_on_approve_after_ms = %v, want omitted for negative value", resp["close_on_approve_after_ms"])
+	}
+}
+
+func TestHandleConfig_NoIntegrationCheck(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.cfg = Config{NoIntegrationCheck: true}
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp["no_integration_check"] != true {
+		t.Errorf("no_integration_check = %v, want true", resp["no_integration_check"])
+	}
+	integrations, ok := resp["integrations"].([]any)
+	if !ok {
+		t.Fatal("integrations should be an array")
+	}
+	if len(integrations) != 0 {
+		t.Errorf("integrations should be empty when check disabled, got %d", len(integrations))
+	}
+	if resp["any_integration_installed"] != false {
+		t.Errorf("any_integration_installed should be false when check disabled")
+	}
+}
+
+func TestFuzzyScore(t *testing.T) {
+	tests := []struct {
+		name    string
+		query   string
+		text    string
+		wantHit bool // true if score >= 0 (match), false if -1 (no match)
+	}{
+		{name: "empty query on empty text", query: "", text: "", wantHit: true},
+		{name: "empty query penalized by length", query: "", text: "anything.go", wantHit: false},
+		{name: "exact match", query: "main.go", text: "main.go", wantHit: true},
+		{name: "substring match", query: "main", text: "main.go", wantHit: true},
+		{name: "fuzzy match scattered", query: "mgo", text: "main.go", wantHit: true},
+		{name: "no match missing char", query: "xyz", text: "main.go", wantHit: false},
+		{name: "case insensitive", query: "main", text: "MAIN.GO", wantHit: true},
+		{name: "query longer than text", query: "toolongquery", text: "short", wantHit: false},
+		{name: "path separator bonus", query: "sg", text: "src/git.go", wantHit: true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			score := fuzzyScore(tt.query, tt.text)
+			gotHit := score >= 0
+			if gotHit != tt.wantHit {
+				t.Errorf("fuzzyScore(%q, %q) = %v, wantHit=%v", tt.query, tt.text, score, tt.wantHit)
+			}
+		})
+	}
+}
+
+func TestFuzzyScore_Ranking(t *testing.T) {
+	// Exact prefix match should score higher than scattered match
+	exactScore := fuzzyScore("main", "main.go")
+	scatteredScore := fuzzyScore("main", "middleware/auth_interceptor.go")
+	if exactScore <= scatteredScore {
+		t.Errorf("exact prefix score (%v) should beat scattered score (%v)", exactScore, scatteredScore)
+	}
+
+	// Shorter path with same match should score higher (length penalty)
+	shortScore := fuzzyScore("srv", "server.go")
+	longScore := fuzzyScore("srv", "internal/services/server_runner.go")
+	if shortScore <= longScore {
+		t.Errorf("short path score (%v) should beat long path score (%v)", shortScore, longScore)
+	}
+}
+
+func TestFuzzyFilterPaths(t *testing.T) {
+	paths := []string{
+		"main.go",
+		"server.go",
+		"session.go",
+		"internal/middleware.go",
+		"README.md",
+		"config.go",
+	}
+
+	t.Run("empty query returns nothing because length penalty", func(t *testing.T) {
+		results := fuzzyFilterPaths(paths, "", 3)
+		if len(results) != 0 {
+			t.Errorf("got %d results, want 0 (length penalty makes score < 0)", len(results))
+		}
+	})
+
+	t.Run("no matches returns empty", func(t *testing.T) {
+		results := fuzzyFilterPaths(paths, "xyz", 10)
+		if len(results) != 0 {
+			t.Errorf("got %d results, want 0", len(results))
+		}
+	})
+
+	t.Run("exact match appears first", func(t *testing.T) {
+		results := fuzzyFilterPaths(paths, "server.go", 5)
+		if len(results) == 0 {
+			t.Fatal("expected at least one result")
+		}
+		if results[0] != "server.go" {
+			t.Errorf("first result = %q, want %q", results[0], "server.go")
+		}
+	})
+
+	t.Run("substring match works", func(t *testing.T) {
+		results := fuzzyFilterPaths(paths, "sess", 5)
+		found := false
+		for _, r := range results {
+			if r == "session.go" {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("expected session.go in results: %v", results)
+		}
+	})
+
+	t.Run("limit caps results", func(t *testing.T) {
+		results := fuzzyFilterPaths(paths, "go", 2)
+		if len(results) > 2 {
+			t.Errorf("got %d results, want at most 2", len(results))
+		}
+	})
+
+	t.Run("nil paths returns empty", func(t *testing.T) {
+		results := fuzzyFilterPaths(nil, "test", 10)
+		if len(results) != 0 {
+			t.Errorf("got %d results, want 0", len(results))
+		}
+	})
+}
+
+func TestHandleSession_PlanMode(t *testing.T) {
+	session := &Session{
+		Mode:    "plan",
+		PlanDir: "/tmp/test-plan",
+		Files: []*FileEntry{
+			{Path: "auth-flow.md", FileType: "markdown", Content: "# Plan", Comments: []Comment{}},
+		},
+	}
+	session.InitTestChannels()
+	srv, _ := NewServer(session, frontendFS, "", "dev", 0, "")
+
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+
+	if resp["mode"] != "plan" {
+		t.Errorf("mode = %v, want 'plan'", resp["mode"])
+	}
+}
+
+func TestReadinessGate_Returns503WhenNotReady(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	endpoints := []string{
+		"/api/session",
+		"/api/config",
+		"/api/comments",
+	}
+	for _, ep := range endpoints {
+		req := httptest.NewRequest("GET", ep, nil)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+		if w.Code != http.StatusServiceUnavailable {
+			t.Errorf("%s: got status %d, want 503", ep, w.Code)
+		}
+		var body map[string]string
+		json.Unmarshal(w.Body.Bytes(), &body)
+		if body["status"] != "loading" {
+			t.Errorf("%s: got status=%q, want 'loading'", ep, body["status"])
+		}
+	}
+}
+
+func TestReadinessGate_HealthAlwaysOK(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/api/health", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("health: got status %d, want 200", w.Code)
+	}
+}
+
+func TestReadinessGate_Returns200AfterSetSession(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.md")
+	os.WriteFile(path, []byte("hello\n"), 0644)
+
+	session := &Session{
+		Mode:        "files",
+		RepoRoot:    dir,
+		ReviewRound: 1,
+
+		Files: []*FileEntry{
+			{
+				Path:     "test.md",
+				AbsPath:  path,
+				Status:   "added",
+				FileType: "markdown",
+				Content:  "hello\n",
+				FileHash: "sha256:testhash",
+				Comments: []Comment{},
+			},
+		},
+	}
+	session.InitTestChannels()
+
+	s.SetSession(session)
+
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("session after SetSession: got status %d, want 200", w.Code)
+	}
+}
+
+func TestRouteCommentByID(t *testing.T) {
+	tests := []struct {
+		name    string
+		trimmed string
+		want    commentRoute
+		ok      bool
+	}{
+		{"empty", "", commentRoute{}, false},
+		{"plain ID", "c5", commentRoute{kind: "comment", id: "c5"}, true},
+		{"replies", "c5/replies", commentRoute{kind: "reply", id: "c5", sub: ""}, true},
+		{"reply ID", "c5/replies/r2", commentRoute{kind: "reply", id: "c5", sub: "r2"}, true},
+		{"resolve", "c5/resolve", commentRoute{kind: "resolve", id: "c5"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := routeCommentByID(tt.trimmed)
+			if ok != tt.ok {
+				t.Fatalf("ok = %v, want %v", ok, tt.ok)
+			}
+			if got != tt.want {
+				t.Errorf("route = %+v, want %+v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestReadinessGate_Returns500OnInitError(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	s.SetInitErr(fmt.Errorf("no changed files detected"))
+
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("got status %d, want 500", w.Code)
+	}
+	var body map[string]string
+	json.Unmarshal(w.Body.Bytes(), &body)
+	if body["status"] != "error" {
+		t.Errorf("got status=%q, want 'error'", body["status"])
+	}
+	if !strings.Contains(body["message"], "no changed files") {
+		t.Errorf("got message=%q, want it to contain 'no changed files'", body["message"])
+	}
+}
+
+func TestSetPRInfo_AppearsInConfig(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	// Config should have no PR fields before SetPRInfo.
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	var before map[string]any
+	json.Unmarshal(w.Body.Bytes(), &before)
+	if _, ok := before["pr_url"]; ok {
+		t.Fatal("pr_url should be absent before SetPRInfo")
+	}
+
+	// Set PR info asynchronously.
+	s.SetPRInfo(&PRInfo{
+		URL:         "https://github.com/test/repo/pull/42",
+		Number:      42,
+		Title:       "fix: something",
+		IsDraft:     false,
+		State:       "OPEN",
+		BaseRefName: "main",
+		HeadRefName: "fix-branch",
+		AuthorLogin: "testuser",
+	})
+
+	// Config should now include PR fields.
+	req = httptest.NewRequest("GET", "/api/config", nil)
+	w = httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	var after map[string]any
+	json.Unmarshal(w.Body.Bytes(), &after)
+	if after["pr_url"] != "https://github.com/test/repo/pull/42" {
+		t.Errorf("pr_url = %v, want https://github.com/test/repo/pull/42", after["pr_url"])
+	}
+	if after["pr_number"].(float64) != 42 {
+		t.Errorf("pr_number = %v, want 42", after["pr_number"])
+	}
+	if after["pr_title"] != "fix: something" {
+		t.Errorf("pr_title = %v, want 'fix: something'", after["pr_title"])
+	}
+	if after["pr_author"] != "testuser" {
+		t.Errorf("pr_author = %v, want 'testuser'", after["pr_author"])
+	}
+}
+
+func TestSetPRInfo_ConcurrentSafe(t *testing.T) {
+	s, _ := newTestServer(t)
+
+	// Simulate the async pattern: SetSession makes server ready,
+	// then SetPRInfo fires from a goroutine while config requests arrive.
+	done := make(chan struct{})
+	go func() {
+		s.SetPRInfo(&PRInfo{
+			URL:    "https://github.com/test/repo/pull/1",
+			Number: 1,
+			Title:  "concurrent PR",
+		})
+		close(done)
+	}()
+
+	// Hit config concurrently — should not panic or race.
+	for i := 0; i < 10; i++ {
+		req := httptest.NewRequest("GET", "/api/config", nil)
+		w := httptest.NewRecorder()
+		s.ServeHTTP(w, req)
+		if w.Code != http.StatusOK {
+			t.Fatalf("config: got status %d, want 200", w.Code)
+		}
+	}
+	<-done
+}
+
+// TestAgentName is in server_agent_test.go (TestAgentName_Codex covers all cases).
+
+func TestFileCommentResolveAPI(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+
+	// Resolve
+	body := `{"resolved": true}`
+	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"/resolve?path=test.md", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("PUT resolve: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resolved Comment
+	json.Unmarshal(w.Body.Bytes(), &resolved)
+	if !resolved.Resolved {
+		t.Error("expected comment to be resolved")
+	}
+
+	// Unresolve
+	body = `{"resolved": false}`
+	req = httptest.NewRequest("PUT", "/api/comment/"+c.ID+"/resolve?path=test.md", strings.NewReader(body))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("PUT unresolve: status = %d", w.Code)
+	}
+	var unresolved Comment
+	json.Unmarshal(w.Body.Bytes(), &unresolved)
+	if unresolved.Resolved {
+		t.Error("expected comment to be unresolved")
+	}
+
+	// Not found
+	req = httptest.NewRequest("PUT", "/api/comment/nonexistent/resolve?path=test.md", strings.NewReader(`{"resolved": true}`))
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("resolve nonexistent: status = %d, want 404", w.Code)
+	}
+}
+
+func TestFileCommentReplyAPI(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+
+	// POST reply
+	body := strings.NewReader(`{"body": "done, fixed", "author": "agent"}`)
+	req := httptest.NewRequest("POST", "/api/comment/"+c.ID+"/replies?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 201 {
+		t.Fatalf("POST reply: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var reply Reply
+	json.Unmarshal(w.Body.Bytes(), &reply)
+	if reply.Body != "done, fixed" {
+		t.Errorf("reply body = %q", reply.Body)
+	}
+	if reply.Author != "agent" {
+		t.Errorf("reply author = %q", reply.Author)
+	}
+
+	// PUT reply
+	body = strings.NewReader(`{"body": "updated reply"}`)
+	req = httptest.NewRequest("PUT", "/api/comment/"+c.ID+"/replies/"+reply.ID+"?path=test.md", body)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("PUT reply: status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var updated Reply
+	json.Unmarshal(w.Body.Bytes(), &updated)
+	if updated.Body != "updated reply" {
+		t.Errorf("updated body = %q", updated.Body)
+	}
+
+	// DELETE reply
+	req = httptest.NewRequest("DELETE", "/api/comment/"+c.ID+"/replies/"+reply.ID+"?path=test.md", nil)
+	w = httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 204 {
+		t.Fatalf("DELETE reply: status = %d", w.Code)
+	}
+
+	// Verify reply is gone
+	comments := session.GetComments("test.md")
+	if len(comments[0].Replies) != 0 {
+		t.Errorf("expected 0 replies after delete, got %d", len(comments[0].Replies))
+	}
+}
+
+func TestFileCommentReplyNotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"body": "reply", "author": "agent"}`)
+	req := httptest.NewRequest("POST", "/api/comment/nonexistent/replies?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("POST reply to nonexistent: status = %d, want 404", w.Code)
+	}
+}
+
+func TestAPIUpdateComment_EmptyBody(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+
+	body := `{"body": ""}`
+	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"?path=test.md", strings.NewReader(body))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("PUT with empty body: status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleAgentRequest_NotConfigured(t *testing.T) {
+	srv, session := newTestServer(t)
+	session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+
+	body := strings.NewReader(`{"comment_id": "c1"}`)
+	req := httptest.NewRequest("POST", "/api/agent/request", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 400 {
+		t.Errorf("expected 400 when agent_cmd not configured, got %d", w.Code)
+	}
+}
+
+func TestHandleAgentRequest_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/agent/request", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+// --- handleCommits tests ---
+
+func TestHandleCommits_GET(t *testing.T) {
+	srv, session := newTestServer(t)
+
+	// Session with Mode "files" and no VCS — returns null/nil.
+	session.Lock()
+	session.Mode = "files"
+	session.Unlock()
+
+	req := httptest.NewRequest("GET", "/api/commits", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("GET /api/commits: status = %d, want 200", w.Code)
+	}
+	// Non-git session returns null (no commits).
+	body := strings.TrimSpace(w.Body.String())
+	if body != "null" {
+		t.Errorf("expected null for non-git session, got %s", body)
+	}
+}
+
+func TestHandleCommits_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/commits", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandleCommits_GitMode(t *testing.T) {
+	dir := testutil.InitTestRepo(t)
+	// Create a feature branch with a commit.
+	testutil.Git(t, dir, "checkout", "-b", "feature")
+	testutil.WriteFile(t, filepath.Join(dir, "new.go"), "package main")
+	testutil.Git(t, dir, "add", "new.go")
+	testutil.Git(t, dir, "commit", "-m", "add new file")
+
+	session := &Session{
+		Mode:        "git",
+		RepoRoot:    dir,
+		Branch:      "feature",
+		BaseRef:     "main",
+		VCS:         &GitVCS{},
+		ReviewRound: 1,
+		Files:       []*FileEntry{},
+	}
+	session.InitTestChannels()
+
+	srv, err := NewServer(session, frontendFS, "", "", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/commits", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var commits []CommitInfo
+	if err := json.Unmarshal(w.Body.Bytes(), &commits); err != nil {
+		t.Fatalf("JSON decode: %v", err)
+	}
+	if len(commits) == 0 {
+		t.Error("expected at least one commit")
+	}
+}
+
+// --- handleBranches tests ---
+
+func TestHandleBranches_NoVCS(t *testing.T) {
+	srv, session := newTestServer(t)
+	// Ensure VCS is nil (files mode).
+	session.Lock()
+	session.VCS = nil
+	session.Unlock()
+
+	req := httptest.NewRequest("GET", "/api/branches", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	var targets vcs.CompareTargets
+	if err := json.Unmarshal(w.Body.Bytes(), &targets); err != nil {
+		t.Fatalf("JSON decode: %v", err)
+	}
+	if targets.VCS != "" || targets.Detected != "" || len(targets.Local) != 0 || len(targets.Remote) != 0 {
+		t.Errorf("expected empty compare targets for no VCS, got %+v", targets)
+	}
+}
+
+func TestHandleBranches_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/branches", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandleBranches_WithGitVCS(t *testing.T) {
+	dir := testutil.InitTestRepo(t)
+
+	session := &Session{
+		Mode:        "git",
+		RepoRoot:    dir,
+		VCS:         &GitVCS{},
+		ReviewRound: 1,
+		Files:       []*FileEntry{},
+	}
+	session.InitTestChannels()
+
+	srv, err := NewServer(session, frontendFS, "", "", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/branches", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	// No remotes in test repo; local main is still listed.
+	var targets vcs.CompareTargets
+	if err := json.Unmarshal(w.Body.Bytes(), &targets); err != nil {
+		t.Fatalf("JSON decode: %v", err)
+	}
+	if targets.VCS != "git" {
+		t.Errorf("vcs = %q, want git", targets.VCS)
+	}
+	if len(targets.Local) == 0 {
+		t.Error("expected at least one local branch")
+	}
+}
+
+// --- handleBaseBranch tests ---
+
+func TestHandleBaseBranch_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/base-branch", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandleBaseBranch_EmptyBranch(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"branch": ""}`)
+	req := httptest.NewRequest("POST", "/api/base-branch", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for empty branch", w.Code)
+	}
+}
+
+func TestHandleBaseBranch_InvalidJSON(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`not json`)
+	req := httptest.NewRequest("POST", "/api/base-branch", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for invalid JSON", w.Code)
+	}
+}
+
+// --- handleEvents (SSE) tests ---
+
+func TestHandleEvents_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/events", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandleEvents_ReturnsAfterServerShutdown(t *testing.T) {
+	srv, session := newTestServer(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil)
+	w := newNotifyingResponseRecorder()
+	done := make(chan struct{})
+	go func() {
+		srv.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	waitForSubscriberCount(t, session, 1)
+	session.Notify(SSEEvent{Type: "server-shutdown"})
+	w.waitForWrite(t, "event: server-shutdown")
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("SSE handler kept the stream open after server-shutdown")
+	}
+}
+
+func TestHandleEvents_SSEHeaders(t *testing.T) {
+	srv, session := newTestServer(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	req := httptest.NewRequest(http.MethodGet, "/api/events", nil).WithContext(ctx)
+	w := newNotifyingResponseRecorder()
+	done := make(chan struct{})
+	go func() {
+		srv.ServeHTTP(w, req)
+		close(done)
+	}()
+
+	waitForSubscriberCount(t, session, 1)
+	session.Notify(SSEEvent{Type: "comments-changed"})
+	w.waitForWrite(t, "event: comments-changed")
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("SSE handler did not stop after request cancellation")
+	}
+
+	// Verify SSE headers.
+	ct := w.Header().Get("Content-Type")
+	if ct != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", ct)
+	}
+	cc := w.Header().Get("Cache-Control")
+	if cc != "no-cache" {
+		t.Errorf("Cache-Control = %q, want no-cache", cc)
+	}
+	conn := w.Header().Get("Connection")
+	if conn != "keep-alive" {
+		t.Errorf("Connection = %q, want keep-alive", conn)
+	}
+
+	// Verify event data was written.
+	body := w.Body.String()
+	if !strings.Contains(body, "event: comments-changed") {
+		t.Errorf("expected SSE event in body, got: %s", body)
+	}
+}
+
+// --- buildPlanFeedback tests ---
+
+func TestFinish_PlanModeNextCommand(t *testing.T) {
+	s, session := newTestServer(t)
+	session.Mode = "plan"
+	session.PlanDir = "/tmp/plans/my-feature"
+	session.AddComment("test.md", 1, 1, "", "expand step 2", "", "")
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	nextCmd, _ := resp["next_command"].(string)
+	if nextCmd != "hunkyard plan --name my-feature" {
+		t.Errorf("next_command = %q, want hunkyard plan --name my-feature", nextCmd)
+	}
+	prompt, _ := resp["prompt"].(string)
+	if !strings.Contains(prompt, "hunkyard plan --name my-feature") {
+		t.Errorf("prompt should include plan reconnect, got: %s", prompt)
+	}
+	if strings.Contains(prompt, "hunkyard --session") {
+		t.Errorf("prompt should not use --session for plan mode, got: %s", prompt)
+	}
+}
+
+// --- handleFileCommentResolve tests ---
+
+func TestHandleFileCommentResolve(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "fix this bug", "", "")
+
+	tests := []struct {
+		name       string
+		resolved   bool
+		wantStatus int
+	}{
+		{"resolve", true, 200},
+		{"unresolve", false, 200},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"resolved": %v}`, tt.resolved)
+			req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"/resolve?path=test.md", strings.NewReader(body))
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, req)
+			if w.Code != tt.wantStatus {
+				t.Errorf("status = %d, want %d, body = %s", w.Code, tt.wantStatus, w.Body.String())
+			}
+			var result Comment
+			json.Unmarshal(w.Body.Bytes(), &result)
+			if result.Resolved != tt.resolved {
+				t.Errorf("resolved = %v, want %v", result.Resolved, tt.resolved)
+			}
+		})
+	}
+}
+
+func TestHandleFileCommentResolve_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"resolved": true}`)
+	req := httptest.NewRequest("PUT", "/api/comment/nonexistent/resolve?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleFileCommentResolve_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/comment/c1/resolve?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandleFileCommentResolve_InvalidBody(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+
+	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"/resolve?path=test.md", strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for invalid JSON", w.Code)
+	}
+}
+
+// --- handleReviewCommentResolve tests ---
+
+func TestHandleReviewCommentResolve(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("general note", "")
+
+	tests := []struct {
+		name     string
+		resolved bool
+	}{
+		{"resolve", true},
+		{"unresolve", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			body := fmt.Sprintf(`{"resolved": %v}`, tt.resolved)
+			req := httptest.NewRequest("PUT", "/api/review-comment/"+c.ID+"/resolve", strings.NewReader(body))
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, req)
+			if w.Code != 200 {
+				t.Errorf("[%s] status = %d, want 200, body = %s", tt.name, w.Code, w.Body.String())
+			}
+			var result Comment
+			json.Unmarshal(w.Body.Bytes(), &result)
+			if result.Resolved != tt.resolved {
+				t.Errorf("resolved = %v, want %v", result.Resolved, tt.resolved)
+			}
+		})
+	}
+}
+
+func TestHandleReviewCommentResolve_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"resolved": true}`)
+	req := httptest.NewRequest("PUT", "/api/review-comment/nonexistent/resolve", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleReviewCommentResolve_InvalidBody(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("note", "")
+
+	req := httptest.NewRequest("PUT", "/api/review-comment/"+c.ID+"/resolve", strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleReviewCommentResolve_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/review-comment/c1/resolve", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+// --- handleReviewCommentUpdate tests ---
+
+func TestHandleReviewCommentUpdate_DELETE(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("delete me", "")
+
+	req := httptest.NewRequest("DELETE", "/api/review-comment/"+c.ID, nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 204 {
+		t.Errorf("DELETE: status = %d, want 204", w.Code)
+	}
+
+	// Verify deleted.
+	comments := session.GetReviewComments()
+	if len(comments) != 0 {
+		t.Errorf("expected 0 comments after delete, got %d", len(comments))
+	}
+}
+
+func TestHandleReviewCommentUpdate_DELETE_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("DELETE", "/api/review-comment/nonexistent", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleReviewCommentUpdate_PUT_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"body": "updated"}`)
+	req := httptest.NewRequest("PUT", "/api/review-comment/nonexistent", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleReviewCommentUpdate_PUT_EmptyBody(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("original", "")
+
+	body := strings.NewReader(`{"body": ""}`)
+	req := httptest.NewRequest("PUT", "/api/review-comment/"+c.ID, body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for empty body", w.Code)
+	}
+}
+
+func TestHandleReviewCommentUpdate_PUT_InvalidJSON(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("original", "")
+
+	req := httptest.NewRequest("PUT", "/api/review-comment/"+c.ID, strings.NewReader("not json"))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleReviewCommentUpdate_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/review-comment/c1", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+// --- handleReplyCRUD additional tests ---
+
+func TestHandleReplyCRUD_PUT_EmptyBody(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+	reply, _ := session.AddReply("test.md", c.ID, "first reply", "agent")
+
+	body := strings.NewReader(`{"body": ""}`)
+	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"/replies/"+reply.ID+"?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for empty reply body", w.Code)
+	}
+}
+
+func TestHandleReplyCRUD_PUT_InvalidJSON(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+	reply, _ := session.AddReply("test.md", c.ID, "first reply", "agent")
+
+	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"/replies/"+reply.ID+"?path=test.md", strings.NewReader("bad"))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for invalid JSON", w.Code)
+	}
+}
+
+func TestHandleReplyCRUD_PUT_NotFound(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+
+	body := strings.NewReader(`{"body": "updated"}`)
+	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"/replies/nonexistent?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404 for nonexistent reply", w.Code)
+	}
+}
+
+func TestHandleReplyCRUD_DELETE_NotFound(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+
+	req := httptest.NewRequest("DELETE", "/api/comment/"+c.ID+"/replies/nonexistent?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleReplyCRUD_POST_EmptyBody(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+
+	body := strings.NewReader(`{"body": "", "author": "agent"}`)
+	req := httptest.NewRequest("POST", "/api/comment/"+c.ID+"/replies?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for empty reply body", w.Code)
+	}
+}
+
+func TestHandleReplyCRUD_POST_InvalidJSON(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+
+	req := httptest.NewRequest("POST", "/api/comment/"+c.ID+"/replies?path=test.md", strings.NewReader("bad json"))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for invalid JSON", w.Code)
+	}
+}
+
+func TestHandleReplyCRUD_MethodNotAllowed(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+
+	req := httptest.NewRequest("PATCH", "/api/comment/"+c.ID+"/replies?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+// --- Review comment reply CRUD additional tests ---
+
+func TestReviewCommentReplyCRUD_PUT_EmptyBody(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("note", "")
+	reply, _ := session.AddReviewCommentReply(c.ID, "reply text", "agent")
+
+	body := strings.NewReader(`{"body": ""}`)
+	req := httptest.NewRequest("PUT", "/api/review-comment/"+c.ID+"/replies/"+reply.ID, body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for empty reply body", w.Code)
+	}
+}
+
+func TestReviewCommentReplyCRUD_PUT_NotFound(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("note", "")
+
+	body := strings.NewReader(`{"body": "updated"}`)
+	req := httptest.NewRequest("PUT", "/api/review-comment/"+c.ID+"/replies/nonexistent", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestReviewCommentReplyCRUD_DELETE_NotFound(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("note", "")
+
+	req := httptest.NewRequest("DELETE", "/api/review-comment/"+c.ID+"/replies/nonexistent", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestReviewCommentReplyCRUD_POST_EmptyBody(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("note", "")
+
+	body := strings.NewReader(`{"body": "", "author": "agent"}`)
+	req := httptest.NewRequest("POST", "/api/review-comment/"+c.ID+"/replies", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestReviewCommentReplyCRUD_POST_InvalidJSON(t *testing.T) {
+	srv, session := newTestServer(t)
+	c := session.AddReviewComment("note", "")
+
+	req := httptest.NewRequest("POST", "/api/review-comment/"+c.ID+"/replies", strings.NewReader("bad"))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// --- handleFileCommentUpdate additional tests ---
+
+func TestHandleFileCommentUpdate_DELETE(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "delete me", "", "")
+
+	req := httptest.NewRequest("DELETE", "/api/comment/"+c.ID+"?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Errorf("DELETE: status = %d, want 200", w.Code)
+	}
+	var resp map[string]string
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["status"] != "deleted" {
+		t.Errorf("expected status 'deleted', got %v", resp)
+	}
+}
+
+func TestHandleFileCommentUpdate_DELETE_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("DELETE", "/api/comment/nonexistent?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleFileCommentUpdate_PUT_NotFound(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"body": "updated"}`)
+	req := httptest.NewRequest("PUT", "/api/comment/nonexistent?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 404 {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandleFileCommentUpdate_PUT_InvalidJSON(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "original", "", "")
+
+	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"?path=test.md", strings.NewReader("bad"))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleFileCommentUpdate_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("PATCH", "/api/comment/c1?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+// --- handleHealth additional tests ---
+
+func TestHandleHealth_WithBrowserClients(t *testing.T) {
+	srv, session := newTestServer(t)
+	session.BrowserConnect()
+	defer session.BrowserDisconnect()
+
+	req := httptest.NewRequest("GET", "/api/health", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["browser_clients"] != true {
+		t.Errorf("browser_clients = %v, want true", resp["browser_clients"])
+	}
+	if resp["api_version"] != float64(APIVersion) {
+		t.Errorf("api_version = %v, want %d", resp["api_version"], APIVersion)
+	}
+}
+
+func TestHandleHealth_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/health", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandleShutdown(t *testing.T) {
+	pid := strconv.Itoa(os.Getpid())
+	tests := []struct {
+		name        string
+		method      string
+		query       string
+		headers     map[string]string
+		notReady    bool
+		withStop    bool
+		wantCode    int
+		wantStopped bool
+	}{
+		{name: "CLI request stops the daemon", method: "POST", query: "pid=" + pid, withStop: true, wantCode: http.StatusOK, wantStopped: true},
+		{name: "GET is not allowed", method: "GET", query: "pid=" + pid, withStop: true, wantCode: http.StatusMethodNotAllowed},
+		{name: "no stop func wired", method: "POST", query: "pid=" + pid, wantCode: http.StatusServiceUnavailable},
+		{name: "missing pid", method: "POST", withStop: true, wantCode: http.StatusConflict},
+		{name: "pid of another daemon", method: "POST", query: "pid=1", withStop: true, wantCode: http.StatusConflict},
+		{name: "still initialising", method: "POST", query: "pid=" + pid, notReady: true, withStop: true, wantCode: http.StatusServiceUnavailable},
+		{name: "pid of another daemon while initialising", method: "POST", query: "pid=1", notReady: true, withStop: true, wantCode: http.StatusConflict},
+		{name: "cross-site browser request", method: "POST", query: "pid=" + pid, headers: map[string]string{"Sec-Fetch-Site": "cross-site"}, withStop: true, wantCode: http.StatusForbidden},
+		{name: "same-origin page script", method: "POST", query: "pid=" + pid, headers: map[string]string{"Sec-Fetch-Site": "same-origin"}, withStop: true, wantCode: http.StatusForbidden},
+		{name: "request with Origin", method: "POST", query: "pid=" + pid, headers: map[string]string{"Origin": "http://localhost"}, withStop: true, wantCode: http.StatusForbidden},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var srv *Server
+			if tt.notReady {
+				var err error
+				if srv, err = NewServer(nil, frontendFS, "", "test", 0, ""); err != nil {
+					t.Fatal(err)
+				}
+			} else {
+				srv, _ = newTestServer(t)
+			}
+			stopped := false
+			if tt.withStop {
+				srv.SetStopFunc(func() { stopped = true })
+			}
+			req := httptest.NewRequest(tt.method, "/api/shutdown?"+tt.query, nil)
+			for k, v := range tt.headers {
+				req.Header.Set(k, v)
+			}
+			w := httptest.NewRecorder()
+			srv.ServeHTTP(w, req)
+			if w.Code != tt.wantCode {
+				t.Errorf("status = %d, want %d", w.Code, tt.wantCode)
+			}
+			if stopped != tt.wantStopped {
+				t.Errorf("stopped = %v, want %v", stopped, tt.wantStopped)
+			}
+			if tt.wantStopped && !strings.Contains(w.Body.String(), `"stopping"`) {
+				t.Errorf("body = %q, want status stopping", w.Body.String())
+			}
+		})
+	}
+}
+
+// flushOrderRecorder records whether the response was flushed before any
+// event reached the subscribed channel.
+type flushOrderRecorder struct {
+	*httptest.ResponseRecorder
+	events             chan SSEEvent
+	flushedBeforeEvent bool
+}
+
+func (r *flushOrderRecorder) Flush() {
+	if len(r.events) == 0 {
+		r.flushedBeforeEvent = true
+	}
+	r.ResponseRecorder.Flush()
+}
+
+func TestHandleFinish_ResponseCompleteBeforeFinishEvent(t *testing.T) {
+	srv, sess := newTestServer(t)
+	ch := sess.Subscribe()
+	defer sess.Unsubscribe(ch)
+
+	w := &flushOrderRecorder{ResponseRecorder: httptest.NewRecorder(), events: ch}
+	srv.ServeHTTP(w, httptest.NewRequest("POST", "/api/finish", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !w.flushedBeforeEvent {
+		t.Error("the finish response must be flushed before the finish event, which may stop the daemon")
+	}
+	if got, want := w.Header().Get("Content-Length"), strconv.Itoa(w.Body.Len()); got != want {
+		t.Errorf("Content-Length = %q, want %q so the response is complete on its own", got, want)
+	}
+	select {
+	case ev := <-ch:
+		if ev.Type != "finish" {
+			t.Errorf("event = %q, want finish", ev.Type)
+		}
+	default:
+		t.Error("no finish event was sent")
+	}
+}
+
+// --- handleFinish additional tests ---
+
+func TestHandleFinish_AllResolved(t *testing.T) {
+	srv, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "fix this", "", "")
+	session.SetCommentResolved("test.md", c.ID, true)
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	prompt, _ := resp["prompt"].(string)
+	if !strings.Contains(prompt, "resolved") {
+		t.Errorf("expected 'resolved' in prompt, got: %s", prompt)
+	}
+	if resp["approved"] != true {
+		t.Errorf("approved = %v, want true", resp["approved"])
+	}
+}
+
+func TestHandleFinish_PlanMode(t *testing.T) {
+	session := &Session{
+		Mode:        "plan",
+		PlanDir:     "/tmp/plans/test-plan",
+		RepoRoot:    t.TempDir(),
+		ReviewRound: 1,
+		Files: []*FileEntry{
+			{
+				Path:     "plan.md",
+				AbsPath:  "/tmp/plan.md",
+				Status:   "added",
+				FileType: "markdown",
+				Content:  "# Plan",
+				Comments: []Comment{{ID: "c1", Body: "needs work", StartLine: 1, EndLine: 1}},
+			},
+		},
+	}
+	session.InitTestChannels()
+	srv, err := NewServer(session, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	prompt, _ := resp["prompt"].(string)
+	if !strings.Contains(prompt, "hunkyard comment --plan") {
+		t.Errorf("plan mode finish should mention hunkyard comment --plan, got: %s", prompt)
+	}
+}
+
+func TestHandleFinish_WithStatus(t *testing.T) {
+	var buf strings.Builder
+	session := &Session{
+		Mode:        "files",
+		RepoRoot:    t.TempDir(),
+		ReviewRound: 1,
+		Files: []*FileEntry{
+			{
+				Path:     "test.md",
+				AbsPath:  "/tmp/test.md",
+				Status:   "added",
+				FileType: "markdown",
+				Content:  "hello",
+				Comments: []Comment{{ID: "c1", Body: "fix", StartLine: 1, EndLine: 1}},
+			},
+		},
+	}
+	session.InitTestChannels()
+	srv, err := NewServer(session, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Set status on the Server, not the Session.
+	srv.status = sesspkg.NewTestStatus(&buf, false)
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	output := buf.String()
+	if output == "" {
+		t.Error("expected status output")
+	}
+}
+
+func TestHandleFinish_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandleFinish_CloseOnApproveAfterMs_IncludedWhenSet(t *testing.T) {
+	srv, _ := newTestServer(t)
+	ms := 2500
+	srv.cfg = Config{CloseOnApproveAfterMs: &ms}
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["approved"] != true {
+		t.Errorf("approved = %v, want true", resp["approved"])
+	}
+	got, ok := resp["close_on_approve_after_ms"].(float64)
+	if !ok || int(got) != 2500 {
+		t.Errorf("close_on_approve_after_ms = %v, want 2500", resp["close_on_approve_after_ms"])
+	}
+}
+
+func TestHandleFinish_CloseOnApproveAfterMs_OmittedWhenUnset(t *testing.T) {
+	srv, _ := newTestServer(t)
+
+	req := httptest.NewRequest("POST", "/api/finish", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp["approved"] != true {
+		t.Errorf("approved = %v, want true", resp["approved"])
+	}
+	if _, ok := resp["close_on_approve_after_ms"]; ok {
+		t.Errorf("close_on_approve_after_ms = %v, want omitted when unset", resp["close_on_approve_after_ms"])
+	}
+}
+
+// --- handleFileComments additional tests ---
+
+func TestHandleFileComments_POST_FileScope(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"body": "file-level note", "scope": "file"}`)
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 201 {
+		t.Fatalf("status = %d, want 201, body = %s", w.Code, w.Body.String())
+	}
+	var c Comment
+	json.Unmarshal(w.Body.Bytes(), &c)
+	if c.Scope != "file" {
+		t.Errorf("scope = %q, want file", c.Scope)
+	}
+}
+
+func TestHandleFileComments_POST_EmptyBody(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"body": "", "start_line": 1, "end_line": 1}`)
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleFileComments_POST_InvalidLineRange(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"body": "test", "start_line": 0, "end_line": 1}`)
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for invalid line range", w.Code)
+	}
+}
+
+func TestHandleFileComments_POST_EndBeforeStart(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"body": "test", "start_line": 5, "end_line": 2}`)
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for end < start", w.Code)
+	}
+}
+
+func TestHandleFileComments_POST_InvalidJSON(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", strings.NewReader("bad"))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+func TestHandleFileComments_MissingPath(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/api/file/comments", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for missing path", w.Code)
+	}
+}
+
+func TestHandleFileComments_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("DELETE", "/api/file/comments?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+// --- handleConfig additional tests ---
+
+func TestHandleConfig_WithAgentCmd(t *testing.T) {
+	session := &Session{
+		Mode:        "files",
+		RepoRoot:    t.TempDir(),
+		ReviewRound: 1,
+		Files:       []*FileEntry{},
+	}
+	session.InitTestChannels()
+	srv, err := NewServer(session, frontendFS, "tester", "v2.0.0", 3000, "claude -p")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/config", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["agent_cmd_enabled"] != true {
+		t.Error("expected agent_cmd_enabled=true")
+	}
+}
+
+// --- handleSession scope tests ---
+
+func TestHandleSession_WithScope(t *testing.T) {
+	dir := testutil.InitTestRepo(t)
+	testutil.Git(t, dir, "checkout", "-b", "feature")
+	testutil.WriteFile(t, filepath.Join(dir, "new.go"), "package main\n")
+	testutil.Git(t, dir, "add", "new.go")
+	testutil.Git(t, dir, "commit", "-m", "add new file")
+
+	session := &Session{
+		Mode:        "git",
+		RepoRoot:    dir,
+		Branch:      "feature",
+		BaseRef:     "main",
+		VCS:         &GitVCS{},
+		ReviewRound: 1,
+		Files:       []*FileEntry{},
+	}
+	session.InitTestChannels()
+
+	srv, err := NewServer(session, frontendFS, "", "", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/session?scope=branch", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	if resp["mode"] != "git" {
+		t.Errorf("mode = %v, want git", resp["mode"])
+	}
+}
+
+// --- handleReviewComments additional tests ---
+
+func TestHandleReviewComments_POST_EmptyBody(t *testing.T) {
+	srv, _ := newTestServer(t)
+	body := strings.NewReader(`{"body": ""}`)
+	req := httptest.NewRequest("POST", "/api/comments", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for empty body", w.Code)
+	}
+}
+
+func TestHandleReviewComments_POST_InvalidJSON(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/comments", strings.NewReader("bad"))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400", w.Code)
+	}
+}
+
+// --- handleCommentByID additional tests ---
+
+func TestHandleCommentByID_EmptyID(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("PUT", "/api/comment/", strings.NewReader(`{"body": "test"}`))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for empty ID", w.Code)
+	}
+}
+
+// --- handleReviewCommentByID additional tests ---
+
+func TestHandleReviewCommentByID_EmptyID(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("PUT", "/api/review-comment/", strings.NewReader(`{"body": "test"}`))
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for empty ID", w.Code)
+	}
+}
+
+// --- handleFileDiff additional tests ---
+
+func TestHandleFileDiff_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/file/diff?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+// --- handleFile additional tests ---
+
+func TestHandleFile_MethodNotAllowed(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("POST", "/api/file?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 405 {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+// --- handleSession with commit parameter ---
+
+func TestHandleSession_WithCommit(t *testing.T) {
+	dir := testutil.InitTestRepo(t)
+	testutil.Git(t, dir, "checkout", "-b", "feature")
+	testutil.WriteFile(t, filepath.Join(dir, "new.go"), "package main\n")
+	testutil.Git(t, dir, "add", "new.go")
+	testutil.Git(t, dir, "commit", "-m", "add new file")
+	sha := testutil.Git(t, dir, "rev-parse", "HEAD")
+
+	session := &Session{
+		Mode:        "git",
+		RepoRoot:    dir,
+		Branch:      "feature",
+		BaseRef:     "main",
+		VCS:         &GitVCS{},
+		ReviewRound: 1,
+		Files:       []*FileEntry{},
+	}
+	session.InitTestChannels()
+
+	srv, err := NewServer(session, frontendFS, "", "", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/api/session?commit="+sha, nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	json.Unmarshal(w.Body.Bytes(), &resp)
+	files, ok := resp["files"].([]any)
+	if !ok {
+		t.Fatal("expected files array in response")
+	}
+	if len(files) == 0 {
+		t.Error("expected files when scoped to specific commit")
+	}
+}
+
+// --- handleFiles additional tests ---
+
+func TestHandleFiles_EmptyPath(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/files/", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 400 {
+		t.Errorf("status = %d, want 400 for empty path", w.Code)
+	}
+}
+
+func TestHandleFiles_PathTraversal_DotDot(t *testing.T) {
+	srv, _ := newTestServer(t)
+	req := httptest.NewRequest("GET", "/files/../../../etc/passwd", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	// Should return 400 or 403.
+	if w.Code == 200 {
+		t.Error("path traversal should not return 200")
+	}
+}
+
+// TestEvents_SafariCompat verifies the SSE stream sends an immediate `:\n\n`
+// comment frame (so Safari fires onopen) and continues sending heartbeats so
+// the connection isn't closed by the server's IdleTimeout. Both behaviors are
+// invisible to the user when working but produce "Could not connect" errors
+// in Safari when missing.
+func TestEvents_SafariCompat(t *testing.T) {
+	prev := sseHeartbeatInterval
+	sseHeartbeatInterval = 50 * time.Millisecond
+	t.Cleanup(func() { sseHeartbeatInterval = prev })
+
+	srv, _ := newTestServer(t)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	req, err := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/events", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	if resp.StatusCode != 200 {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "text/event-stream" {
+		t.Errorf("Content-Type = %q, want text/event-stream", got)
+	}
+
+	buf := make([]byte, 3)
+	if _, err := io.ReadFull(resp.Body, buf); err != nil {
+		t.Fatalf("reading initial frame: %v", err)
+	}
+	if string(buf) != ":\n\n" {
+		t.Errorf("initial frame = %q, want %q (Safari needs a body byte before onopen fires)", buf, ":\n\n")
+	}
+
+	heartbeat := make([]byte, 3)
+	if _, err := io.ReadFull(resp.Body, heartbeat); err != nil {
+		t.Fatalf("reading heartbeat frame: %v", err)
+	}
+	if string(heartbeat) != ":\n\n" {
+		t.Errorf("heartbeat frame = %q, want %q", heartbeat, ":\n\n")
+	}
+}
+
+func TestLiveRoutes_NotGatedByWithReady(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{
+		"/live", "/hunkyard-agent.js",
+		"/agent-protocol.js", "/agent-anchor-utils.js",
+		"/agent-scroll-utils.js",
+		"/agent-marker-overlay.js", "/agent-mutation-batcher.js",
+		"/agent-resolution.js", "/agent-reanchor-state.js",
+		"/agent-marker.css",
+	} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest("GET", path, nil)
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code == http.StatusServiceUnavailable {
+				t.Errorf("GET %s returned 503 before SetSession — must not be withReady gated", path)
+			}
+		})
+	}
+}
+
+func TestLive_ProtocolAndUtilsServedUnguarded(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/agent-protocol.js", "/agent-anchor-utils.js"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodGet, path, nil)
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("%s: want 200, got %d", path, w.Code)
+			}
+			if !strings.Contains(w.Header().Get("Content-Type"), "javascript") {
+				t.Fatalf("%s: want JS content-type, got %q", path, w.Header().Get("Content-Type"))
+			}
+			if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+				t.Errorf("%s: missing CORS header, got %q", path, got)
+			}
+		})
+	}
+}
+
+func TestAgentMarkerCSS_ServedUnguarded(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/agent-marker.css", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("got %d, want 200", w.Code)
+	}
+	ct := w.Header().Get("Content-Type")
+	if !strings.HasPrefix(ct, "text/css") {
+		t.Fatalf("content-type %q, want text/css*", ct)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, ".hunkyard-live-marker") {
+		end := 200
+		if len(body) < end {
+			end = len(body)
+		}
+		t.Fatalf("missing marker class in body: %s", body[:end])
+	}
+	if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+		t.Errorf("missing CORS header, got %q", got)
+	}
+}
+
+func TestLiveAssets_CORSHeader(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"/hunkyard-agent.js"} {
+		t.Run(path, func(t *testing.T) {
+			req := httptest.NewRequest("GET", path, nil)
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("GET %s status = %d", path, w.Code)
+			}
+			if got := w.Header().Get("Access-Control-Allow-Origin"); got != "*" {
+				t.Errorf("GET %s Access-Control-Allow-Origin = %q, want %q", path, got, "*")
+			}
+		})
+	}
+}
+
+func TestHandleSession_LiveFields(t *testing.T) {
+	s, session := newTestServer(t)
+	session.ReviewType = "live"
+	session.Origin = "http://localhost:3000"
+	session.ProxyPort = 54322
+
+	req := httptest.NewRequest("GET", "/api/session", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["review_type"] != "live" {
+		t.Errorf("review_type = %v, want live", resp["review_type"])
+	}
+	if resp["origin"] != "http://localhost:3000" {
+		t.Errorf("origin = %v", resp["origin"])
+	}
+	if v, _ := resp["proxy_port"].(float64); int(v) != 54322 {
+		t.Errorf("proxy_port = %v, want 54322", resp["proxy_port"])
+	}
+}
+
+func TestHandleFileComments_AcceptsDOMAnchor_AutoRegistersRoute(t *testing.T) {
+	s, session := newTestServer(t)
+	session.ReviewType = "live"
+	session.Origin = "http://localhost:3000"
+	session.Files = []*FileEntry{}
+
+	body := `{"start_line":0,"end_line":0,"body":"pin","dom_anchor":{"pathname":"/dashboard","css_selector":"#main > h2","tag_chain":["MAIN","H2"],"outer_html":"<h2>x</h2>","viewport_width":1280,"viewport_height":800}}`
+	req := httptest.NewRequest("POST", "/api/file/comments?path=/dashboard", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusCreated {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if ct := w.Result().Header.Get("Content-Type"); ct != "application/json" {
+		t.Errorf("committed Content-Type = %q, want application/json", ct)
+	}
+	var c Comment
+	json.NewDecoder(w.Body).Decode(&c)
+	if c.DOMAnchor == nil {
+		t.Fatal("DOMAnchor nil in response")
+	}
+	if c.DOMAnchor.Pathname != "/dashboard" {
+		t.Errorf("Pathname = %q", c.DOMAnchor.Pathname)
+	}
+
+	found := false
+	for _, fe := range session.Files {
+		if fe.Path == "/dashboard" {
+			found = true
+			if len(fe.Comments) != 1 {
+				t.Errorf("auto-registered route has %d comments, want 1", len(fe.Comments))
+			}
+		}
+	}
+	if !found {
+		t.Errorf("FileEntry for /dashboard was not auto-created on first pin")
+	}
+}
+
+func TestLive_PostFileCommentsWithDOMAnchor(t *testing.T) {
+	s, session := newTestServer(t)
+	session.ReviewType = "live"
+	session.Origin = "http://localhost:3000"
+	body := strings.NewReader(`{
+		"start_line": 0, "end_line": 0, "body": "looks off",
+		"dom_anchor": {
+			"pathname": "/dashboard",
+			"css_selector": "#main > h1:nth-of-type(1)",
+			"tag_chain": ["MAIN", "H1"],
+			"accessible_name": "Welcome",
+			"role": "heading",
+			"landmark": "main",
+			"outer_html": "<h1>Welcome</h1>",
+			"screenshot": "data:image/jpeg;base64,abc",
+			"viewport_width": 1280,
+			"viewport_height": 800
+		}
+	}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/file/comments?path=/dashboard", body)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusOK && w.Code != http.StatusCreated {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	var got Comment
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if got.DOMAnchor == nil {
+		t.Fatal("DOMAnchor not persisted")
+	}
+	if got.DOMAnchor.CSSSelector != "#main > h1:nth-of-type(1)" {
+		t.Fatalf("wrong selector: %q", got.DOMAnchor.CSSSelector)
+	}
+	if got.DOMAnchor.AccessibleName != "Welcome" {
+		t.Errorf("accessible_name lost: %q", got.DOMAnchor.AccessibleName)
+	}
+	if got.DOMAnchor.Role != "heading" {
+		t.Errorf("role lost: %q", got.DOMAnchor.Role)
+	}
+}
+
+func TestHandleFileComments_CodeComment_LineValidationUnchanged(t *testing.T) {
+	s, _ := newTestServer(t)
+	body := `{"start_line":0,"end_line":0,"body":"code comment"}`
+	req := httptest.NewRequest("POST", "/api/file/comments?path=test.md", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 for zero-line code comment", w.Code)
+	}
+}
+
+func TestHandleFileCommentUpdate_AcceptsDOMAnchor(t *testing.T) {
+	type tc struct {
+		name       string
+		seedAnchor *DOMAnchor
+		body       string
+		wantStatus int
+		wantAnchor func(*DOMAnchor) bool
+	}
+	cases := []tc{
+		{
+			name:       "PUT dom_anchor on existing live pin replaces anchor",
+			seedAnchor: &DOMAnchor{Pathname: "/dashboard", CSSSelector: "#old"},
+			body:       `{"body":"pin","dom_anchor":{"pathname":"/dashboard","css_selector":"#new","tag_chain":["MAIN","H2"],"outer_html":"<h2>x</h2>","viewport_width":1280,"viewport_height":800}}`,
+			wantStatus: http.StatusOK,
+			wantAnchor: func(a *DOMAnchor) bool { return a != nil && a.CSSSelector == "#new" },
+		},
+		{
+			name:       "PUT without dom_anchor preserves existing anchor (does not drop it)",
+			seedAnchor: &DOMAnchor{Pathname: "/dashboard", CSSSelector: "#keep"},
+			body:       `{"body":"pin updated"}`,
+			wantStatus: http.StatusOK,
+			wantAnchor: func(a *DOMAnchor) bool { return a != nil && a.CSSSelector == "#keep" },
+		},
+		{
+			name:       "PUT dom_anchor on code comment is rejected (only live pins re-anchor)",
+			seedAnchor: nil,
+			body:       `{"body":"x","dom_anchor":{"pathname":"/x","css_selector":"#y","tag_chain":["H1"],"outer_html":"<h1/>","viewport_width":1,"viewport_height":1}}`,
+			wantStatus: http.StatusBadRequest,
+			wantAnchor: func(a *DOMAnchor) bool { return a == nil },
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			s, session := newTestServer(t)
+			session.ReviewType = "live"
+			session.Origin = "http://localhost:3000"
+			session.Files = []*FileEntry{{
+				Path: "/dashboard", FileType: "live-route", Status: "added",
+				Comments: []Comment{{ID: "c1", Body: "seed", DOMAnchor: c.seedAnchor}},
+			}}
+			req := httptest.NewRequest("PUT", "/api/comment/c1?path=/dashboard", strings.NewReader(c.body))
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code != c.wantStatus {
+				t.Fatalf("status = %d, want %d, body = %s", w.Code, c.wantStatus, w.Body.String())
+			}
+			var stored *DOMAnchor
+			for _, fe := range session.Files {
+				for _, cm := range fe.Comments {
+					if cm.ID == "c1" {
+						stored = cm.DOMAnchor
+					}
+				}
+			}
+			if !c.wantAnchor(stored) {
+				t.Errorf("post-state DOMAnchor mismatch: %+v", stored)
+			}
+		})
+	}
+}
+
+func TestSSE_LiveRoundStart_Broadcasts(t *testing.T) {
+	prev := sseHeartbeatInterval
+	sseHeartbeatInterval = 50 * time.Millisecond
+	t.Cleanup(func() { sseHeartbeatInterval = prev })
+
+	srv, session := newTestServer(t)
+	session.ReviewType = "live"
+	session.SetLiveRoundStart(func(_, next int) {
+		session.Notify(SSEEvent{Type: "live-round-start", Round: next})
+	})
+
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	req, _ := http.NewRequestWithContext(ctx, "GET", ts.URL+"/api/events", nil)
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = resp.Body.Close() })
+
+	// Drain initial Safari frame.
+	tmp := make([]byte, 3)
+	if _, err := io.ReadFull(resp.Body, tmp); err != nil {
+		t.Fatalf("initial frame: %v", err)
+	}
+
+	// Wait for the server to register the subscriber before firing the event.
+	waitForSubscriberCount(t, session, 1)
+	session.FireOnLiveRoundStart(1, 2)
+
+	// Read until we see the live-round-start event.
+	scanCtx, scanCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer scanCancel()
+	got := readSSEUntil(t, scanCtx, resp.Body, "live-round-start")
+	if !strings.Contains(got, `"round":2`) {
+		t.Fatalf("missing round field: %q", got)
+	}
+}
+
+// readSSEUntil reads SSE frames until one with the given event name is seen
+// or the context expires. Returns the matching frame's full text.
+func readSSEUntil(t *testing.T, ctx context.Context, r io.Reader, eventName string) string {
+	t.Helper()
+	type res struct {
+		s   string
+		err error
+	}
+	ch := make(chan res, 1)
+	go func() {
+		buf := make([]byte, 0, 4096)
+		tmp := make([]byte, 256)
+		for {
+			n, err := r.Read(tmp)
+			if n > 0 {
+				buf = append(buf, tmp[:n]...)
+				// Split on blank line (\n\n).
+				for {
+					idx := bytes.Index(buf, []byte("\n\n"))
+					if idx < 0 {
+						break
+					}
+					frame := string(buf[:idx])
+					buf = buf[idx+2:]
+					if strings.Contains(frame, "event: "+eventName) {
+						ch <- res{s: frame}
+						return
+					}
+				}
+			}
+			if err != nil {
+				ch <- res{err: err}
+				return
+			}
+		}
+	}()
+	select {
+	case <-ctx.Done():
+		t.Fatalf("timeout waiting for SSE event %q", eventName)
+		return ""
+	case r := <-ch:
+		if r.err != nil {
+			t.Fatalf("SSE read error: %v", r.err)
+		}
+		return r.s
+	}
+}
+
+func TestPUTComment_AcceptsDriftedOnRound(t *testing.T) {
+	srv, session := newTestServer(t)
+	session.ReviewType = "live"
+	c, _ := session.AddComment("test.md", 1, 1, "", "live pin", "", "")
+	// Tag as a live pin so the patch path is meaningful.
+	session.Lock()
+	for i := range session.Files[0].Comments {
+		if session.Files[0].Comments[i].ID == c.ID {
+			session.Files[0].Comments[i].DOMAnchor = &DOMAnchor{Pathname: "/", CSSSelector: "h1"}
+		}
+	}
+	session.Unlock()
+
+	body := []byte(`{"drifted": true, "drifted_on_round": 4}`)
+	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"?path=test.md", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	session.RLock()
+	defer session.RUnlock()
+	var got *Comment
+	for i := range session.Files[0].Comments {
+		if session.Files[0].Comments[i].ID == c.ID {
+			got = &session.Files[0].Comments[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("comment not found after PUT")
+	}
+	if got.DriftedOnRound != 4 || !got.Drifted {
+		t.Fatalf("got %+v; want DriftedOnRound=4 Drifted=true", got)
+	}
+}
+
+// TestAPIDeleteComment_FansOutSSE pins down that DELETE /api/comment/{id}
+// emits a comments-changed SSE event. Without this fanout, the
+// frontend-agent's delete-affordance can't update other tabs (or even the
+// current tab's comment panel) until the watcher's mtime tick. Insert and
+// reply paths already broadcast (db0a12f, ea5297e); delete must too.
+func TestAPIDeleteComment_FansOutSSE(t *testing.T) {
+	s, session := newTestServer(t)
+	c, _ := session.AddComment("test.md", 1, 1, "", "to delete", "", "")
+
+	sub := session.Subscribe()
+	defer session.Unsubscribe(sub)
+
+	req := httptest.NewRequest("DELETE", "/api/comment/"+c.ID+"?path=test.md", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != 200 {
+		t.Fatalf("status = %d", w.Code)
+	}
+
+	select {
+	case ev := <-sub:
+		if ev.Type != "comments-changed" {
+			t.Errorf("event type = %q, want comments-changed", ev.Type)
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("no SSE event after DELETE — frontend tabs would stall on stale state")
+	}
+}
+
+// TestAPIResolveComment_WrongPathHint covers a comment stored under index.html
+// while the client sends the iframe route as ?path= when resolving.
+func TestAPIResolveComment_WrongPathHint(t *testing.T) {
+	srv, sess := newTestServer(t)
+	sess.Files = append(sess.Files, &FileEntry{
+		Path: "index.html",
+		Comments: []Comment{{
+			ID:        "web-1",
+			Body:      "imported pin",
+			DOMAnchor: &DOMAnchor{Pathname: "/preview-content", CSSSelector: "h1"},
+		}},
+	})
+
+	body := strings.NewReader(`{"resolved":true}`)
+	req := httptest.NewRequest("PUT", "/api/comment/web-1/resolve?path=/preview-content", body)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+	}
+	for _, f := range sess.Files {
+		if f.Path != "index.html" {
+			continue
+		}
+		for _, c := range f.Comments {
+			if c.ID == "web-1" && !c.Resolved {
+				t.Fatal("comment not resolved after PUT with route path hint")
+			}
+		}
+	}
+}
+
+// TestAPIResolveComment_FansOutSSE pins down that PUT
+// /api/comment/{id}/resolve emits a comments-changed SSE event for both
+// resolve and unresolve transitions, on both the file-scoped and
+// review-scoped routes. Insert/reply/delete already broadcast (db0a12f,
+// 2c8b87d); resolve must too — without it, the resolve-affordance can't
+// update other tabs (or the originating tab's review panel) until the
+// watcher's 1s mtime tick.
+func TestAPIResolveComment_FansOutSSE(t *testing.T) {
+	cases := []struct {
+		name     string
+		resolved bool
+	}{
+		{"resolve", true},
+		{"unresolve", false},
+	}
+	for _, tc := range cases {
+		t.Run("file-scoped/"+tc.name, func(t *testing.T) {
+			s, session := newTestServer(t)
+			c, _ := session.AddComment("test.md", 1, 1, "", "to resolve", "", "")
+			// For unresolve, flip it to resolved first (no SSE drained — we
+			// subscribe after).
+			if !tc.resolved {
+				session.SetCommentResolved("test.md", c.ID, true)
+			}
+
+			sub := session.Subscribe()
+			defer session.Unsubscribe(sub)
+
+			body := strings.NewReader(fmt.Sprintf(`{"resolved":%t}`, tc.resolved))
+			req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"/resolve?path=test.md", body)
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+			}
+
+			select {
+			case ev := <-sub:
+				if ev.Type != "comments-changed" {
+					t.Errorf("event type = %q, want comments-changed", ev.Type)
+				}
+			case <-time.After(500 * time.Millisecond):
+				t.Fatal("no SSE event after PUT resolve — frontend tabs would stall on stale state")
+			}
+		})
+
+		t.Run("review-scoped/"+tc.name, func(t *testing.T) {
+			s, session := newTestServer(t)
+			c := session.AddReviewComment("review-level", "alice")
+			if !tc.resolved {
+				session.ResolveReviewComment(c.ID, true)
+			}
+
+			sub := session.Subscribe()
+			defer session.Unsubscribe(sub)
+
+			body := strings.NewReader(fmt.Sprintf(`{"resolved":%t}`, tc.resolved))
+			req := httptest.NewRequest("PUT", "/api/review-comment/"+c.ID+"/resolve", body)
+			w := httptest.NewRecorder()
+			s.ServeHTTP(w, req)
+			if w.Code != http.StatusOK {
+				t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
+			}
+
+			select {
+			case ev := <-sub:
+				if ev.Type != "comments-changed" {
+					t.Errorf("event type = %q, want comments-changed", ev.Type)
+				}
+			case <-time.After(500 * time.Millisecond):
+				t.Fatal("no SSE event after PUT review-comment resolve")
+			}
+		})
+	}
+}
+
+// TestAPIDeleteComment_CascadesReplies pins down that deleting a parent
+// comment removes its nested replies. Replies live inside Comment.Replies, so
+// removing the parent struct cascades naturally — this test guards against a
+// future refactor that splits replies into a separate top-level slice without
+// updating delete to walk it.
+func TestAPIDeleteComment_CascadesReplies(t *testing.T) {
+	srv, sess := newTestServer(t)
+	c, _ := sess.AddComment("test.md", 1, 1, "", "parent", "", "alice")
+	if _, ok := sess.AddReply("test.md", c.ID, "reply 1", "bob"); !ok {
+		t.Fatal("AddReply 1 returned ok=false")
+	}
+	if _, ok := sess.AddReply("test.md", c.ID, "reply 2", "carol"); !ok {
+		t.Fatal("AddReply 2 returned ok=false")
+	}
+
+	req := httptest.NewRequest("DELETE", "/api/comment/"+c.ID+"?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if got := sess.GetComments("test.md"); len(got) != 0 {
+		t.Errorf("comments remain after parent delete = %d (replies should cascade with the parent struct)", len(got))
+	}
+}
+
+// --- handleSharePayload tests ---
+
+// --- handleUpsertPayload tests ---
+
+// --- handleMergeComments tests ---
+
+// TestHandleFileCommentsGitHubID verifies that the GET path serializes
+// Comment.GitHubID into the JSON response when the field is non-zero.
+// This locks the wire contract so consumers (the frontend) can
+// rely on the field being present for GitHub-synced comments.
+func TestHandleFileCommentsGitHubID(t *testing.T) {
+	srv, session := newTestServer(t)
+	session.Files[0].Comments = []Comment{
+		{
+			ID:        "gh-test-1",
+			StartLine: 1,
+			EndLine:   1,
+			Body:      "synced comment",
+			GitHubID:  12345,
+		},
+	}
+
+	req := httptest.NewRequest("GET", "/api/file/comments?path=test.md", nil)
+	w := httptest.NewRecorder()
+	srv.ServeHTTP(w, req)
+
+	if w.Code != 200 {
+		t.Fatalf("status = %d, want 200; body = %s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, `"github_id":12345`) {
+		t.Errorf("response missing github_id field:\n%s", body)
+	}
+}
+
+func TestThemesPage_ServedWithoutSession(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest("GET", "/themes", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("GET /themes = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "hunkyard-theme-preview.js") {
+		t.Errorf("GET /themes did not serve the theme preview page")
+	}
+}
+
+// Plan reviews started by the plan hook continue when the agent submits the
+// plan again, not by running `hunkyard plan --name`, which blocks in plan mode.
+func TestReviewCycle_PlanHookNextRound(t *testing.T) {
+	tests := []struct {
+		name     string
+		query    string
+		wantNext string
+		want     string
+		notWant  string
+	}{
+		{"manual hunkyard plan", "", "hunkyard plan --name my-feature", "hunkyard plan --name my-feature", "exit plan mode"},
+		{"plan mode hook", "?plan_hook=plan_mode", "", "exit plan mode again", "hunkyard plan --name"},
+		{"codex hook", "?plan_hook=codex", "", "end your turn with the revised plan", "hunkyard plan --name"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			s, session := newTestServer(t)
+			session.Mode = "plan"
+			session.PlanDir = "/tmp/plans/my-feature"
+			session.SetAwaitingFirstReview(true)
+			session.AddComment("test.md", 1, 1, "", "expand step 2", "", "")
+
+			done := make(chan *httptest.ResponseRecorder, 1)
+			go func() {
+				req := httptest.NewRequest("POST", "/api/review-cycle"+tc.query, nil)
+				w := httptest.NewRecorder()
+				s.ServeHTTP(w, req)
+				done <- w
+			}()
+
+			waitForSubscriberCount(t, session, 1)
+			finish := httptest.NewRecorder()
+			s.ServeHTTP(finish, httptest.NewRequest("POST", "/api/finish", nil))
+
+			check := func(who string, body []byte) {
+				t.Helper()
+				var resp map[string]any
+				if err := json.Unmarshal(body, &resp); err != nil {
+					t.Fatal(err)
+				}
+				if got, _ := resp["next_command"].(string); got != tc.wantNext {
+					t.Errorf("%s next_command = %q, want %q", who, got, tc.wantNext)
+				}
+				prompt, _ := resp["prompt"].(string)
+				if !strings.Contains(prompt, tc.want) {
+					t.Errorf("%s prompt missing %q:\n%s", who, tc.want, prompt)
+				}
+				if strings.Contains(prompt, tc.notWant) {
+					t.Errorf("%s prompt should not contain %q:\n%s", who, tc.notWant, prompt)
+				}
+				if !strings.Contains(prompt, "hunkyard comment --plan my-feature --reply-to") {
+					t.Errorf("%s prompt should keep the reply instruction:\n%s", who, prompt)
+				}
+			}
+			// The browser shows the same prompt the waiting agent gets.
+			check("finish", finish.Body.Bytes())
+
+			select {
+			case w := <-done:
+				check("review-cycle", w.Body.Bytes())
+			case <-time.After(2 * time.Second):
+				t.Fatal("review-cycle did not return in time")
+			}
+			if got := session.PlanHook(); got != "" {
+				t.Errorf("PlanHook() = %q after review-cycle returned, want empty", got)
+			}
+		})
+	}
+}
+
+func TestPlanHookParam(t *testing.T) {
+	tests := []struct {
+		name  string
+		mode  string
+		query string
+		want  string
+	}{
+		{"plan mode hook", "plan", "?plan_hook=plan_mode", "plan_mode"},
+		{"codex hook", "plan", "?plan_hook=codex", "codex"},
+		{"no param", "plan", "", ""},
+		{"unknown value", "plan", "?plan_hook=other", ""},
+		{"not a plan session", "files", "?plan_hook=plan_mode", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest("POST", "/api/review-cycle"+tc.query, nil)
+			if got := planHookParam(r, &Session{Mode: tc.mode}); got != tc.want {
+				t.Errorf("planHookParam = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}

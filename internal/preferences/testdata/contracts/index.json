@@ -1,0 +1,2288 @@
+{
+  "schema_version": 1,
+  "purpose": "284 Ruby source contracts mapped to executable Go tests, with explicit replacements for removed provider subprocesses and private Go APIs; synthetic fixtures only.",
+  "tests": [
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_claude_compatible_payload_without_turn_id_still_loads_and_captures",
+      "owner": "P11",
+      "go_test": "TestHookHostPayloadsAndAdvisoryFailures",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_records_the_neighboring_correction_context_without_current_prompt_duplication",
+      "owner": "P11",
+      "go_test": "TestHookTranscriptSessionConfinement",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_claude_identical_feedback_for_a_new_agent_action_is_not_lost",
+      "owner": "P11",
+      "go_test": "TestContextCannotSupplyIntentAndDistinguishesNewActions",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_context_ignores_foreign_sessions_and_symlink_targets",
+      "owner": "P11",
+      "go_test": "TestHookTranscriptSessionConfinement",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_context_skips_harness_metadata_before_the_corrected_agent_response",
+      "owner": "P11",
+      "go_test": "TestHookTranscriptSessionConfinement",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_emits_official_nonblocking_context_shape",
+      "owner": "P11",
+      "go_test": "TestHookHostPayloadsAndAdvisoryFailures",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_omits_additional_context_when_selection_has_no_rules",
+      "owner": "P11",
+      "go_test": "TestHookBoundaryReferenceCases/test_hook_omits_additional_context_when_selection_has_no_rules",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_maintenance_recursion_guard_does_not_read_state_or_capture",
+      "owner": "P11",
+      "go_test": "TestHookHostPayloadsAndAdvisoryFailures",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_malformed_and_oversized_input_fail_open_with_safe_diagnostics",
+      "owner": "P11",
+      "go_test": "TestHookHostPayloadsAndAdvisoryFailures",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_unreadable_generation_fails_open_without_prompt_in_diagnostic",
+      "owner": "P11",
+      "go_test": "TestHookBoundaryReferenceCases/test_hook_unreadable_generation_fails_open_without_prompt_in_diagnostic",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_capture_lock_failure_preserves_selected_context_and_fails_open",
+      "owner": "P11",
+      "go_test": "TestHookBoundaryReferenceCases/test_hook_capture_lock_failure_preserves_selected_context_and_fails_open",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_ordinary_prompt_injects_without_capture_and_correction_captures_once",
+      "owner": "P11",
+      "go_test": "TestHookBoundaryReferenceCases/test_hook_ordinary_prompt_injects_without_capture_and_correction_captures_once",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_secret_shaped_correction_is_not_captured",
+      "owner": "P11",
+      "go_test": "TestHookBoundaryReferenceCases/test_hook_secret_shaped_correction_is_not_captured",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_hook_adapter_never_reads_transcript_path_and_disk_errors_are_advisory",
+      "owner": "P11",
+      "go_test": "TestHookBoundaryReferenceCases/test_hook_adapter_never_reads_transcript_path_and_disk_errors_are_advisory",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_installer_merge_preserves_existing_hooks_and_adds_one_exact_handler",
+      "owner": "P11",
+      "go_test": "TestHookInstallerStrictMerge",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_installer_merge_replaces_only_older_learn_preferences_handlers",
+      "owner": "P11",
+      "go_test": "TestHookInstallerStrictMerge",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_installer_invalid_existing_json_fails_before_backup_or_write",
+      "owner": "P11",
+      "go_test": "TestHookInstallerStrictMerge",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_installer_merge_rejects_duplicate_json_keys",
+      "owner": "P11",
+      "go_test": "TestHookInstallerStrictMerge",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_installer_merge_rejects_null_hook_containers",
+      "owner": "P11",
+      "go_test": "TestHookInstallerStrictMerge",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_installer_install_is_atomic_backed_up_and_returns_manual_trust_action",
+      "owner": "P11",
+      "go_test": "TestHookInstallerStrictMerge",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_cron_runtime_path_fits_crontab_limits_with_a_large_interactive_path",
+      "owner": "P11",
+      "go_test": "TestCronMergeReferenceBoundaries",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_cron_merge_preserves_unrelated_bytes_and_is_idempotent",
+      "owner": "P11",
+      "go_test": "TestCronMergeReferenceBoundaries",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_cron_merge_replaces_one_marked_block_in_place",
+      "owner": "P11",
+      "go_test": "TestCronMergeReferenceBoundaries",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_cron_merge_rejects_unmatched_duplicate_and_nested_markers",
+      "owner": "P11",
+      "go_test": "TestCronMergeReferenceBoundaries",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_cron_install_failure_leaves_original_and_readback_mismatch_rolls_back",
+      "owner": "P11",
+      "go_test": "TestPreferenceCronInstallAndRollback",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/hook_installer_test.rb",
+      "test": "test_executable_resolver_prefers_recorded_codex_then_searches_path_and_rejects_directories",
+      "owner": "P11",
+      "go_test": "TestHookInstallerStrictMerge",
+      "provenance": "source-manifest.json#tests/hook_installer_test.rb; local-only replacement contract",
+      "status": "replaced",
+      "replacement_reason": "Hook and cron commands bind the current absolute Go executable. Recorded Codex/provider paths and PATH-based provider discovery are removed under the local-only requirement."
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_force_maintenance_recovers_malformed_records_and_blank_lines",
+      "owner": "P9",
+      "go_test": "TestMaintenanceValidationQuarantineAndLock",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_codex_runner_uses_exact_command_environment_and_isolated_input",
+      "owner": "P9",
+      "go_test": "TestMaintenanceNeverExecutesModelProviders",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; local-only replacement contract",
+      "status": "replaced",
+      "replacement_reason": "The local-only requirement removes provider/Open3 process execution, timeouts and provider stderr handling. Maintenance exports a digest-bound local request and accepts a host-created proposal file; installed fake Codex/Claude/Ruby executables are never invoked, including for an empty inbox."
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_changed_source_pack_is_staged_from_allowlisted_snapshot_only",
+      "owner": "P9",
+      "go_test": "TestMaintenanceBatchSourceBinding",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; isolated Go source binding / ordered catalog regression",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_batch_is_canonical_digest_bound_and_excludes_processed_observations",
+      "owner": "P9",
+      "go_test": "TestMaintenanceBatchSourceBinding",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; isolated Go source binding / ordered catalog regression",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_malformed_pending_line_is_quarantined_without_touching_inbox",
+      "owner": "P9",
+      "go_test": "TestMaintenanceValidationQuarantineAndLock",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "replaced",
+      "replacement_reason": "Read-only dry runs reject malformed pending records without writing quarantine. Mutating force/due exports quarantine malformed lines and retain valid inbox records. This strengthens the no-mutation preflight contract; the source builder wrote quarantine even on read-only failure."
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_prompt_states_the_maintenance_safety_contract",
+      "owner": "P9",
+      "go_test": "TestMaintenanceSkillContainsSafetyAndActionContract",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_prompt_supplies_the_cross_field_action_contract_missing_from_the_output_schema",
+      "owner": "P9",
+      "go_test": "TestMaintenanceSkillContainsSafetyAndActionContract",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_due_runs_once_force_bypasses_stamp_and_stamp_is_written_last",
+      "owner": "P9",
+      "go_test": "TestMaintenanceMirrorFailureAndMigrationMetadata",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_daily_success_preserves_completed_migration_metadata",
+      "owner": "P9",
+      "go_test": "TestMaintenanceMirrorFailureAndMigrationMetadata",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_model_and_validation_failures_do_not_stamp_and_due_retries",
+      "owner": "P9",
+      "go_test": "TestMaintenanceValidationQuarantineAndLock",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_audit_or_mirror_failure_does_not_stamp_and_is_retryable",
+      "owner": "P9",
+      "go_test": "TestMaintenanceMirrorFailureAndMigrationMetadata",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_retry_after_post_swap_failure_archives_previously_processed_inbox_lines",
+      "owner": "P9",
+      "go_test": "TestMaintenanceInterruptedPublicationPreservesConcurrentCapture",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_retry_archives_processed_pending_lines_before_running_full_audit",
+      "owner": "P9",
+      "go_test": "TestMaintenanceInterruptedPublicationPreservesConcurrentCapture",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_compatibility_mirror_failure_does_not_stamp_and_retries",
+      "owner": "P9",
+      "go_test": "TestMaintenanceMirrorFailureAndMigrationMetadata",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_codex_timeout_is_retryable_and_stderr_is_bounded_and_scrubbed",
+      "owner": "P9",
+      "go_test": "TestMaintenanceNeverExecutesModelProviders",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; local-only replacement contract",
+      "status": "replaced",
+      "replacement_reason": "The local-only requirement removes provider/Open3 process execution, timeouts and provider stderr handling. Maintenance exports a digest-bound local request and accepts a host-created proposal file; installed fake Codex/Claude/Ruby executables are never invoked, including for an empty inbox."
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_codex_failure_scrubs_binary_stderr_against_utf8_observation_excerpts",
+      "owner": "P9",
+      "go_test": "TestMaintenanceNeverExecutesModelProviders",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; local-only replacement contract",
+      "status": "replaced",
+      "replacement_reason": "The local-only requirement removes provider/Open3 process execution, timeouts and provider stderr handling. Maintenance exports a digest-bound local request and accepts a host-created proposal file; installed fake Codex/Claude/Ruby executables are never invoked, including for an empty inbox."
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_codex_failure_scrubs_rule_excerpts_and_examples_from_stderr",
+      "owner": "P9",
+      "go_test": "TestMaintenanceNeverExecutesModelProviders",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; local-only replacement contract",
+      "status": "replaced",
+      "replacement_reason": "The local-only requirement removes provider/Open3 process execution, timeouts and provider stderr handling. Maintenance exports a digest-bound local request and accepts a host-created proposal file; installed fake Codex/Claude/Ruby executables are never invoked, including for an empty inbox."
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_open3_executor_terminates_the_process_group_at_its_deadline",
+      "owner": "P9",
+      "go_test": "TestMaintenanceNeverExecutesModelProviders",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; local-only replacement contract",
+      "status": "replaced",
+      "replacement_reason": "The local-only requirement removes provider/Open3 process execution, timeouts and provider stderr handling. Maintenance exports a digest-bound local request and accepts a host-created proposal file; installed fake Codex/Claude/Ruby executables are never invoked, including for an empty inbox."
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_retention_keeps_current_and_at_least_one_prior_generation",
+      "owner": "P9",
+      "go_test": "TestMaintenanceRetentionPreservesOnePriorGeneration",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_empty_inbox_still_invokes_model_and_accepts_zero_proposal",
+      "owner": "P9",
+      "go_test": "TestMaintenanceNeverExecutesModelProviders",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; local-only replacement contract",
+      "status": "replaced",
+      "replacement_reason": "The local-only requirement removes provider/Open3 process execution, timeouts and provider stderr handling. Maintenance exports a digest-bound local request and accepts a host-created proposal file; installed fake Codex/Claude/Ruby executables are never invoked, including for an empty inbox."
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_dry_run_validates_without_durable_mutation",
+      "owner": "P9",
+      "go_test": "TestMaintenanceLocalProposalAndRecovery",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_nonblocking_lock_returns_already_running",
+      "owner": "P9",
+      "go_test": "TestMaintenanceValidationQuarantineAndLock",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/maintenance_test.rb",
+      "test": "test_success_archives_processed_observations_compacts_pending_and_writes_safe_report",
+      "owner": "P9",
+      "go_test": "TestMaintenanceLocalProposalAndRecovery",
+      "provenance": "source-manifest.json#tests/maintenance_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_legacy_reader_parses_one_safe_yaml_document_and_maps_scopes",
+      "owner": "P11",
+      "go_test": "TestMigrationReferenceParity/test_legacy_reader_parses_one_safe_yaml_document_and_maps_scopes",
+      "provenance": "migration.json#test_legacy_reader_parses_one_safe_yaml_document_and_maps_scopes",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_legacy_reader_rejects_aliases_objects_second_fence_and_invalid_rules_shapes",
+      "owner": "P11",
+      "go_test": "TestMigrationReferenceParity/test_legacy_reader_rejects_aliases_objects_second_fence_and_invalid_rules_shapes",
+      "provenance": "migration.json#test_legacy_reader_rejects_aliases_objects_second_fence_and_invalid_rules_shapes",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_migration_plan_deduplicates_seeds_and_real_examples_without_trusting_counts",
+      "owner": "P11",
+      "go_test": "TestMigrationReferenceParity/test_migration_plan_deduplicates_seeds_and_real_examples_without_trusting_counts",
+      "provenance": "migration.json#test_migration_plan_deduplicates_seeds_and_real_examples_without_trusting_counts",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_migration_dry_run_validates_without_changing_the_root",
+      "owner": "P11",
+      "go_test": "TestMigrationLocalBackupAndIdempotency",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_migration_backup_precedes_model_apply_and_second_run_is_idempotent",
+      "owner": "P11",
+      "go_test": "TestMigrationLocalBackupAndIdempotency",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_migration_failure_keeps_verified_backup_without_current_or_completion_state",
+      "owner": "P11",
+      "go_test": "TestMigrationFailureAndRetryBoundaries",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_idempotent_migration_repairs_a_missing_daily_success_stamp_without_model_or_generation_write",
+      "owner": "P11",
+      "go_test": "TestMigrationCompletionValidationAndStampRepair",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_migration_rejects_an_incomplete_completion_marker",
+      "owner": "P11",
+      "go_test": "TestMigrationCompletionValidationAndStampRepair",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_migration_retry_reuses_the_verified_backup_after_model_failure",
+      "owner": "P11",
+      "go_test": "TestMigrationFailureAndRetryBoundaries",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_migration_retry_after_post_swap_audit_failure_excludes_processed_observations",
+      "owner": "P11",
+      "go_test": "TestMigrationFailureAndRetryBoundaries",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_cli_capture_candidate_and_explicit_paths_are_private_and_deterministic",
+      "owner": "P11",
+      "go_test": "TestPreferencesCLIStateAndSafeFailureCodes",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_cli_reads_capture_feedback_from_stdin_and_maps_usage_validation_retry_and_audit_codes",
+      "owner": "P11",
+      "go_test": "TestPreferencesCLIStateAndSafeFailureCodes",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_cli_reports_only_the_safe_error_class_for_a_failed_migration",
+      "owner": "P11",
+      "go_test": "TestPreferencesCLIStateAndSafeFailureCodes",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_cli_dispatches_every_stable_command_and_status_contains_only_operational_data",
+      "owner": "P11",
+      "go_test": "TestPreferencesCLIStateAndSafeFailureCodes",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_cli_executable_runs_status_with_an_isolated_root",
+      "owner": "P11",
+      "go_test": "TestPreferencesBinaryWithoutRubyOrProviderCLI",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_cli_build_audit_and_retire_operate_on_real_canonical_state",
+      "owner": "P11",
+      "go_test": "TestPreferencesCLIStateAndSafeFailureCodes",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_audit_rejects_recorded_source_metadata_after_source_bytes_change",
+      "owner": "P11",
+      "go_test": "TestMaintenanceBatchSourceBinding",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; isolated Go source binding / ordered catalog regression",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/migration_cli_test.rb",
+      "test": "test_wrappers_map_legacy_commands_to_the_one_canonical_cli",
+      "owner": "P11",
+      "go_test": "TestPreferencesBinaryWithoutRubyOrProviderCLI",
+      "provenance": "source-manifest.json#tests/migration_cli_test.rb; local-only replacement contract",
+      "status": "replaced",
+      "replacement_reason": "The Go binary and installed Codex/Claude skills replace Ruby wrapper executables. All workflows use hunkyard preferences with the same canonical root; no Ruby wrapper is shipped."
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_naming_preferences_are_available_even_for_short_followups",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_naming_preferences_are_available_even_for_short_followups",
+      "provenance": "persona.json#test_naming_preferences_are_available_even_for_short_followups",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_standing_naming_survives_a_busy_repository_surface",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_standing_naming_survives_a_busy_repository_surface",
+      "provenance": "persona.json#test_standing_naming_survives_a_busy_repository_surface",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_renderer_emits_only_active_and_core_directives_without_private_rule_metadata",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_renderer_emits_only_active_and_core_directives_without_private_rule_metadata",
+      "provenance": "persona.json#test_renderer_emits_only_active_and_core_directives_without_private_rule_metadata",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_selector_applies_personal_precedence_exact_relevance_and_supersession_before_budgeting",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_selector_applies_personal_precedence_exact_relevance_and_supersession_before_budgeting",
+      "provenance": "persona.json#test_selector_applies_personal_precedence_exact_relevance_and_supersession_before_budgeting",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_selector_filters_normalized_global_duplicates_and_renderer_emits_one_global_bullet",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_selector_filters_normalized_global_duplicates_and_renderer_emits_one_global_bullet",
+      "provenance": "persona.json#test_selector_filters_normalized_global_duplicates_and_renderer_emits_one_global_bullet",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_repository_duplicate_suppresses_source_only_in_that_repository",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_repository_duplicate_suppresses_source_only_in_that_repository",
+      "provenance": "persona.json#test_repository_duplicate_suppresses_source_only_in_that_repository",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_disjoint_surface_duplicates_remain_rendered_and_only_prompt_relevant_personal_rules_suppress_sources",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_disjoint_surface_duplicates_remain_rendered_and_only_prompt_relevant_personal_rules_suppress_sources",
+      "provenance": "persona.json#test_disjoint_surface_duplicates_remain_rendered_and_only_prompt_relevant_personal_rules_suppress_sources",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_core_source_duplicate_is_suppressed_only_when_the_personal_surface_is_relevant",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_core_source_duplicate_is_suppressed_only_when_the_personal_surface_is_relevant",
+      "provenance": "persona.json#test_core_source_duplicate_is_suppressed_only_when_the_personal_surface_is_relevant",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_selector_filters_direct_conflicts_from_either_side",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_selector_filters_direct_conflicts_from_either_side",
+      "provenance": "persona.json#test_selector_filters_direct_conflicts_from_either_side",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_token_estimate_and_core_files_use_conservative_deterministic_budgets",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_token_estimate_and_core_files_use_conservative_deterministic_budgets",
+      "provenance": "persona.json#test_token_estimate_and_core_files_use_conservative_deterministic_budgets",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_selection_budget_uses_the_exact_six_group_omission_order_and_count",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_selection_budget_uses_the_exact_six_group_omission_order_and_count",
+      "provenance": "persona.json#test_selection_budget_uses_the_exact_six_group_omission_order_and_count",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_controlled_router_selects_only_exactly_relevant_surfaces",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_controlled_router_selects_only_exactly_relevant_surfaces",
+      "provenance": "persona.json#test_controlled_router_selects_only_exactly_relevant_surfaces",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_retryable_failure_job_work_routes_testing_guidance",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_retryable_failure_job_work_routes_testing_guidance",
+      "provenance": "persona.json#test_retryable_failure_job_work_routes_testing_guidance",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_renderer_generates_every_canonical_surface_file",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_renderer_generates_every_canonical_surface_file",
+      "provenance": "persona.json#test_renderer_generates_every_canonical_surface_file",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_controlled_router_recognizes_plural_apis",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_controlled_router_recognizes_plural_apis",
+      "provenance": "persona.json#test_controlled_router_recognizes_plural_apis",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_controlled_router_recognizes_plural_controllers",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_controlled_router_recognizes_plural_controllers",
+      "provenance": "persona.json#test_controlled_router_recognizes_plural_controllers",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_controlled_router_recognizes_plural_serializers",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_controlled_router_recognizes_plural_serializers",
+      "provenance": "persona.json#test_controlled_router_recognizes_plural_serializers",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_controlled_router_recognizes_plural_endpoints",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_controlled_router_recognizes_plural_endpoints",
+      "provenance": "persona.json#test_controlled_router_recognizes_plural_endpoints",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_controlled_router_recognizes_plural_migrations",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_controlled_router_recognizes_plural_migrations",
+      "provenance": "persona.json#test_controlled_router_recognizes_plural_migrations",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_controlled_router_recognizes_plural_workers",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_controlled_router_recognizes_plural_workers",
+      "provenance": "persona.json#test_controlled_router_recognizes_plural_workers",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_controlled_router_does_not_match_plural_substrings",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_controlled_router_does_not_match_plural_substrings",
+      "provenance": "persona.json#test_controlled_router_does_not_match_plural_substrings",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_selector_instance_reads_each_new_current_generation",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_selector_instance_reads_each_new_current_generation",
+      "provenance": "persona.json#test_selector_instance_reads_each_new_current_generation",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_persona_mirror_uses_manifest_paths_and_preserves_unknown_manual_files",
+      "owner": "P7",
+      "go_test": "TestPersonaMirrorConfinementAndManagedRemoval",
+      "provenance": "source-manifest.json#tests/persona_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_persona_mirror_rejects_symlinks_and_never_removes_headerless_obsolete_files",
+      "owner": "P7",
+      "go_test": "TestGenerationMirrorValidatesObsoleteFilesBeforeApplying",
+      "provenance": "source-manifest.json#tests/persona_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_persona_mirror_rejects_malformed_unsorted_duplicate_and_missing_manifest_paths",
+      "owner": "P7",
+      "go_test": "TestGenerationRejectsResignedInvalidArtifacts",
+      "provenance": "source-manifest.json#tests/persona_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_persona_mirror_rejects_file_parent_collisions_and_symlinked_roots_or_parents",
+      "owner": "P7",
+      "go_test": "TestPersonaMirrorConfinementAndManagedRemoval",
+      "provenance": "source-manifest.json#tests/persona_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_persona_mirror_fsyncs_each_renamed_or_unlinked_parent_and_the_root",
+      "owner": "P7",
+      "go_test": "TestPersonaMirrorSyncsRenamedAndRemovedParents",
+      "provenance": "source-manifest.json#tests/persona_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/persona_test.rb",
+      "test": "test_explicit_capture_renders_the_same_generation_seen_by_the_next_selector",
+      "owner": "P7",
+      "go_test": "TestPersonaReferenceParity/test_explicit_capture_renders_the_same_generation_seen_by_the_next_selector",
+      "provenance": "persona.json#test_explicit_capture_renders_the_same_generation_seen_by_the_next_selector",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_neighboring_context_is_sanitized_and_cannot_supply_durable_intent",
+      "owner": "P5",
+      "go_test": "TestContextCannotSupplyIntentAndDistinguishesNewActions",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_neighboring_context_drops_code_redacts_paths_and_preserves_evidence",
+      "owner": "P5",
+      "go_test": "TestContextCannotSupplyIntentAndDistinguishesNewActions",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_rejects_credentials_without_persisting_excerpt",
+      "owner": "P5",
+      "go_test": "TestPrivacyReferenceParity/credentials",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_caps_safe_utf8_excerpt_at_one_thousand_characters",
+      "owner": "P5",
+      "go_test": "TestPrivacyReferenceParity/excerpt_utf8",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_rejects_other_sensitive_and_large_pasted_content",
+      "owner": "P5",
+      "go_test": "TestPrivacyReferenceParity",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_redacts_ordinary_urls_before_they_can_be_persisted",
+      "owner": "P5",
+      "go_test": "TestPrivacyReferenceParity/url",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_task_local_rename_is_not_queued",
+      "owner": "P5",
+      "go_test": "TestCaptureCandidateIdempotencyAndPrivacy",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_durable_ruby_preference_is_queued_once",
+      "owner": "P5",
+      "go_test": "TestCaptureCandidateIdempotencyAndPrivacy",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_stored_identifiers_are_hashed_and_raw_values_never_reach_pending_file",
+      "owner": "P5",
+      "go_test": "TestCaptureCandidateIdempotencyAndPrivacy",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_store_rechecks_raw_input_before_writing_even_when_given_a_result",
+      "owner": "P5",
+      "go_test": "TestCaptureRejectsForgedPrivacyAndRepositoryAuthority",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_store_rejects_a_forged_result_without_the_raw_input",
+      "owner": "P5",
+      "go_test": "TestCaptureRejectsForgedPrivacyAndRepositoryAuthority",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_redacts_ssh_repository_urls_and_customer_email_addresses",
+      "owner": "P5",
+      "go_test": "TestPrivacyReferenceParity/ssh_email",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_rejects_non_prefix_pasted_code_blocks",
+      "owner": "P5",
+      "go_test": "TestPrivacyReferenceParity/late_code_block",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_config_uses_global_default_and_private_modes",
+      "owner": "P5",
+      "go_test": "TestDefaultPreferenceRootAndPrivateModes",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_config_rejects_empty_and_filesystem_root",
+      "owner": "P5",
+      "go_test": "TestConfigRoot",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_config_uses_dir_home_when_home_is_blank",
+      "owner": "P5",
+      "go_test": "TestBlankHomeUsesAccountHomeWithoutWriting",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_repository_identity_is_shared_by_linked_worktrees_with_different_origins",
+      "owner": "P5",
+      "go_test": "TestRepositoryIdentityReferenceParity",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_repository_identity_resolves_relative_common_directory",
+      "owner": "P5",
+      "go_test": "TestRepositoryIdentityReferenceParity",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_store_rejects_repository_keys_that_are_not_generated_safe_keys",
+      "owner": "P5",
+      "go_test": "TestCaptureRejectsForgedPrivacyAndRepositoryAuthority",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_store_fails_closed_when_exclusive_lock_cannot_be_acquired",
+      "owner": "P5",
+      "go_test": "TestCaptureLockFailure",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/privacy_capture_test.rb",
+      "test": "test_concurrent_appends_create_one_line_per_distinct_observation",
+      "owner": "P5",
+      "go_test": "TestCaptureConcurrentAppend",
+      "provenance": "source-manifest.json#tests/privacy_capture_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_schema_is_strict_at_every_object_boundary",
+      "owner": "P6",
+      "go_test": "TestProposalSchemaReferenceContract",
+      "provenance": "source-manifest.json#schemas/maintenance-proposal.json; runtime scope/schema assertions",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_model_schema_leaves_scope_cross_field_conditions_to_the_runtime_validator",
+      "owner": "P6",
+      "go_test": "TestProposalSchemaReferenceContract",
+      "provenance": "source-manifest.json#schemas/maintenance-proposal.json; runtime scope/schema assertions",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_model_output_schema_uses_only_supported_composition_keywords",
+      "owner": "P6",
+      "go_test": "TestProposalSchemaReferenceContract",
+      "provenance": "source-manifest.json#schemas/maintenance-proposal.json; runtime scope/schema assertions",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_parse_rejects_invalid_json",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_parse_rejects_invalid_json",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_parse_rejects_invalid_json",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_parse_rejects_a_non_document_shape",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_parse_rejects_a_non_document_shape",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_parse_rejects_a_non_document_shape",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_parse_rejects_duplicate_json_keys",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_parse_rejects_duplicate_json_keys",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_parse_rejects_duplicate_json_keys",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_parse_rejects_json_additions",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_parse_rejects_json_additions",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_parse_rejects_json_additions",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_parse_requires_an_integer_schema_version",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_parse_requires_an_integer_schema_version",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_parse_requires_an_integer_schema_version",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_parse_rejects_an_invalid_action_type",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_parse_rejects_an_invalid_action_type",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_parse_rejects_an_invalid_action_type",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_parse_rejects_an_invalid_surface",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_parse_rejects_an_invalid_surface",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_parse_rejects_an_invalid_surface",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_parse_rejects_model_derived_rule_fields",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_parse_rejects_model_derived_rule_fields",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_parse_rejects_model_derived_rule_fields",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_no_observation_no_change_daily_proposal_is_valid",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_no_observation_no_change_daily_proposal_is_valid",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_no_observation_no_change_daily_proposal_is_valid",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_wrong_input_digest",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_wrong_input_digest",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_wrong_input_digest",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_an_omitted_observation",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_an_omitted_observation",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_an_omitted_observation",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_a_duplicate_observation",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_a_duplicate_observation",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_a_duplicate_observation",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_an_unknown_observation_id",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_an_unknown_observation_id",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_an_unknown_observation_id",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_an_unknown_rule_id",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_an_unknown_rule_id",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_an_unknown_rule_id",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_global_inference_from_one_repository",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_global_inference_from_one_repository",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_global_inference_from_one_repository",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_a_directive_over_240_characters",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_rejects_a_directive_over_240_characters",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_a_directive_over_240_characters",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_a_directive_requiring_privacy_redaction",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_a_directive_requiring_privacy_redaction",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_a_directive_requiring_privacy_redaction",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_repository_scope_rejects_a_missing_repository_key",
+      "owner": "P6",
+      "go_test": "TestProposalParseReferenceParity/test_repository_scope_rejects_a_missing_repository_key",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_repository_scope_rejects_a_missing_repository_key",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_repository_scope_rejects_mismatched_evidence_repository",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_repository_scope_rejects_mismatched_evidence_repository",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_repository_scope_rejects_mismatched_evidence_repository",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_merge_across_incompatible_scopes_without_explicit_change_scope",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_merge_across_incompatible_scopes_without_explicit_change_scope",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_merge_across_incompatible_scopes_without_explicit_change_scope",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_a_supersession_cycle",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_a_supersession_cycle",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_a_supersession_cycle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_a_self_conflict",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_a_self_conflict",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_a_self_conflict",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_rejects_summary_counts_that_do_not_match_actions",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_rejects_summary_counts_that_do_not_match_actions",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_rejects_summary_counts_that_do_not_match_actions",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_changed_source_pack_rejects_incomplete_source_file_coverage",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_changed_source_pack_rejects_incomplete_source_file_coverage",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_changed_source_pack_rejects_incomplete_source_file_coverage",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_changed_source_pack_rejects_a_stale_source_citation",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_changed_source_pack_rejects_a_stale_source_citation",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_changed_source_pack_rejects_a_stale_source_citation",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_changed_source_pack_accepts_complete_fresh_source_file_coverage",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_changed_source_pack_accepts_complete_fresh_source_file_coverage",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_changed_source_pack_accepts_complete_fresh_source_file_coverage",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_source_rule_requires_matching_action_and_proposed_citations",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_source_rule_requires_matching_action_and_proposed_citations",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_source_rule_requires_matching_action_and_proposed_citations",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_validated_application_uses_authorized_catalog_and_returns_defensive_state",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_validated_application_uses_authorized_catalog_and_returns_defensive_state",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_validated_application_uses_authorized_catalog_and_returns_defensive_state",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_application_rejects_a_duck_typed_source_authority",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_application_rejects_a_duck_typed_source_authority",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_application_rejects_a_duck_typed_source_authority",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_application_rejects_nonidentical_catalog_authorities",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_application_rejects_nonidentical_catalog_authorities",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_application_rejects_nonidentical_catalog_authorities",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_application_rejects_plain_batch_rules_that_differ_from_the_selected_catalog",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_application_rejects_plain_batch_rules_that_differ_from_the_selected_catalog",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_application_rejects_plain_batch_rules_that_differ_from_the_selected_catalog",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_plain_batch_rules_use_the_injected_authorized_catalog_clock",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_plain_batch_rules_use_the_injected_authorized_catalog_clock",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_plain_batch_rules_use_the_injected_authorized_catalog_clock",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_application_rejects_a_public_untrusted_catalog_without_mutation",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_application_rejects_a_public_untrusted_catalog_without_mutation",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_application_rejects_a_public_untrusted_catalog_without_mutation",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_source_refresh_application_returns_metadata_only_from_fresh_source_pack",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_source_refresh_application_returns_metadata_only_from_fresh_source_pack",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_source_refresh_application_returns_metadata_only_from_fresh_source_pack",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refresh_source_pack_cannot_supersede_a_personal_rule",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refresh_source_pack_cannot_supersede_a_personal_rule",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refresh_source_pack_cannot_supersede_a_personal_rule",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_supersede_rule_cannot_rewrite_an_existing_source_successor",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_supersede_rule_cannot_rewrite_an_existing_source_successor",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_supersede_rule_cannot_rewrite_an_existing_source_successor",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_evidenced_personal_successor_may_supersede_a_source_predecessor",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_evidenced_personal_successor_may_supersede_a_source_predecessor",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_evidenced_personal_successor_may_supersede_a_source_predecessor",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_failed_application_is_transactional",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_failed_application_is_transactional",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_failed_application_is_transactional",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_ignore_and_confirm_apply_without_semantic_rewrites",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_ignore_and_confirm_apply_without_semantic_rewrites",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_ignore_and_confirm_apply_without_semantic_rewrites",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_merge_preserves_retained_id_and_personal_provenance",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_merge_preserves_retained_id_and_personal_provenance",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_merge_preserves_retained_id_and_personal_provenance",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_changes_wording_only_with_observation_evidence",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_changes_wording_only_with_observation_evidence",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_changes_wording_only_with_observation_evidence",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_explicit_change_scope_allows_a_cross_repository_merge",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_explicit_change_scope_allows_a_cross_repository_merge",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_explicit_change_scope_allows_a_cross_repository_merge",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_cross_scope_merge_must_match_the_change_scope_final_scope",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_cross_scope_merge_must_match_the_change_scope_final_scope",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_cross_scope_merge_must_match_the_change_scope_final_scope",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_cross_scope_repository_merge_rejects_mixed_repository_evidence",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_cross_scope_repository_merge_rejects_mixed_repository_evidence",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_cross_scope_repository_merge_rejects_mixed_repository_evidence",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_cross_scope_global_merge_accepts_two_repository_evidence",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_cross_scope_global_merge_accepts_two_repository_evidence",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_cross_scope_global_merge_accepts_two_repository_evidence",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_duplicate_change_scope_actions_for_a_merge_are_rejected",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_duplicate_change_scope_actions_for_a_merge_are_rejected",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_duplicate_change_scope_actions_for_a_merge_are_rejected",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_explicit_instruction_reason_requires_an_explicit_observation",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_explicit_instruction_reason_requires_an_explicit_observation",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_explicit_instruction_reason_requires_an_explicit_observation",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_merge_from_source_to_personal_provenance_strips_source_fields",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_merge_from_source_to_personal_provenance_strips_source_fields",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_merge_from_source_to_personal_provenance_strips_source_fields",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_supersede_creates_an_evidenced_replacement_and_keeps_both_stable_ids",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_supersede_creates_an_evidenced_replacement_and_keeps_both_stable_ids",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_supersede_creates_an_evidenced_replacement_and_keeps_both_stable_ids",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_quarantine_rebuilds_symmetric_conflict_links",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_quarantine_rebuilds_symmetric_conflict_links",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_quarantine_rebuilds_symmetric_conflict_links",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_mark_dormant_and_reactivate_recompute_status_from_local_evidence",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_mark_dormant_and_reactivate_recompute_status_from_local_evidence",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_mark_dormant_and_reactivate_recompute_status_from_local_evidence",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_confirm_rule_rejects_a_dormant_rule_and_leaves_catalog_unchanged",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_confirm_rule_rejects_a_dormant_rule_and_leaves_catalog_unchanged",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_confirm_rule_rejects_a_dormant_rule_and_leaves_catalog_unchanged",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_mark_dormant_rejects_an_already_dormant_rule",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_mark_dormant_rejects_an_already_dormant_rule",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_mark_dormant_rejects_an_already_dormant_rule",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_reactivate_requires_a_new_pending_confirming_observation",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_reactivate_requires_a_new_pending_confirming_observation",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_reactivate_requires_a_new_pending_confirming_observation",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_accepts_conservative_correction_wording",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_accepts_conservative_correction_wording",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_accepts_conservative_correction_wording",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_an_unrelated_semantic_rewrite",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_an_unrelated_semantic_rewrite",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_an_unrelated_semantic_rewrite",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_false_correction_evidence",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_false_correction_evidence",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_false_correction_evidence",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_weak_lexical_overlap",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_weak_lexical_overlap",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_weak_lexical_overlap",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_missing_correction_signal_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_missing_correction_signal_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_missing_correction_signal_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_surface_change_rejects_missing_correction_signal_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_surface_change_rejects_missing_correction_signal_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_surface_change_rejects_missing_correction_signal_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_accepts_symbol_keyed_positive_correction_signal",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_accepts_symbol_keyed_positive_correction_signal",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_accepts_symbol_keyed_positive_correction_signal",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_stored_correction_evidence_does_not_ground_a_new_refinement",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_stored_correction_evidence_does_not_ground_a_new_refinement",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_stored_correction_evidence_does_not_ground_a_new_refinement",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_prefer_to_avoid_polarity_inversion_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_prefer_to_avoid_polarity_inversion_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_prefer_to_avoid_polarity_inversion_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_avoid_to_prefer_polarity_inversion_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_avoid_to_prefer_polarity_inversion_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_avoid_to_prefer_polarity_inversion_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_use_to_do_not_use_polarity_inversion_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_use_to_do_not_use_polarity_inversion_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_use_to_do_not_use_polarity_inversion_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_use_to_never_use_polarity_inversion_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_use_to_never_use_polarity_inversion_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_use_to_never_use_polarity_inversion_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_do_not_use_to_use_polarity_inversion_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_do_not_use_to_use_polarity_inversion_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_do_not_use_to_use_polarity_inversion_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_rejects_never_use_to_use_polarity_inversion_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_rejects_never_use_to_use_polarity_inversion_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_rejects_never_use_to_use_polarity_inversion_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_rule_accepts_same_polarity_wording",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_rule_accepts_same_polarity_wording",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_rule_accepts_same_polarity_wording",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_refine_surface_narrowing_still_needs_correction_evidence",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_refine_surface_narrowing_still_needs_correction_evidence",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_refine_surface_narrowing_still_needs_correction_evidence",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_create_rule_rejects_target_rule_ids_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_create_rule_rejects_target_rule_ids_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_create_rule_rejects_target_rule_ids_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_confirm_rule_rejects_a_proposed_rule_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_confirm_rule_rejects_a_proposed_rule_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_confirm_rule_rejects_a_proposed_rule_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_mark_dormant_rejects_target_rule_ids_transactionally",
+      "owner": "P6",
+      "go_test": "TestProposalReferenceParity/test_mark_dormant_rejects_target_rule_ids_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_mark_dormant_rejects_target_rule_ids_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_direct_catalog_confirm_rejects_a_dormant_rule_transactionally",
+      "owner": "P6",
+      "go_test": "TestCatalogActionReferenceParity/test_direct_catalog_confirm_rejects_a_dormant_rule_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_direct_catalog_confirm_rejects_a_dormant_rule_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_direct_catalog_confirm_rejects_a_conflicted_rule_transactionally",
+      "owner": "P6",
+      "go_test": "TestCatalogActionReferenceParity/test_direct_catalog_confirm_rejects_a_conflicted_rule_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_direct_catalog_confirm_rejects_a_conflicted_rule_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_direct_catalog_confirm_rejects_a_superseded_rule_transactionally",
+      "owner": "P6",
+      "go_test": "TestCatalogActionReferenceParity/test_direct_catalog_confirm_rejects_a_superseded_rule_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_direct_catalog_confirm_rejects_a_superseded_rule_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_direct_catalog_rejects_repeated_dormancy_transactionally",
+      "owner": "P6",
+      "go_test": "TestCatalogActionReferenceParity/test_direct_catalog_rejects_repeated_dormancy_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_direct_catalog_rejects_repeated_dormancy_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_direct_catalog_rejects_dormancy_before_the_authorized_clock_threshold_transactionally",
+      "owner": "P6",
+      "go_test": "TestCatalogActionReferenceParity/test_direct_catalog_rejects_dormancy_before_the_authorized_clock_threshold_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_direct_catalog_rejects_dormancy_before_the_authorized_clock_threshold_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_direct_catalog_reactivation_rejects_duplicate_evidence_transactionally",
+      "owner": "P6",
+      "go_test": "TestCatalogActionReferenceParity/test_direct_catalog_reactivation_rejects_duplicate_evidence_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_direct_catalog_reactivation_rejects_duplicate_evidence_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/proposal_test.rb",
+      "test": "test_direct_catalog_explicit_reactivation_requires_explicit_new_evidence_transactionally",
+      "owner": "P6",
+      "go_test": "TestCatalogActionReferenceParity/test_direct_catalog_explicit_reactivation_requires_explicit_new_evidence_transactionally",
+      "provenance": "source-manifest.json#tests/proposal_test.rb; proposals.json#test_direct_catalog_explicit_reactivation_requires_explicit_new_evidence_transactionally",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_snapshot_imports_only_sorted_allowlisted_reference_files",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_snapshot_imports_only_sorted_allowlisted_reference_files",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_snapshot_digest_is_deterministic_and_changes_with_a_referenced_file",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_snapshot_digest_is_deterministic_and_changes_with_a_referenced_file",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_unreferenced_metadata_does_not_change_the_snapshot",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_unreferenced_metadata_does_not_change_the_snapshot",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_reference_section_ends_at_the_next_level_two_heading",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_reference_section_ends_at_the_next_level_two_heading",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_absolute_reference_is_rejected",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_absolute_reference_is_rejected",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_parent_traversal_reference_is_rejected",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_parent_traversal_reference_is_rejected",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_missing_reference_is_rejected",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_missing_reference_is_rejected",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_symlink_that_escapes_the_source_root_is_rejected",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_symlink_that_escapes_the_source_root_is_rejected",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_citation_requires_an_allowlisted_path_and_current_digest",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_citation_requires_an_allowlisted_path_and_current_digest",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_citation_becomes_stale_when_the_source_file_changes",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_citation_becomes_stale_when_the_source_file_changes",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_metadata_contains_only_digest_manifest_and_refresh_time",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_metadata_contains_only_digest_manifest_and_refresh_time",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_rule_validation_accepts_cross_cutting_core_and_surface_specific_rules",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_rule_validation_accepts_cross_cutting_core_and_surface_specific_rules",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_rule_validation_rejects_wrong_pack_stale_citation_and_non_active_import",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_rule_validation_rejects_wrong_pack_stale_citation_and_non_active_import",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_rule_validation_requires_surface_tier_for_single_surface_guidance",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_rule_validation_requires_surface_tier_for_single_surface_guidance",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_rule_validation_accepts_aligned_negative_guidance_about_the_discouraged_habit",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_rule_validation_accepts_aligned_negative_guidance_about_the_discouraged_habit",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_rule_validation_rejects_positive_advocacy_for_the_discouraged_habit",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_rule_validation_rejects_positive_advocacy_for_the_discouraged_habit",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_rule_validation_uses_the_nearest_positive_controller_for_a_discouraged_phrase",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_rule_validation_uses_the_nearest_positive_controller_for_a_discouraged_phrase",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/source_pack_test.rb",
+      "test": "test_rule_validation_honors_an_immediate_contrastive_negation",
+      "owner": "P8",
+      "go_test": "TestSourcePackReferenceParity/test_rule_validation_honors_an_immediate_contrastive_negation",
+      "provenance": "source-pack-metadata.json and synthetic source-pack fixture",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_explicit_global_feedback_is_active_on_first_observation",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_explicit_global_feedback_is_active_on_first_observation",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_duplicate_confirmation_does_not_erase_explicit_evidence",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_duplicate_confirmation_does_not_erase_explicit_evidence",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_explicit_feedback_promotes_a_matching_inferred_rule_origin",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_explicit_feedback_promotes_a_matching_inferred_rule_origin",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_ordinary_correction_needs_a_distinct_session",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_ordinary_correction_needs_a_distinct_session",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_inferred_global_promotion_needs_two_repositories",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_inferred_global_promotion_needs_two_repositories",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_personal_rule_becomes_core_after_five_observations_in_three_sessions",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_personal_rule_becomes_core_after_five_observations_in_three_sessions",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_source_pack_core_tier_remains_active_without_personal_evidence",
+      "owner": "P4",
+      "go_test": "TestGenerationSourceCitationsAndRollback",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; isolated Go source binding / ordered catalog regression",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_personal_rule_outranks_conflicting_source_pack_rule",
+      "owner": "P4",
+      "go_test": "TestGenerationSourceCitationsAndRollback",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; isolated Go source binding / ordered catalog regression",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_active_and_core_rules_do_not_decay",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_active_and_core_rules_do_not_decay",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_unconfirmed_candidate_becomes_dormant_at_one_hundred_eighty_days",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_unconfirmed_candidate_becomes_dormant_at_one_hundred_eighty_days",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_retirement_only_happens_through_an_explicit_action",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_retirement_only_happens_through_an_explicit_action",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_model_action_cannot_supply_derived_status_or_evidence",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_model_action_cannot_supply_derived_status_or_evidence",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_model_action_cannot_forge_explicit_evidence_on_an_observation",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_model_action_cannot_forge_explicit_evidence_on_an_observation",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_untrusted_catalog_seed_cannot_forge_status_driving_state",
+      "owner": "P4",
+      "go_test": "TestGenerationAuthorityBoundary",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_confirm_uses_the_catalog_rule_and_ignores_caller_state",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_confirm_uses_the_catalog_rule_and_ignores_caller_state",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_rule_validator_requires_exact_fields_and_iso_string_timestamps",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_rule_validator_requires_exact_fields_and_iso_string_timestamps",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_rule_validator_requires_complete_source_provenance_and_rejects_it_on_personal_rules",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_rule_validator_requires_complete_source_provenance_and_rejects_it_on_personal_rules",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_supersedes_graph_rejects_cycles",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_supersedes_graph_rejects_cycles",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_inverse_supersession_fields_cannot_hide_a_cycle",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_inverse_supersession_fields_cannot_hide_a_cycle",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_symmetric_conflict_is_valid_when_both_rules_are_quarantined",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_symmetric_conflict_is_valid_when_both_rules_are_quarantined",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_one_sided_or_active_conflicts_are_rejected",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_one_sided_or_active_conflicts_are_rejected",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_self_conflict_is_rejected",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_self_conflict_is_rejected",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_unknown_conflict_target_is_rejected",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_unknown_conflict_target_is_rejected",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_conflict_actions_update_and_quarantine_both_rules",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_conflict_actions_update_and_quarantine_both_rules",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_examples_are_sanitized_and_capped_at_two",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_examples_are_sanitized_and_capped_at_two",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_rule_validator_rejects_unsanitized_examples",
+      "owner": "P4",
+      "go_test": "TestStateReferenceParity/test_rule_validator_rejects_unsanitized_examples",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_rule_catalog_rejects_more_than_two_caller_examples_before_recomputing",
+      "owner": "P4",
+      "go_test": "TestRuleStrictFieldsAndExamples",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_generation_writes_deterministic_versioned_canonical_files",
+      "owner": "P4",
+      "go_test": "TestGenerationPublication",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_generation_recomputes_forged_derived_fields_before_persisting",
+      "owner": "P4",
+      "go_test": "TestGenerationAuthorityBoundary",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_commit_rejects_rule_or_source_pack_fields_its_loader_would_reject",
+      "owner": "P4",
+      "go_test": "TestGenerationAuthorityBoundary",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_commit_accepts_a_source_rule_with_an_exact_transaction_citation",
+      "owner": "P4",
+      "go_test": "TestGenerationSourceCitationsAndRollback",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_commit_rejects_missing_stale_unknown_and_wrong_pack_citations_before_publication",
+      "owner": "P4",
+      "go_test": "TestGenerationSourceCitationsAndRollback",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_successful_commit_refreshes_the_versioned_source_pack_mirror_without_prose_or_paths",
+      "owner": "P4",
+      "go_test": "TestGenerationSourceCitationsAndRollback",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_rollback_refreshes_the_source_pack_mirror_from_the_selected_generation",
+      "owner": "P4",
+      "go_test": "TestGenerationSourceCitationsAndRollback",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_untrusted_commit_cannot_forge_status_driving_state_and_preserves_current",
+      "owner": "P4",
+      "go_test": "TestGenerationAuthorityBoundary",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_untrusted_commit_can_round_trip_unchanged_validated_current_rules",
+      "owner": "P4",
+      "go_test": "TestGenerationAuthorityBoundary",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_validated_current_catalog_action_can_commit_a_trusted_rule_set",
+      "owner": "P4",
+      "go_test": "TestGenerationAuthorityBoundary",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_public_catalog_cannot_issue_a_commit_capability_with_a_forged_clock",
+      "owner": "P4",
+      "go_test": "TestGenerationAuthorityBoundary",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; local-only replacement contract",
+      "status": "replaced",
+      "replacement_reason": "Go catalogs and validated rule sets are package-private. Foreign issuers and raw changed records cannot publish; the browser/CLI cannot construct a catalog or supply a clock. Config.Clock remains a trusted embedding/test input."
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_catalog_action_result_cannot_mutate_an_authorized_rule_set",
+      "owner": "P4",
+      "go_test": "TestGenerationAuthorityBoundary",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_commit_self_loads_the_completed_candidate_before_swapping_current",
+      "owner": "P4",
+      "go_test": "TestGenerationRejectsResignedInvalidArtifacts",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_malformed_aliased_tagged_and_wrong_version_yaml_fail_closed",
+      "owner": "P4",
+      "go_test": "TestGenerationRejectsResignedInvalidArtifacts",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_malformed_and_wrong_version_manifest_fail_closed",
+      "owner": "P4",
+      "go_test": "TestGenerationRejectsResignedInvalidArtifacts",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_failed_commit_does_not_change_current_or_compatibility_persona",
+      "owner": "P4",
+      "go_test": "TestGenerationCrashRecovery",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_successful_commit_uses_relative_symlink_to_complete_immutable_generation",
+      "owner": "P4",
+      "go_test": "TestGenerationPublication",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_persona_manifest_named_files_are_integrity_protected",
+      "owner": "P4",
+      "go_test": "TestGenerationRejectsResignedInvalidArtifacts",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_loader_rejects_symlinked_generation_and_persona_artifacts",
+      "owner": "P4",
+      "go_test": "TestGenerationRejectsResignedInvalidArtifacts",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_mirror_failure_after_publication_is_reported_without_raising_or_rollback",
+      "owner": "P4",
+      "go_test": "TestGenerationCrashRecovery",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_source_pack_mirror_failure_does_not_erase_a_successful_persona_mirror",
+      "owner": "P4",
+      "go_test": "TestGenerationMirrorIndependenceAndRepair",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_mid_apply_persona_failure_keeps_current_attempts_source_mirror_and_cleans_staging",
+      "owner": "P4",
+      "go_test": "TestMirrorInterruptionPreservesPublicationAndRollback",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_successful_source_pack_submirror_does_not_erase_an_earlier_persona_error",
+      "owner": "P4",
+      "go_test": "TestGenerationMirrorIndependenceAndRepair",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_source_pack_mirror_refuses_manual_content_and_clears_after_a_later_repair",
+      "owner": "P4",
+      "go_test": "TestGenerationMirrorIndependenceAndRepair",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_source_pack_mirror_refuses_canonical_yaml_without_the_generated_signature",
+      "owner": "P4",
+      "go_test": "TestGenerationMirrorIndependenceAndRepair",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_properly_signed_source_pack_mirror_is_refreshed",
+      "owner": "P4",
+      "go_test": "TestGenerationMirrorIndependenceAndRepair",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_simultaneous_mirror_failures_are_aggregated_after_publication",
+      "owner": "P4",
+      "go_test": "TestGenerationMirrorIndependenceAndRepair",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_pre_swap_failure_preserves_existing_mirror_repair_state",
+      "owner": "P4",
+      "go_test": "TestMirrorInterruptionPreservesPublicationAndRollback",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_mirror_never_follows_symlinks_or_deletes_headerless_files",
+      "owner": "P4",
+      "go_test": "TestPersonaMirrorConfinementAndManagedRemoval",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_mirror_never_follows_a_symlinked_parent_directory",
+      "owner": "P4",
+      "go_test": "TestPersonaMirrorConfinementAndManagedRemoval",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_mirror_does_not_overwrite_a_manually_replaced_managed_file",
+      "owner": "P4",
+      "go_test": "TestGenerationMirrorNeverOverwritesManualFiles",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_rollback_switches_current_to_an_existing_complete_generation",
+      "owner": "P4",
+      "go_test": "TestGenerationRollbackAndMirrorRepair",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_rollback_keeps_the_selected_generation_when_mirroring_needs_repair",
+      "owner": "P4",
+      "go_test": "TestMirrorInterruptionPreservesPublicationAndRollback",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_explicit_capture_appends_then_commits_a_generation",
+      "owner": "P4",
+      "go_test": "TestCaptureExplicitAndReviewReplay",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_explicit_capture_accepts_the_task_five_renderer_interface",
+      "owner": "P4",
+      "go_test": "TestCaptureExplicitAndReviewReplay",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_duplicate_explicit_capture_is_idempotent_and_reuses_stored_observation",
+      "owner": "P4",
+      "go_test": "TestCaptureExplicitAndReviewReplay",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_explicit_capture_reports_mirror_repair_without_transaction_failure",
+      "owner": "P4",
+      "go_test": "TestExplicitCaptureFailureBoundaries",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_invalid_explicit_capture_leaves_observation_pending_without_a_generation",
+      "owner": "P4",
+      "go_test": "TestExplicitCaptureFailureBoundaries",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_global_explicit_capture_rejects_a_repository_key_after_appending",
+      "owner": "P4",
+      "go_test": "TestExplicitCaptureFailureBoundaries",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go transaction regression / state.json full action oracle",
+      "status": "covered"
+    },
+    {
+      "source_file": "tests/state_rules_test.rb",
+      "test": "test_hook_capture_does_not_create_a_generation",
+      "owner": "P4",
+      "go_test": "TestCaptureCandidateIdempotencyAndPrivacy",
+      "provenance": "source-manifest.json#tests/state_rules_test.rb; synthetic Go boundary regression / state.json catalog oracle",
+      "status": "covered"
+    }
+  ]
+}

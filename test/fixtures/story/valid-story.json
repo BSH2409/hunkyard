@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "agent": "fake-agent",
+  "prologue": {
+    "title": "App entry point",
+    "overview": "Adds an app function and wires it up.",
+    "key_changes": ["Introduce app.A()."],
+    "risks": ["Fixture coverage depends on the app.go new-file hunk."]
+  },
+  "chapters": [
+    {
+      "id": "ch1",
+      "title": "New app fn",
+      "summary": "Introduce app.A().",
+      "hunk_refs": [{ "file_path": "app.go", "old_start": 0 }]
+    }
+  ]
+}

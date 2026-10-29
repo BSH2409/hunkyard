@@ -1,0 +1,575 @@
+// hunkyard-settings-panes.test.js — exercise the shared Settings overlay
+// renderer used by both code-review (app.js) and live-mode.js.
+//
+// The renderer writes its markup as a single `pane.innerHTML = html`
+// assignment, then runs querySelectorAll to wire events. We stub a
+// minimal DOM where `innerHTML=` records the raw string (assertable via
+// regex) and querySelectorAll returns a small set of stub nodes for the
+// wire-up calls (so renderSettingsTab doesn't throw). We do not exercise
+// click wiring here — that path requires a real DOM and is covered by
+// E2E. We DO verify the option contract: which sections render under
+// which (mode, cfg, show) combinations.
+'use strict';
+
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const path = require('node:path');
+const fs = require('node:fs');
+
+function makeStubNode() {
+  return {
+    classList: {
+      _s: new Set(),
+      add(...c) { c.forEach((x) => this._s.add(x)); },
+      remove(...c) { c.forEach((x) => this._s.delete(x)); },
+      contains(c) { return this._s.has(c); },
+      toggle(c, force) {
+        if (typeof force === 'boolean') { force ? this._s.add(c) : this._s.delete(c); return force; }
+        if (this._s.has(c)) { this._s.delete(c); return false; }
+        this._s.add(c); return true;
+      },
+    },
+    dataset: {},
+    style: {},
+    setAttribute() {},
+    addEventListener() {},
+    querySelector() { return null },
+    querySelectorAll() { return []; },
+  };
+}
+
+function makePane() {
+  const pane = makeStubNode();
+  pane._html = '';
+  Object.defineProperty(pane, 'innerHTML', {
+    set(v) { this._html = String(v); },
+    get() { return this._html; },
+  });
+  pane.querySelectorAll = () => [];
+  pane.querySelector = () => null;
+  return pane;
+}
+
+// Returns both the panes API and the sandbox, so tests that depend on
+// persisted settings (read from document.cookie) can seed them.
+function loadPanes(cookie) {
+  const sandbox = { window: {}, document: { cookie: cookie || '', getElementById: () => null } };
+  const sharedSrc = fs.readFileSync(path.join(__dirname, '..', 'hunkyard-shared.js'), 'utf8');
+  new Function('window', 'document', sharedSrc)(sandbox.window, sandbox.document);
+  const shortcutsSrc = fs.readFileSync(path.join(__dirname, '..', 'hunkyard-shortcuts.js'), 'utf8');
+  new Function('window', 'globalThis', 'module', shortcutsSrc)(sandbox.window, sandbox.window, undefined);
+  const panesSrc = fs.readFileSync(path.join(__dirname, '..', 'hunkyard-settings-panes.js'), 'utf8');
+  // navigator.clipboard is referenced inside copy-button click handlers but
+  // those handlers don't run during render.
+  new Function('window', 'document', 'navigator', panesSrc)(sandbox.window, sandbox.document, {});
+  return { panes: sandbox.window.hunkyard.settingsPanes, sandbox };
+}
+
+function loadShared() {
+  return loadPanes().panes;
+}
+
+function paletteHooks() {
+  return {
+    applyTheme: () => {},
+    themePalettes: [
+      { id: 'light-test', displayName: 'Test light', type: 'light' },
+      { id: 'dark-test', displayName: 'Test dark', type: 'dark' },
+    ],
+    paletteDefaults: { light: 'light-test', dark: 'dark-test' },
+    onRendererSettingChange: () => {},
+  };
+}
+
+test('renderSettingsTab: Syntax contrast preserves its opt-in saved preference', () => {
+  for (const value of ['off', 'on']) {
+    const { panes } = loadPanes('hunkyard-settings=' + encodeURIComponent(JSON.stringify({ boostContrast: value })));
+    const pane = makePane();
+    panes.renderSettingsTab(pane, { mode: 'code-review', cfg: {}, hooks: paletteHooks() });
+    const select = pane.innerHTML.match(/<select[^>]*id="boostContrastSelect"[^>]*>([\s\S]*?)<\/select>/);
+    assert.ok(select, 'code review offers Syntax contrast');
+    assert.match(select[1], new RegExp('<option value="' + value + '" selected>'));
+    assert.match(select[1], />Theme default<\/option>/);
+    assert.match(select[1], />Increased<\/option>/);
+  }
+});
+
+test('renderSettingsTab: live mode offers both palettes and omits code renderer settings', () => {
+  const pane = makePane();
+  loadShared().renderSettingsTab(pane, { mode: 'live', cfg: {}, hooks: paletteHooks() });
+  const settings = [...pane.innerHTML.matchAll(/data-renderer-setting="([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(settings, ['lightPalette', 'darkPalette']);
+  assert.match(pane.innerHTML, /<option value="light-test" selected>Test light<\/option>/);
+  assert.match(pane.innerHTML, /<option value="dark-test" selected>Test dark<\/option>/);
+});
+
+test('renderSettingsTab: code-review mode renders theme + width + hide-resolved', () => {
+  const sp = loadShared();
+  const pane = makePane();
+
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: {},
+    hooks: {
+      applyTheme: () => {},
+      applyWidth: () => {},
+      getHideResolved: () => false,
+      setHideResolved: () => {},
+    },
+  });
+
+  const html = pane.innerHTML;
+  assert.match(html, /data-settings-theme="system"/);
+  assert.match(html, /data-settings-theme="light"/);
+  assert.match(html, /data-settings-theme="dark"/);
+  assert.match(html, /data-settings-width="compact"/);
+  assert.match(html, /data-settings-width="default"/);
+  assert.match(html, /data-settings-width="wide"/);
+  assert.match(html, /id="hideResolvedToggle"/);
+});
+
+test('renderSettingsTab: code font select defaults to the preset row, custom row hidden', () => {
+  const sp = loadShared();
+  const pane = makePane();
+
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: {},
+    hooks: { applyTheme: () => {}, applyWidth: () => {} },
+  });
+
+  const html = pane.innerHTML;
+  assert.match(html, /id="codeFontSelect"/);
+  assert.match(html, /<option value="default" selected>/);
+  assert.match(html, /<option value="custom">/);
+  // The free-text row only appears once the user picks Custom.
+  assert.match(html, /id="codeFontCustomRow" hidden/);
+  assert.match(html, /id="codeFontCustomInput"[^>]*value=""/);
+});
+
+test('renderSettingsTab: live mode does not render the code font picker', () => {
+  const sp = loadShared();
+  const pane = makePane();
+
+  sp.renderSettingsTab(pane, { mode: 'live', cfg: {}, hooks: { applyTheme: () => {} } });
+
+  assert.doesNotMatch(pane.innerHTML, /id="codeFontSelect"/);
+});
+
+test('renderSettingsTab: a stored discovered font pre-selects that font', () => {
+  const { panes: sp, sandbox } = loadPanes(
+    'hunkyard-settings=' + encodeURIComponent(JSON.stringify({ codeFont: '"Example Mono", monospace' })));
+  assert.equal(sandbox.window.hunkyard.shared.getSetting('codeFont', ''), '"Example Mono", monospace');
+  const pane = makePane();
+
+  // code_fonts is injected here, so this test does not need local fonts.
+  sp.renderSettingsTab(pane, { mode: 'code-review', cfg: { code_fonts: ['Example Mono'] }, hooks: { applyTheme: () => {}, applyWidth: () => {} } });
+
+  assert.match(pane.innerHTML, /<option value="installed-0" selected>Example Mono/);
+  assert.match(pane.innerHTML, /id="codeFontCustomRow" hidden/);
+});
+
+test('renderSettingsTab: only server-provided installed fonts are listed and safely quoted', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: { code_fonts: ['Sample Code Mono', 'Name "quoted"'] },
+    hooks: { applyTheme: () => {}, applyWidth: () => {} },
+  });
+  assert.match(pane.innerHTML, />Sample Code Mono</);
+  assert.match(pane.innerHTML, />Name &quot;quoted&quot;</);
+  assert.doesNotMatch(pane.innerHTML, />Fira Code</);
+  assert.equal(sp.fontFamilyStack('Name "quoted"'), '"Name \\"quoted\\"", monospace');
+  assert.equal(sp.fontFamilyStack('Name\fnewline'), '"Name newline", monospace');
+});
+
+test('renderSettingsTab: a stack matching no preset falls back to Custom and fills the input', () => {
+  const { panes: sp } = loadPanes(
+    'hunkyard-settings=' + encodeURIComponent(JSON.stringify({ codeFont: "'Comic Mono', monospace" })));
+  const pane = makePane();
+
+  sp.renderSettingsTab(pane, { mode: 'code-review', cfg: {}, hooks: { applyTheme: () => {}, applyWidth: () => {} } });
+
+  const html = pane.innerHTML;
+  assert.match(html, /<option value="custom" selected>/);
+  assert.doesNotMatch(html, /id="codeFontCustomRow" hidden/);
+  assert.match(html, /id="codeFontCustomInput"[^>]*value="&#39;Comic Mono&#39;, monospace"/);
+});
+
+test('renderSettingsTab: live mode hides width pill but keeps theme + hide-resolved', () => {
+  const sp = loadShared();
+  const pane = makePane();
+
+  sp.renderSettingsTab(pane, {
+    mode: 'live',
+    cfg: {},
+    hooks: {
+      applyTheme: () => {},
+      getHideResolved: () => false,
+      setHideResolved: () => {},
+    },
+  });
+
+  const html = pane.innerHTML;
+  assert.match(html, /data-settings-theme="system"/);
+  assert.doesNotMatch(html, /data-settings-width=/, 'no width pill in live mode');
+  assert.match(html, /id="hideResolvedToggle"/);
+});
+
+test('renderSettingsTab: pre-checks hide-resolved checkbox when getHideResolved returns true', () => {
+  const sp = loadShared();
+  const pane = makePane();
+
+  sp.renderSettingsTab(pane, {
+    mode: 'live',
+    cfg: {},
+    hooks: { applyTheme: () => {}, getHideResolved: () => true, setHideResolved: () => {} },
+  });
+
+  assert.match(pane.innerHTML, /id="hideResolvedToggle"[^>]*checked/);
+});
+
+test('renderSettingsTab: update card is not rendered in Settings', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: { version: '1.0.0', latest_version: '1.1.0' },
+    hooks: { applyTheme: () => {}, applyWidth: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+
+  assert.doesNotMatch(pane.innerHTML, /Update available/);
+  assert.doesNotMatch(pane.innerHTML, /go install github\.com\/BSH2409\/hunkyard/);
+});
+
+test('renderAboutPane: keeps update guidance out of About', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderAboutPane(pane, { version: '1.0.0', latest_version: '1.1.0' }, {});
+  assert.doesNotMatch(pane.innerHTML, /Update available/);
+  assert.doesNotMatch(pane.innerHTML, /Latest version/);
+});
+
+test('renderUpdatesPane: groups Hunkyard releases and integration work', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderUpdatesPane(pane, {
+    version: '1.0.0',
+    latest_version: '1.1.0',
+    installation_source: 'go',
+    stale_integrations: [{ agent: 'claude-code', hash: 'new-hash', hint: 'Run: hunkyard install claude-code' }],
+    missing_integrations: ['codex'],
+  }, {});
+  assert.match(pane.innerHTML, /Release notes and downloads/);
+  assert.match(pane.innerHTML, /class="updates-release-notes"/);
+  assert.match(pane.innerHTML, /go install github\.com\/BSH2409\/hunkyard\/cmd\/hunkyard@latest/);
+  assert.match(pane.innerHTML, /v1\.0\.0/);
+  assert.match(pane.innerHTML, /Claude Code/);
+  assert.match(pane.innerHTML, /hunkyard install claude-code/);
+  assert.match(pane.innerHTML, /Codex/);
+  assert.match(pane.innerHTML, /hunkyard install codex/);
+  assert.match(pane.innerHTML, /updates-command-copy/);
+  assert.match(pane.innerHTML, /images\/integrations\/claude-code-dark\.svg/);
+  assert.match(pane.innerHTML, />Stale</);
+  assert.match(pane.innerHTML, />Not installed</);
+  assert.match(pane.innerHTML, /Copy all commands/);
+});
+
+test('renderUpdatesPane: uses brand icons for all agents with SVG assets', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  const agents = ['claude-code', 'codex'];
+  sp.renderUpdatesPane(pane, {
+    stale_integrations: agents.map((agent) => ({ agent, hash: 'h', hint: 'hunkyard install ' + agent })),
+  }, {});
+  for (const agent of agents) {
+    assert.match(pane.innerHTML, new RegExp('images/integrations/' + agent + '-dark\\.svg'));
+  }
+  assert.doesNotMatch(pane.innerHTML, /updates-agent-icon--fallback/);
+});
+
+test('renderUpdatesPane: current Hunkyard still shows its version and release notes', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderUpdatesPane(pane, { version: '0.20.2' }, {});
+  assert.match(pane.innerHTML, /v0\.20\.2/);
+  assert.match(pane.innerHTML, /Release notes/);
+  assert.match(pane.innerHTML, /Up to date/);
+});
+
+test('renderUpdatesPane: shows muted integrations before uninstalled integrations', () => {
+  const { panes: sp } = loadPanes('hunkyard-settings=' + encodeURIComponent(JSON.stringify({
+    dismissedIntegrations: { 'claude-code': 'old', 'missing:codex-plugin': true },
+  })));
+  const pane = makePane();
+  sp.renderUpdatesPane(pane, {
+    stale_integrations: [
+      { agent: 'codex', hash: 'current', hint: 'hunkyard install codex' },
+      { agent: 'claude-code', hash: 'old', hint: 'hunkyard install claude-code' },
+    ],
+    missing_integrations: ['codex-plugin', 'preferences'],
+  }, {});
+  const html = pane.innerHTML;
+  assert.ok(html.indexOf('Codex') < html.indexOf('Claude Code'));
+  assert.ok(html.indexOf('Claude Code') < html.indexOf('Codex Plugin'));
+  assert.ok(html.indexOf('Codex Plugin') < html.indexOf('Preferences'));
+});
+
+test('renderSettingsTab: agent card unconfigured snippet when agent_cmd_enabled false', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'live',
+    cfg: { agent_cmd_enabled: false, no_integration_check: true },
+    hooks: { applyTheme: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+  assert.match(pane.innerHTML, /Agent Command/);
+  assert.match(pane.innerHTML, /config-card--unconfigured/);
+});
+
+test('renderSettingsTab: agent card configured shows agent_cmd value', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'live',
+    cfg: { agent_cmd_enabled: true, agent_cmd: 'claude -p', no_integration_check: true },
+    hooks: { applyTheme: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+  assert.match(pane.innerHTML, /<code>claude -p<\/code>/);
+});
+
+test('renderSettingsTab: integration card omitted when no_integration_check', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'live',
+    cfg: { no_integration_check: true },
+    hooks: { applyTheme: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+  assert.doesNotMatch(pane.innerHTML, /AI Integration/);
+});
+
+test('renderSettingsTab: omits the integration installer when nothing is installed', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'live',
+    cfg: { integrations: [], integrations_available: ['claude-code', 'codex'] },
+    hooks: { applyTheme: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+  assert.doesNotMatch(pane.innerHTML, /AI Integration/);
+  assert.doesNotMatch(pane.innerHTML, /hunkyard install claude-code/);
+});
+
+test('renderSettingsTab: leaves updates to the Updates tab', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: {
+      integrations: [{ agent: 'claude-code', status: 'stale', hash: 'new-hash', hint: 'Run: hunkyard install claude-code' }],
+      any_integration_installed: true,
+    },
+    hooks: { applyTheme: () => {}, applyWidth: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+  assert.doesNotMatch(pane.innerHTML, /AI Integration/);
+  assert.doesNotMatch(pane.innerHTML, /hunkyard install claude-code/);
+});
+
+test('renderSettingsTab: leaves missing integrations to the Updates tab', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: { integrations: [], missing_integrations: ['codex'] },
+    hooks: { applyTheme: () => {}, applyWidth: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+  assert.doesNotMatch(pane.innerHTML, /Integration Available/);
+  assert.doesNotMatch(pane.innerHTML, /hunkyard install codex/);
+});
+
+test('renderSettingsTab: opts.show overrides defaults', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: {},
+    show: { width: false, hideResolved: false, update: false, agent: false, integration: false },
+    hooks: { applyTheme: () => {}, applyWidth: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+  // Only theme pill remains.
+  assert.match(pane.innerHTML, /data-settings-theme/);
+  assert.doesNotMatch(pane.innerHTML, /data-settings-width=/);
+  assert.doesNotMatch(pane.innerHTML, /id="hideResolvedToggle"/);
+  assert.doesNotMatch(pane.innerHTML, /Configuration/);
+});
+
+test('renderSettingsTab: ignore-whitespace toggle omitted by default (no hook / show off)', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: {},
+    hooks: { applyTheme: () => {}, applyWidth: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+  // Defaults: ignoreWhitespace is off, so the row never renders even though
+  // the hide-resolved row does.
+  assert.match(pane.innerHTML, /id="hideResolvedToggle"/);
+  assert.doesNotMatch(pane.innerHTML, /id="ignoreWhitespaceToggle"/);
+});
+
+test('renderSettingsTab: ignore-whitespace toggle renders when show.ignoreWhitespace + hook provided', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: {},
+    show: { ignoreWhitespace: true },
+    hooks: {
+      applyTheme: () => {},
+      applyWidth: () => {},
+      getHideResolved: () => false,
+      setHideResolved: () => {},
+      getIgnoreWhitespace: () => false,
+      setIgnoreWhitespace: () => {},
+      onIgnoreWhitespaceChange: () => {},
+    },
+  });
+  assert.match(pane.innerHTML, /id="ignoreWhitespaceToggle"/);
+  assert.match(pane.innerHTML, /Ignore whitespace/);
+  // Unchecked when getIgnoreWhitespace returns false.
+  assert.doesNotMatch(pane.innerHTML, /id="ignoreWhitespaceToggle"[^>]*checked/);
+});
+
+test('renderSettingsTab: ignore-whitespace toggle omitted when show on but hook absent', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: {},
+    show: { ignoreWhitespace: true },
+    hooks: { applyTheme: () => {}, getHideResolved: () => false, setHideResolved: () => {} },
+  });
+  // Same guard as hide-resolved: needs BOTH show flag and the getter hook.
+  assert.doesNotMatch(pane.innerHTML, /id="ignoreWhitespaceToggle"/);
+});
+
+test('renderSettingsTab: pre-checks ignore-whitespace when getIgnoreWhitespace returns true', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, {
+    mode: 'code-review',
+    cfg: {},
+    show: { ignoreWhitespace: true },
+    hooks: {
+      applyTheme: () => {},
+      getHideResolved: () => false,
+      setHideResolved: () => {},
+      getIgnoreWhitespace: () => true,
+      setIgnoreWhitespace: () => {},
+    },
+  });
+  assert.match(pane.innerHTML, /id="ignoreWhitespaceToggle"[^>]*checked/);
+});
+
+test('renderShortcutsPane / renderAboutPane / renderUpdatesPane are exposed', () => {
+  const sp = loadShared();
+  assert.equal(typeof sp.renderShortcutsPane, 'function');
+  assert.equal(typeof sp.renderAboutPane, 'function');
+  assert.equal(typeof sp.renderUpdatesPane, 'function');
+});
+
+test('renderShortcutsPane: code-review mode shows code-review-only shortcuts', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderShortcutsPane(pane, { mode: 'code-review' });
+  const html = pane.innerHTML;
+  // Code-review-only bindings present
+  assert.match(html, /<kbd>j<\/kbd>/);
+  assert.match(html, /<kbd>k<\/kbd>/);
+  assert.match(html, /<kbd>\]<\/kbd>/);
+  assert.match(html, /<kbd>\[<\/kbd>/);
+  assert.match(html, /<kbd>c<\/kbd>/);
+  assert.match(html, /<kbd>e<\/kbd>/);
+  assert.match(html, /<kbd>d<\/kbd>/);
+  assert.match(html, /<kbd>G<\/kbd>/);
+  assert.match(html, /<kbd>t<\/kbd>/);
+  assert.match(html, /<kbd>h<\/kbd>/);
+  assert.match(html, /Shift<\/kbd>\+<kbd>F/);
+  assert.match(html, /Shift<\/kbd>\+<kbd>C/);
+  assert.match(html, /Switch to all changes/);
+  assert.match(html, /Next story chapter/);
+  assert.match(html, /Previous story chapter/);
+  assert.match(html, /Story prologue/);
+  assert.match(html, /Story support/);
+  assert.match(html, /Jump to story chapter/);
+  assert.match(html, /Toggle sidebar \(story chapter list\)/);
+  // Shared bindings present
+  assert.match(html, /<kbd>Esc<\/kbd>/);
+  assert.match(html, /<kbd>\?<\/kbd>/);
+  assert.match(html, /Ctrl<\/kbd>\+<kbd>Enter/);
+  // Capture a11y: idle binding buttons expose change label + aria-pressed
+  assert.match(html, /aria-pressed="false"/);
+  assert.match(html, /aria-label="Change shortcut for Next block"/);
+  assert.match(html, /data-shortcut-action="Next block"/);
+  // Live-only binding absent
+  assert.doesNotMatch(html, /Toggle pin mode/);
+});
+
+test('shortcut capture updates aria-label to Press new keys for …', () => {
+  const panesSrc = fs.readFileSync(path.join(__dirname, '..', 'hunkyard-settings-panes.js'), 'utf8');
+  assert.match(panesSrc, /Press new keys for /);
+  assert.match(panesSrc, /aria-pressed',\s*'true'/);
+  assert.match(panesSrc, /function restoreBindingLabel\s*\(/);
+});
+
+test('renderShortcutsPane: live mode omits code-review-only shortcuts', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderShortcutsPane(pane, { mode: 'live' });
+  const html = pane.innerHTML;
+  // Code-review-only bindings absent
+  assert.doesNotMatch(html, /<kbd>j<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>k<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>\]<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>\[<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>n<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>c<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>e<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>d<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>G<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>t<\/kbd>/);
+  assert.doesNotMatch(html, /<kbd>h<\/kbd>/);
+  // Shift+F (Finish review) is shared with code-review now — live mode
+  // wires it up via live-mode.shortcut.handleShortcut.
+  assert.match(html, /Finish review/);
+  assert.match(html, /Shift<\/kbd>\+<kbd>F/);
+  assert.doesNotMatch(html, /Toggle comments panel/);
+  assert.doesNotMatch(html, /Switch scope/);
+  assert.doesNotMatch(html, /Next story chapter/);
+  assert.doesNotMatch(html, /Story prologue/);
+  // Shared bindings present
+  assert.match(html, /<kbd>Esc<\/kbd>/);
+  assert.match(html, /<kbd>\?<\/kbd>/);
+  assert.match(html, /Ctrl<\/kbd>\+<kbd>Enter/);
+  // Live-only binding present
+  assert.match(html, /<kbd>p<\/kbd>/);
+  assert.match(html, /Toggle pin mode/);
+});
+
+test('renderShortcutsPane: defaults to code-review when no opts passed', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderShortcutsPane(pane);
+  // Sanity: code-review-only entries appear (legacy behaviour preserved)
+  assert.match(pane.innerHTML, /<kbd>j<\/kbd>/);
+  assert.doesNotMatch(pane.innerHTML, /Toggle pin mode/);
+});
+
+test('local-only settings omit unsupported external and subprocess controls', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderSettingsTab(pane, { mode: 'code-review', cfg: { local_only: true, no_integration_check: true } });
+  assert.doesNotMatch(pane.innerHTML, /config-card-title">Agent Command/);
+});

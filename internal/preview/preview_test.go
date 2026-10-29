@@ -1,0 +1,398 @@
+package preview
+
+import (
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+)
+
+func TestPreviewSessionKey(t *testing.T) {
+	k1 := previewSessionKey("/app", "/app/index.html")
+	k2 := previewSessionKey("/app", "/app/index.html")
+	if k1 != k2 {
+		t.Errorf("same inputs produced different keys: %q vs %q", k1, k2)
+	}
+	k3 := previewSessionKey("/app", "/app/other.html")
+	if k1 == k3 {
+		t.Error("different files produced same key")
+	}
+	k4 := previewSessionKey("/other", "/app/index.html")
+	if k1 == k4 {
+		t.Error("different cwds produced same key")
+	}
+	if len(k1) != 12 {
+		t.Errorf("key length = %d, want 12", len(k1))
+	}
+}
+
+func TestPreviewSessionKey_NoCollisionWithLive(t *testing.T) {
+	cwd := "/app"
+	pk := previewSessionKey(cwd, "http://localhost:3000")
+	dk := liveSessionKey(cwd, "http://localhost:3000")
+	if pk == dk {
+		t.Error("preview and live keys collide for same input")
+	}
+}
+
+func TestLooksLikePreviewArgs(t *testing.T) {
+	dir := t.TempDir()
+	htmlFile := filepath.Join(dir, "test.html")
+	htmFile := filepath.Join(dir, "test.htm")
+	mdFile := filepath.Join(dir, "test.md")
+	writeTestFile(t, htmlFile, "<html></html>")
+	writeTestFile(t, htmFile, "<html></html>")
+	writeTestFile(t, mdFile, "# hello")
+	if err := os.Mkdir(filepath.Join(dir, "dir.html"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cases := []struct {
+		name string
+		args []string
+		want bool
+	}{
+		{name: "html", args: []string{htmlFile}, want: true},
+		{name: "htm", args: []string{htmFile}, want: true},
+		{name: "non-html extension", args: []string{mdFile}, want: false},
+		{name: "directory", args: []string{filepath.Join(dir, "dir.html")}, want: false},
+		{name: "missing", args: []string{filepath.Join(dir, "nonexistent.html")}, want: false},
+		{name: "multiple files", args: []string{htmlFile, htmFile}, want: false},
+		{name: "nil", args: nil, want: false},
+		{name: "empty", args: []string{}, want: false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := looksLikePreviewArgs(tc.args)
+			if got != tc.want {
+				t.Errorf("looksLikePreviewArgs(%v) = %v, want %v", tc.args, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCreatePreviewSession(t *testing.T) {
+	dir := t.TempDir()
+	htmlFile := filepath.Join(dir, "index.html")
+	writeTestFile(t, htmlFile, "<html><body>hello</body></html>")
+
+	sc := &serverConfig{previewFile: htmlFile}
+	sess, err := createPreviewSession(sc)
+	if err != nil {
+		t.Fatalf("createPreviewSession: %v", err)
+	}
+	if sess.ReviewType != "preview" {
+		t.Errorf("ReviewType = %q, want %q", sess.ReviewType, "preview")
+	}
+	if sess.Origin != htmlFile {
+		t.Errorf("Origin = %q, want %q", sess.Origin, htmlFile)
+	}
+	if len(sess.Files) != 1 {
+		t.Fatalf("len(Files) = %d, want 1", len(sess.Files))
+	}
+	if sess.Files[0].Content == "" {
+		t.Error("file content is empty")
+	}
+	if !strings.Contains(sess.Files[0].Content, "hello") {
+		t.Error("file content missing expected text")
+	}
+}
+
+func TestCreatePreviewSession_MissingFile(t *testing.T) {
+	sc := &serverConfig{previewFile: "/nonexistent/test.html"}
+	_, err := createPreviewSession(sc)
+	if err == nil {
+		t.Error("expected error for missing file")
+	}
+}
+
+func TestCreatePreviewSession_EmptyPath(t *testing.T) {
+	sc := &serverConfig{}
+	_, err := createPreviewSession(sc)
+	if err == nil {
+		t.Error("expected error for empty previewFile")
+	}
+}
+
+func newPreviewTestServer(t *testing.T, dir string) (*Server, *Session) {
+	t.Helper()
+	htmlFile := filepath.Join(dir, "index.html")
+	sess := &Session{
+		Mode:        "files",
+		RepoRoot:    dir,
+		ReviewRound: 1,
+		ReviewType:  "preview",
+		Origin:      htmlFile,
+		Files: []*FileEntry{
+			{
+				Path:     "index.html",
+				Status:   "added",
+				FileType: "code",
+				Content:  "<html><body>test</body></html>",
+			},
+		},
+	}
+	sess.InitTestChannels()
+	s, err := NewServer(sess, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s, sess
+}
+
+func TestHandlePreviewPage(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html></html>")
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("GET", "/preview", nil)
+	w := httptest.NewRecorder()
+	s.ServeIndexHTMLForTest()(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if ct := w.Header().Get("Content-Type"); !strings.Contains(ct, "text/html") {
+		t.Errorf("Content-Type = %q, want text/html", ct)
+	}
+}
+
+func TestHandlePreviewPage_MethodNotAllowed(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html></html>")
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("POST", "/preview", nil)
+	w := httptest.NewRecorder()
+	s.ServeIndexHTMLForTest()(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandlePreviewContent_ServesHTML(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html><body>hello</body></html>")
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("GET", "/preview-content/", nil)
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "hello") {
+		t.Error("response missing original content")
+	}
+}
+
+func TestHandlePreviewContent_InjectsAgent(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html><body>content</body></html>")
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("GET", "/preview-content/", nil)
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	body := w.Body.String()
+	if !strings.Contains(body, "hunkyard-agent.js") {
+		t.Error("agent script not injected")
+	}
+	if !strings.Contains(body, "agent-protocol.js") {
+		t.Error("agent-protocol.js not injected")
+	}
+	if strings.Contains(body, "agent-marker.css") {
+		t.Error("agent-marker.css should not be injected (loaded dynamically by hunkyard-agent.js)")
+	}
+	// Verify injection is before </body>
+	agentIdx := strings.Index(body, "hunkyard-agent.js")
+	bodyIdx := strings.Index(body, "</body>")
+	if agentIdx > bodyIdx {
+		t.Error("agent injected after </body>")
+	}
+}
+
+// Fragment HTML (no </body>) must still get the agent bundle appended, otherwise
+// Pin stays stuck on "Loading…" forever.
+func TestHandlePreviewContent_AppendsAgentWhenNoBodyTag(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<div>fragment with no body tag</div>")
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("GET", "/preview-content/", nil)
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "fragment with no body tag") {
+		t.Error("response missing original content")
+	}
+	if !strings.Contains(body, "hunkyard-agent.js") {
+		t.Error("agent script not appended when </body> is absent")
+	}
+	if !strings.Contains(body, "agent-protocol.js") {
+		t.Error("agent-protocol.js not appended when </body> is absent")
+	}
+	fragIdx := strings.Index(body, "fragment with no body tag")
+	agentIdx := strings.Index(body, "hunkyard-agent.js")
+	if fragIdx < 0 || agentIdx < 0 || agentIdx < fragIdx {
+		t.Error("expected agent scripts appended after fragment content")
+	}
+}
+
+func TestHandlePreviewContent_InjectsAgentOnSiblingHTML(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html><body>home</body></html>")
+	chDir := filepath.Join(dir, "chapters")
+	if err := os.Mkdir(chDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(chDir, "01-intro.html"), "<html><body>chapter</body></html>")
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("GET", "/preview-content/chapters/01-intro.html", nil)
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	if !strings.Contains(body, "chapter") {
+		t.Error("response missing chapter content")
+	}
+	if !strings.Contains(body, "hunkyard-agent.js") {
+		t.Error("agent script not injected into sibling HTML")
+	}
+}
+
+func TestHandlePreviewContent_ServesSiblingAssets(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html></html>")
+	writeTestFile(t, filepath.Join(dir, "style.css"), "body { color: red; }")
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("GET", "/preview-content/style.css", nil)
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "color: red") {
+		t.Error("CSS content not served")
+	}
+}
+
+func TestHandlePreviewContent_PathTraversal(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html></html>")
+	// Create a file outside the preview dir
+	secretDir := t.TempDir()
+	writeTestFile(t, filepath.Join(secretDir, "secret.txt"), "secret")
+
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("GET", "/preview-content/", nil)
+	// Set Path after construction because httptest.NewRequest normalizes dot
+	// segments as a browser or proxy would before the handler sees them.
+	req.URL.Path = "/preview-content/../../secret.txt"
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "secret") {
+		t.Error("path traversal response exposed file outside preview dir")
+	}
+}
+
+func TestHandlePreviewContent_DirectoryListing(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html></html>")
+	subdir := filepath.Join(dir, "subdir")
+	if err := os.Mkdir(subdir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeTestFile(t, filepath.Join(subdir, "file.txt"), "hello")
+
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("GET", "/preview-content/subdir", nil)
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("directory request: status = %d, want 404", w.Code)
+	}
+}
+
+func TestHandlePreviewContent_MethodNotAllowed(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html></html>")
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("POST", "/preview-content/", nil)
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", w.Code)
+	}
+}
+
+func TestHandlePreviewContent_NoSession(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/preview-content/", nil)
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503", w.Code)
+	}
+}
+
+func TestHandlePreviewContent_NotFound(t *testing.T) {
+	dir := t.TempDir()
+	writeTestFile(t, filepath.Join(dir, "index.html"), "<html></html>")
+	s, _ := newPreviewTestServer(t, dir)
+
+	req := httptest.NewRequest("GET", "/preview-content/nonexistent.css", nil)
+	w := httptest.NewRecorder()
+	s.HandlePreviewContentForTest(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+// Verify newTestServer from embed.FS compiles with preview routes registered.
+func TestPreviewRouteRegistered(t *testing.T) {
+	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// /preview should be handled (returns index.html from embedded FS)
+	req := httptest.NewRequest("GET", "/preview", nil)
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("/preview status = %d, want 200", w.Code)
+	}
+}

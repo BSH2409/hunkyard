@@ -1,0 +1,41 @@
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - gocyclo
+    - ineffassign
+    - misspell
+    - staticcheck
+    - nilerr
+    - gocritic
+    - errorlint
+    - unparam
+    - perfsprint
+  settings:
+    gocyclo:
+      min-complexity: 15
+  exclusions:
+    rules:
+      - linters: [staticcheck]
+        text: "QF"
+      # perfsprint's error-format (fmt.Errorf → errors.New on static strings)
+      # is style churn with zero perf value; the format/integer/hex/concat
+      # checks it also runs are the ones that buy real ns/op and allocs.
+      - linters: [perfsprint]
+        text: "error-format"
+      - linters: [gocyclo]
+        text: "runComment|mergeExternalHunkyardJSON|bulkAddCommentsToHunkyardJSONScoped|runPush|runServe|runDesign|handleFileComments"
+      - linters: [gocyclo]
+        path: "_test\\.go"
+      - linters: [gocyclo]
+        path: "node_modules/"
+      - linters: [unparam]
+        path: "_test\\.go"
+      - linters: [nilerr, gocritic, errorlint, unparam, govet]
+        path: "node_modules/"
+
+formatters:
+  enable:
+    - gofmt

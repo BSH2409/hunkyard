@@ -1,0 +1,874 @@
+import { test, expect, type Page, type APIRequestContext, type Locator } from '@playwright/test';
+import { execSync, execFileSync } from 'child_process';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import {
+  clearAllComments, loadPage, goSection, addComment, diffLine, diffLineNumber, hoverLine, revealFile,
+  submitFileLevelComment, expectPaintedQuote, selectInLineAndPressC, readFixtureState, roundComplete,
+} from './helpers';
+
+// Story mode fixtures live on top of the shared git-mode fixture repo (server.go,
+// routes.go, plan.md, handler.js, legacy.go, utils.go — see setup-fixtures.sh).
+// A story references real hunks in that diff via (file_path, old_start) — these
+// were confirmed empirically against a running daemon's /api/file/diff response
+// (hunk fields are the bare Go struct field names: OldStart, not old_start; the
+// story JSON schema itself uses the snake_case old_start).
+//
+// This spec ingests a story, drives the renderer, then MUST leave the shared
+// server story-less (via DELETE /api/story) so other spec files in this project
+// aren't affected — tests within a project share one server process.
+
+
+// The shared git-mode fixture repo (setup-fixtures.sh) has 11 hunks across 8
+// changed files. These old_start values were confirmed empirically against a
+// running daemon's /api/file/diff response (hunks use the bare Go struct
+// field name OldStart there; the story JSON schema field is old_start):
+//   server.go: 2, 17, 39   routes.go: 1, 48   plan.md: 0   legacy.go: 5
+//   utils.go: 8   handler.js: 0   login.feature: 0   config.yaml: 0
+//
+// routes.go's two hunks are split across ch1/ch2 to exercise the "elsewhere"
+// hint (a file with hunks owned by more than one page) — NOT server.go: its
+// three hunks sit close enough together (new-line gaps of 8 and 6) that the
+// client's autoExpandSmallGaps() merges them into one hunk object in-place
+// (gap <= 8 lines), which collapses their distinct old_start identities and
+// would misattribute line-based chapter lookups. routes.go's hunks are ~38
+// lines apart, well outside that merge threshold, so they stay separate.
+// The story below places 6 of 11 hunks (>50% floor) across two chapters, with
+// the rest (including all of server.go) routed to support.
+const STORY = {
+  version: 1,
+  agent: 'e2e-test',
+  prologue: {
+    title: 'Route registration story',
+    overview: 'Reworks route registration and documents the [plan](https://example.com/plan).',
+    key_changes: [
+      'routes.go adds the health-check route and grouped imports.',
+      'Dashboard logging and plan.md document the route behavior.',
+    ],
+    risks: [
+      'Auth middleware is support plumbing, so routing review should still scan the support page.',
+    ],
+  },
+  chapters: [
+    {
+      id: 'ch1',
+      title: 'Route imports + health check',
+      summary: 'routes.go gains a health-check route and a grouped import block.',
+      hunk_refs: [{ file_path: 'routes.go', old_start: 1 }],
+    },
+    {
+      id: 'ch2',
+      title: 'Dashboard logging + docs',
+      summary: "routes.go's dashboard handler logs hits; plan.md documents the approach.",
+      hunk_refs: [
+        { file_path: 'routes.go', old_start: 48 },
+        { file_path: 'plan.md', old_start: 0 },
+      ],
+    },
+  ],
+  support: [
+    {
+      hunk_refs: [
+        { file_path: 'handler.js', old_start: 0 },
+        { file_path: 'server.go', old_start: 2 },
+        { file_path: 'server.go', old_start: 17 },
+        { file_path: 'server.go', old_start: 39 },
+      ],
+      reason: 'New file / auth middleware plumbing — mechanical additions, not part of the routing story.',
+    },
+  ],
+};
+
+const MERGED_HUNK_STORY = {
+  version: 1,
+  agent: 'e2e-test',
+  prologue: {
+    title: 'Merged hunk story',
+    overview: 'Exercises story rendering for small-gap hunk clusters.',
+    key_changes: ['server.go raw hunks render as one small-gap cluster.'],
+    risks: ['Missing nearby raw hunks would hide part of the logical change.'],
+  },
+  chapters: [
+    {
+      id: 'ch1',
+      title: 'Server auth cluster',
+      summary: 'The first server.go hunk should render the full small-gap cluster.',
+      hunk_refs: [{ file_path: 'server.go', old_start: 2 }],
+    },
+  ],
+  support: [
+    {
+      hunk_refs: [
+        { file_path: 'server.go', old_start: 17 },
+        { file_path: 'server.go', old_start: 39 },
+        { file_path: 'routes.go', old_start: 1 },
+        { file_path: 'routes.go', old_start: 48 },
+        { file_path: 'plan.md', old_start: 0 },
+        { file_path: 'deleted.txt', old_start: 1 },
+      ],
+      reason: 'Additional fixture hunks keep the story above ingestion coverage requirements.',
+    },
+  ],
+};
+
+function writeStoryFixtureFile(story: Record<string, unknown> = STORY): string {
+  const file = path.join(os.tmpdir(), `hunkyard-e2e-story-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+  fs.writeFileSync(file, JSON.stringify(story));
+  return file;
+}
+
+function execOptsFor(fixtureDir: string, fakeHome: string) {
+  return { shell: true, timeout: 10_000, cwd: fixtureDir, env: { ...process.env, HOME: fakeHome, USERPROFILE: fakeHome, CODEX_HOME: path.join(fakeHome, '.codex'), CLAUDE_CONFIG_DIR: path.join(fakeHome, '.claude'), HUNKYARD_OWNER_ID: `codex:e2e:${fakeHome}` } } as const;
+}
+
+function storyRail(page: Page) {
+  return page.locator('#storyRail');
+}
+
+function storyPane(page: Page) {
+  return page.locator('#storyPane');
+}
+
+function storyOverview(page: Page) {
+  return page.locator('#hunkyard-story-view-overview');
+}
+
+function railRow(page: Page, target: string) {
+  return storyRail(page).locator(`.hunkyard-story-row[data-story-target="${target}"]`);
+}
+
+function tocItem(page: Page, target: string) {
+  return storyOverview(page).locator(`.hunkyard-story-toc__item[data-story-target="${target}"]`);
+}
+
+function storyView(page: Page, pageId: string) {
+  return page.locator(`#hunkyard-story-view-${pageId}`);
+}
+
+// Rendered new-side rows of a story group's Pierre FileDiff (split or unified).
+function storyDiffRows(group: Locator): Locator {
+  return group.locator('code[data-additions] [data-content] > [data-line], code[data-unified] [data-content] > [data-line]:not([data-line-type="change-deletion"])');
+}
+
+// Drag a story group's gutter "+" from one new-side line to another and
+// return the comment form it opens inside that group.
+async function dragStoryLineRange(page: Page, group: Locator, from: number, to: number): Promise<Locator> {
+  const button = await hoverLine(page, group, from);
+  const start = await button.boundingBox();
+  const end = await diffLineNumber(group, to).first().boundingBox();
+  if (!start || !end) throw new Error('expected gutter button and target line number');
+  await page.mouse.move(start.x + start.width / 2, start.y + start.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(start.x + start.width / 2, end.y + end.height / 2, { steps: 8 });
+  await page.mouse.up();
+  const form = group.locator('.comment-form');
+  await expect(form.locator('textarea')).toBeVisible();
+  return form;
+}
+
+// Ingest through the CLI (`hunkyard story --story-file`), which validates the
+// story and POSTs it to the running daemon. Only the CLI-path test uses this;
+// everything else posts straight to /api/story (postStory), which is the same
+// request the CLI makes (cmd/hunkyard/cli_handlers_story.go postStoryToDaemon)
+// without spawning a process per test.
+async function ingestStoryCLI(hunkyardBin: string, fixtureDir: string, fakeHome: string, opts: { refresh?: boolean; story?: Record<string, unknown> } = {}) {
+  const storyFile = writeStoryFixtureFile(opts.story || STORY);
+  // --refresh forces a re-ingest (and a story-updated SSE to a running daemon)
+  // even when a story is already present, where a bare `hunkyard story` would
+  // instead resume the existing one.
+  const refreshFlag = opts.refresh ? ' --refresh' : '';
+  try {
+    execSync(`"${hunkyardBin}" story --story-file "${storyFile}"${refreshFlag}`, execOptsFor(fixtureDir, fakeHome));
+  } finally {
+    fs.rmSync(storyFile, { force: true });
+  }
+}
+
+async function postStory(request: APIRequestContext, story: Record<string, unknown> = STORY) {
+  const resp = await request.post('/api/story', { data: { story } });
+  await expect(resp).toBeOK();
+}
+
+async function clearStory(request: APIRequestContext) {
+  await request.delete('/api/story');
+}
+
+test.describe('Story mode', () => {
+  let hunkyardBin: string;
+  let fixtureDir: string;
+  let fakeHome: string;
+
+  test.beforeAll(() => {
+    const state = readFixtureState();
+    hunkyardBin = state.HUNKYARD_BIN;
+    fixtureDir = state.HUNKYARD_FIXTURE_DIR;
+    fakeHome = state.FAKE_HOME;
+    if (!hunkyardBin || !fixtureDir || !fakeHome) {
+      throw new Error('HUNKYARD_BIN, HUNKYARD_FIXTURE_DIR, or FAKE_HOME not set in state file');
+    }
+  });
+
+  test.beforeEach(async ({ request }) => {
+    await clearAllComments(request);
+    await clearStory(request);
+  });
+
+  test.afterEach(async ({ request }) => {
+    // Leave the shared server story-less for every other spec in this project.
+    await clearStory(request);
+  });
+
+  test('selected words stay underlined in Slack Dark while commenting in a story', async ({ page, request }) => {
+    await postStory(request, MERGED_HUNK_STORY);
+    await loadPage(page);
+    await page.locator('#settingsToggle').click();
+    await page.locator('[data-settings-theme="dark"]').click();
+    await page.locator('#darkPaletteSelect').selectOption('slack-dark');
+    await page.keyboard.press('Escape');
+    await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+    await expect(page.locator('html')).toHaveAttribute('data-hunkyard-palette', 'slack-dark');
+    await tocItem(page, 'ch1').click();
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="server.go"]');
+    const selected = await selectInLineAndPressC(page, group, 24);
+    const textarea = group.locator('.comment-form textarea');
+    await expect(textarea).toBeFocused();
+    await expect.poll(() => page.evaluate(() =>
+      [...(CSS.highlights.get('hunkyard-quote') || [])].map(range => range.toString()),
+    )).toEqual([selected.trim()]);
+    await expectPaintedQuote(page);
+    await textarea.fill('Story Slack Dark quote');
+    await textarea.press('Control+Enter');
+    await expect(group.locator('.comment-card', { hasText: 'Story Slack Dark quote' })).toBeVisible();
+    await expectPaintedQuote(page);
+    await railRow(page, 'overview').click();
+    await tocItem(page, 'ch1').click();
+    await expectPaintedQuote(page);
+  });
+
+  test('a review with no story renders the flat layout', async ({ page, request }) => {
+    await loadPage(page);
+    await expect(page.locator('body')).not.toHaveClass(/hunkyard-story-active/);
+    await expect(page.locator('#storyRoot')).toBeHidden();
+    await expect(await goSection(page)).toBeVisible();
+  });
+
+  test('ingesting a story activates the overview with prologue and chapter TOC, and a support page with reasons', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-active/);
+    await expect(storyOverview(page)).toBeVisible();
+    await expect(storyOverview(page).locator('.hunkyard-story-prologue')).toContainText('Reworks route registration');
+    await expect(storyOverview(page).locator('.hunkyard-story-prologue')).toContainText('Key changes');
+    await expect(storyOverview(page).locator('.hunkyard-story-prologue')).toContainText('Dashboard logging and plan.md');
+    await expect(storyOverview(page).locator('.hunkyard-story-prologue')).toContainText('Risks');
+    const overviewLink = storyOverview(page).locator('.hunkyard-story-prologue__overview a', { hasText: 'plan' });
+    await expect(overviewLink).toBeVisible();
+    await expect(overviewLink).not.toHaveCSS('color', 'rgb(0, 0, 238)');
+
+    await expect(tocItem(page, 'ch1')).toContainText('Route imports + health check');
+    await expect(tocItem(page, 'ch2')).toContainText('Dashboard logging + docs');
+    await expect(tocItem(page, 'support')).toBeVisible();
+
+    // The support page renders each group with its reason.
+    await tocItem(page, 'support').scrollIntoViewIfNeeded();
+    await tocItem(page, 'support').click();
+
+    await expect(page).toHaveURL(/#story\/support$/);
+    const supportView = storyView(page, 'support');
+    await expect(supportView).toBeVisible();
+    await expect(supportView.locator('.hunkyard-story-file-group[data-story-file="handler.js"]')).toContainText(
+      'New file / auth middleware plumbing — mechanical additions, not part of the routing story.'
+    );
+  });
+
+  test('chapter rail: header toggle collapses it, it fills the viewport, and it resizes with the shared handle', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-active/);
+
+    // The rail fills the viewport and uses the shared resize handle.
+    const rail = page.locator('#storyRail');
+    const resizer = page.locator('#storyRailResizer');
+    await expect(rail).toBeVisible();
+    await expect(resizer).toBeVisible();
+
+    const railBox = await rail.boundingBox();
+    const viewport = page.viewportSize();
+    if (!railBox || !viewport) throw new Error('expected visible story rail and viewport');
+    expect(Math.abs((railBox.y + railBox.height) - viewport.height)).toBeLessThanOrEqual(2);
+
+    const widthBefore = railBox.width;
+    await resizer.focus();
+    await page.keyboard.press('ArrowRight');
+    await expect.poll(async () => {
+      const box = await rail.boundingBox();
+      return box ? Math.round(box.width) : 0;
+    }).toBe(Math.round(widthBefore + 16));
+
+    // The header sidebar toggle collapses the rail (same control as the file tree).
+    const toggle = page.locator('#fileTreeToggle');
+    await expect(toggle).toBeVisible();
+    await expect(page.locator('#storyRailToggle')).toHaveCount(0);
+
+    await expect(storyRail(page)).toBeVisible();
+    await toggle.click();
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-rail-collapsed/);
+    await expect(storyRail(page)).toBeHidden();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
+
+    await toggle.click();
+    await expect(page.locator('body')).not.toHaveClass(/hunkyard-story-rail-collapsed/);
+    await expect(storyRail(page)).toBeVisible();
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  test('navigating into a chapter shows only that chapter\'s file groups', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+
+    await tocItem(page, 'ch1').scrollIntoViewIfNeeded();
+    await tocItem(page, 'ch1').click();
+
+    await expect(page).toHaveURL(/#story\/ch1$/);
+    const ch1View = storyView(page, 'ch1');
+    await expect(ch1View).toBeVisible();
+    await expect(ch1View.locator('.hunkyard-story-file-group[data-story-file="routes.go"]')).toBeVisible();
+    await expect(ch1View.locator('.hunkyard-story-file-header')).toHaveCSS('top', '0px');
+    // Only ch1's hunk group renders — plan.md and handler.js belong to other pages.
+    await expect(ch1View.locator('.hunkyard-story-file-group')).toHaveCount(1);
+    await expect(ch1View.locator('.hunkyard-story-chapter__top .hunkyard-story-chapter__mark')).toHaveCount(0);
+    await expect(ch1View.locator('.hunkyard-story-chapter__mark-row .hunkyard-story-chapter__mark')).toBeVisible();
+    await expect.poll(async () => ch1View.evaluate((el) => {
+      const fileGroup = el.querySelector('.hunkyard-story-file-group');
+      const markRow = el.querySelector('.hunkyard-story-chapter__mark-row');
+      const footer = el.querySelector('.hunkyard-story-footer');
+      if (!fileGroup || !markRow || !footer) return false;
+      return !!(fileGroup.compareDocumentPosition(markRow) & Node.DOCUMENT_POSITION_FOLLOWING) &&
+        !!(markRow.compareDocumentPosition(footer) & Node.DOCUMENT_POSITION_FOLLOWING);
+    })).toBe(true);
+
+    // Rail highlights the active chapter.
+    await expect(railRow(page, 'ch1')).toHaveClass(/active/);
+  });
+
+  test('file-level comments in a chapter show above the diff, left-aligned, twice in a row', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+    await tocItem(page, 'ch1').scrollIntoViewIfNeeded();
+    await tocItem(page, 'ch1').click();
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]');
+    await expect(group).toBeVisible();
+
+    const opts = { header: group.locator('.hunkyard-story-file-header'), scope: group.locator('.file-comments'), content: group.locator('[data-line]').first() };
+    await submitFileLevelComment(page, { ...opts, body: 'First story file comment' });
+    await submitFileLevelComment(page, { ...opts, body: 'Second story file comment' });
+  });
+
+  test('line comment forms in a unified chapter diff stay at reading width', async ({ page, request }) => {
+    await page.setViewportSize({ width: 1800, height: 900 });
+    await postStory(request);
+    await loadPage(page);
+    await page.locator('#diffModeToggle .toggle-btn[data-mode="unified"]').click();
+    await tocItem(page, 'ch1').scrollIntoViewIfNeeded();
+    await tocItem(page, 'ch1').click();
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]');
+    await expect(group.locator('code[data-unified]').first()).toBeAttached();
+    const form = await dragStoryLineRange(page, group, 3, 4);
+    const [formBox, groupBox] = [await form.boundingBox(), await group.boundingBox()];
+    expect(groupBox!.width).toBeGreaterThan(1200);
+    expect(formBox!.width).toBeLessThanOrEqual(1040);
+  });
+
+  test('adding a comment on a diff line inside a chapter surfaces it in the comments panel and nav returns to the owning chapter', async ({ page, request }) => {
+    await postStory(request);
+
+    // ch2 owns routes.go's old_start=48 hunk (new-side lines 52-58) — comment
+    // on a line in that range so the comment is scoped to ch2, not ch1.
+    const comment = await addComment(request, 'routes.go', 55, 'Story E2E: dashboard logging comment');
+    await loadPage(page);
+
+    // Start on the overview (not ch2) so the click has to navigate cross-chapter.
+    // Initial load doesn't rewrite the URL hash (only in-app navigation does),
+    // so assert on the rendered view rather than the URL.
+    await expect(storyOverview(page)).toBeVisible();
+
+    await page.keyboard.press('Shift+C');
+    const panel = page.locator('#commentsPanel');
+    await expect(panel).not.toHaveClass(/comments-panel-hidden/);
+
+    const panelCard = panel.locator('.comment-card', { hasText: 'Story E2E: dashboard logging comment' });
+    await expect(panelCard).toBeVisible();
+    await panelCard.scrollIntoViewIfNeeded();
+    await panelCard.click();
+
+    // Chapter-aware navigation: clicking the panel card activates ch2.
+    await expect(page).toHaveURL(/#story\/ch2$/);
+    const ch2Card = storyPane(page).locator(`.comment-card[data-comment-id="${comment.id}"]`);
+    await expect(ch2Card).toBeVisible();
+    await expect(ch2Card).toContainText('Story E2E: dashboard logging comment');
+  });
+
+  test('viewed state on a file group persists across reload and updates rail/TOC progress', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+
+    await tocItem(page, 'ch1').scrollIntoViewIfNeeded();
+    await tocItem(page, 'ch1').click();
+    await expect(storyView(page, 'ch1')).toBeVisible();
+
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]');
+    const viewedLabel = group.locator('.file-header-viewed');
+    await viewedLabel.scrollIntoViewIfNeeded();
+    // Click the label, not .check() on the hidden-pattern checkbox — repo
+    // convention for toggle-style controls (see comments-panel-switch).
+    await viewedLabel.click();
+
+    await expect(group).toHaveClass(/viewed/);
+    await expect(railRow(page, 'ch1').locator('.hunkyard-story-status')).toHaveClass(/done|partial/);
+
+    // Reload preserves the URL, and showStory() wrote #story/ch1 to the hash
+    // when we navigated there — so the reload lands directly back on ch1
+    // (hash-based routing survives reload), not the overview.
+    await page.reload();
+    await expect(page.locator('.loading')).toBeHidden({ timeout: 10_000 });
+    await expect(storyView(page, 'ch1')).toBeVisible();
+    await expect(storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]')).toHaveClass(/viewed/);
+  });
+
+  test('marking every file in a chapter viewed updates the chapter mark button in place', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+
+    await tocItem(page, 'ch1').scrollIntoViewIfNeeded();
+    await tocItem(page, 'ch1').click();
+    await expect(storyView(page, 'ch1')).toBeVisible();
+
+    // ch1 owns a single file group (routes.go), so one checkbox flips the
+    // whole chapter to all-viewed.
+    const markBtn = storyView(page, 'ch1').locator('.hunkyard-story-chapter__mark-row .hunkyard-story-chapter__mark');
+    await expect(markBtn).toHaveText('Mark chapter viewed');
+
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]');
+    await group.locator('.file-header-viewed').scrollIntoViewIfNeeded();
+    await group.locator('.file-header-viewed').click();
+
+    await expect(group).toHaveClass(/viewed/);
+    await expect(markBtn).toHaveText('Chapter viewed');
+
+    // Click polarity flips too: clicking the viewed-state button unmarks.
+    await markBtn.scrollIntoViewIfNeeded();
+    await markBtn.click();
+    await expect(markBtn).toHaveText('Mark chapter viewed');
+    await expect(group).not.toHaveClass(/viewed/);
+  });
+
+  test('chapter file headers reuse collapse and selected-text comment affordances', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+
+    await tocItem(page, 'ch1').scrollIntoViewIfNeeded();
+    await tocItem(page, 'ch1').click();
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]');
+    await expect(group).toBeVisible();
+    await expect(group).toHaveAttribute('open', '');
+    await expect(group.locator('pre[data-diff-type="split"]')).toBeVisible();
+    await expect(group.locator('.file-header-toggle')).toHaveCount(0);
+
+    // Gutter drag across two added lines opens a range form in the group.
+    const form = await dragStoryLineRange(page, group, 3, 4);
+    await expect(form).toContainText(/Lines? 3.{1,3}4/);
+    await page.keyboard.press('Escape');
+    await expect(group.locator('.comment-form')).toHaveCount(0);
+
+    await page.locator('#diffModeToggle .toggle-btn[data-mode="unified"]').click();
+    await expect(group.locator('pre[data-diff-type="single"]')).toBeVisible();
+
+    // Select a few characters of an added line and comment on the selection.
+    const line = diffLine(group, 3);
+    await expect(line).toContainText('import (');
+    await line.evaluate((el) => {
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const text = walker.nextNode();
+      if (!text) throw new Error('expected text in diff content');
+      const selection = window.getSelection();
+      selection?.setBaseAndExtent(text, 0, text, Math.min(5, text.textContent?.length || 0));
+    });
+    await page.keyboard.press('Shift+C');
+    await expect(group.locator('.comment-form textarea')).toBeVisible();
+
+    await page.keyboard.press('Escape');
+    await group.locator('.file-header').click();
+    await expect(group).not.toHaveAttribute('open', '');
+  });
+
+  test('chapter diff gap expand controls reveal more context', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+
+    await tocItem(page, 'ch1').click();
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]');
+    await expect(group).toBeVisible();
+
+    // ch1 shows routes.go's first hunk; the trailing gap (the rest of the
+    // file) is collapsed behind an expand control.
+    const rows = storyDiffRows(group);
+    await expect(rows.last()).toBeVisible();
+    const rowsBefore = await rows.count();
+    await expect(diffLine(group, 30)).toHaveCount(0);
+    // (split view draws the separator once, across both columns)
+    const trailing = group.locator('[data-separator][data-separator-last] [data-expand-button]').first();
+    await expect(trailing).toBeVisible();
+
+    // Pierre ignores pointer events briefly after a scroll: retry the click
+    // until the gap actually expands.
+    await expect(async () => {
+      await trailing.click({ timeout: 1000 });
+      expect(await rows.count()).toBeGreaterThan(rowsBefore);
+    }).toPass();
+    await expect(diffLine(group, rowsBefore + 1)).toBeVisible();
+  });
+
+  test('story chapter refs render the full small-gap hunk cluster', async ({ page, request }) => {
+    await postStory(request, MERGED_HUNK_STORY);
+    const comment = await addComment(request, 'server.go', 68, 'Story E2E: merged cluster support comment');
+    await loadPage(page);
+
+    await tocItem(page, 'ch1').click();
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="server.go"]');
+    await expect(group).toBeVisible();
+
+    // The ref names only the first raw hunk (old_start 2), but all three
+    // small-gap hunks of the cluster (new lines 2-71) render together.
+    await expect(diffLine(group, 5)).toHaveAttribute('data-line-type', 'change-addition'); // "log" import, hunk 1
+    await expect(diffLine(group, 24)).toContainText('authMiddleware'); // hunk 2
+    await expect(diffLine(group, 67)).toContainText('Server starting on :%s'); // hunk 3
+    await expect(diffLine(group, 67)).toHaveAttribute('data-line-type', 'change-addition');
+    await expect(diffLine(group, 71)).toBeVisible();
+
+    await page.keyboard.press('Shift+C');
+    const panel = page.locator('#commentsPanel');
+    await expect(panel).not.toHaveClass(/comments-panel-hidden/);
+    const panelCard = panel.locator('.comment-card', { hasText: 'Story E2E: merged cluster support comment' });
+    await expect(panelCard).toBeVisible();
+    await panelCard.click();
+    await expect(page).toHaveURL(/#story\/support$/);
+    await expect(storyView(page, 'support').locator(`.comment-card[data-comment-id="${comment.id}"]`)).toBeVisible();
+  });
+
+  test('chapter navigation resets scroll to the top of the story page', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+
+    await tocItem(page, 'ch2').scrollIntoViewIfNeeded();
+    await tocItem(page, 'ch2').click();
+    await expect(storyView(page, 'ch2')).toBeVisible();
+
+    // Scroll the chapter down first, or the reset below would pass trivially.
+    await expect.poll(() => page.evaluate(() => {
+      const pane = document.getElementById('storyPane');
+      if (pane) pane.scrollTop = 500;
+      return pane ? pane.scrollTop : 0;
+    })).toBeGreaterThan(0);
+    await railRow(page, 'ch1').click();
+    await expect(storyView(page, 'ch1')).toBeVisible();
+    await expect(storyView(page, 'ch1').locator('.hunkyard-story-next.prev')).toContainText('Prologue');
+    await expect.poll(async () => page.evaluate(() => {
+      const pane = document.getElementById('storyPane');
+      return {
+        windowTop: window.scrollY || document.documentElement.scrollTop || 0,
+        paneTop: pane ? pane.scrollTop : 0,
+      };
+    })).toEqual({ windowTop: 0, paneTop: 0 });
+
+    await railRow(page, 'ch2').click();
+    await expect(storyView(page, 'ch2')).toBeVisible();
+    await storyView(page, 'ch2').locator('.hunkyard-story-next.prev').click();
+    await expect(storyView(page, 'ch1')).toBeVisible();
+
+    await storyView(page, 'ch1').locator('.hunkyard-story-next.prev').click();
+    await expect(storyOverview(page)).toBeVisible();
+  });
+
+  test('Story/Diff toggle is non-destructive: diff layout + story restore without re-ingest', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-active/);
+
+    // Diff: flat layout, story root gone, navbar toggle remains. This
+    // must NOT delete the story (that's DELETE /api/story / --clear), so no
+    // network round-trip is needed — the story stays in session.story.
+    // Hold the session refresh so a tree click reliably arrives while the
+    // previous viewer is disposed and the new list has not been mounted.
+    let releaseReload!: () => void;
+    const reloadAllowed = new Promise<void>(resolve => { releaseReload = resolve; });
+    let reloadStarted!: () => void;
+    const reloadPending = new Promise<void>(resolve => { reloadStarted = resolve; });
+    await page.route('**/api/session?**', async route => {
+      reloadStarted();
+      await reloadAllowed;
+      await route.continue();
+    });
+    await page.locator('#storyViewToggle .toggle-btn[data-story-view="diff"]').click();
+    await reloadPending;
+    await expect(page.locator('body')).not.toHaveClass(/hunkyard-story-active/);
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-hidden/);
+    await expect(page.locator('#storyRoot')).toBeHidden();
+    await page.locator('.tree-file[data-tree-path="server.go"]').click();
+    releaseReload();
+    await expect(page.locator('.pierre-file-header[data-file-path="server.go"]')).toBeInViewport();
+    await expect(page.locator('.tree-file .hunkyard-story-chip')).toHaveCount(0);
+    await expect(page.locator('#storyViewToggle .toggle-btn[data-story-view="diff"]')).toHaveClass(/active/);
+    // Verify real tree jumps after rebuilding the virtualized diff list.
+    await page.locator('.tree-file[data-tree-path="handler.js"]').click();
+    await expect(page.locator('.pierre-file-header[data-file-path="handler.js"]')).toBeInViewport();
+    await page.locator('.tree-file[data-tree-path="server.go"]').click();
+    await expect(page.locator('.pierre-file-header[data-file-path="server.go"]')).toBeInViewport();
+
+    // Show: story view returns with the SAME story (no re-ingest happened).
+    await page.locator('#storyViewToggle .toggle-btn[data-story-view="story"]').click();
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-active/);
+    await expect(page.locator('body')).not.toHaveClass(/hunkyard-story-hidden/);
+    await expect(storyOverview(page)).toBeVisible();
+    await expect(page.locator('#storyViewToggle .toggle-btn[data-story-view="story"]')).toHaveClass(/active/);
+  });
+
+  test('Story keeps raw hunk anchors while Diff honors Ignore whitespace', async ({ page, request }) => {
+    const routesPath = path.join(fixtureDir, 'routes.go');
+    const original = fs.readFileSync(routesPath, 'utf8');
+    const opts = { cwd: fixtureDir, encoding: 'utf8' as const };
+    const base = execFileSync('git', ['rev-list', '--max-parents=0', 'HEAD'], opts).trim();
+    const baseline = execFileSync('git', ['show', `${base}:routes.go`], opts);
+
+    try {
+      // Two separated hunks: whitespace-only imports, then a semantic change.
+      fs.writeFileSync(routesPath, baseline
+        .replace('import "net/http"', 'import   "net/http"')
+        .replace('func handleAnalytics(w http.ResponseWriter, r *http.Request) {\n\tw.WriteHeader(http.StatusOK)',
+          'func handleAnalytics(w http.ResponseWriter, r *http.Request) {\n\tw.WriteHeader(http.StatusAccepted)'));
+      await roundComplete(request);
+      const raw = await (await request.get('/api/file/diff?path=routes.go')).json();
+      expect(raw.hunks).toHaveLength(2);
+      const filtered = await (await request.get('/api/file/diff?path=routes.go&w=1')).json();
+      expect(filtered.hunks).toHaveLength(1);
+
+      await postStory(request, {
+        ...STORY,
+        chapters: [{
+          id: 'ch1',
+          title: 'Accept analytics requests',
+          summary: 'Return Accepted for analytics requests.',
+          hunk_refs: [{ file_path: 'routes.go', old_start: raw.hunks[1].OldStart }],
+        }],
+        support: [...STORY.support, {
+          hunk_refs: [
+            { file_path: 'routes.go', old_start: raw.hunks[0].OldStart },
+            { file_path: 'plan.md', old_start: 0 },
+          ],
+          reason: 'Whitespace-only import change and supporting documentation.',
+        }],
+      });
+      await page.context().addCookies([{
+        name: 'hunkyard-settings',
+        value: encodeURIComponent(JSON.stringify({ ignoreWhitespace: true })),
+        domain: 'localhost',
+        path: '/',
+      }]);
+
+      const isRoutesDiff = (req: { url(): string }) => {
+        const url = new URL(req.url());
+        return url.pathname === '/api/file/diff' && url.searchParams.get('path') === 'routes.go';
+      };
+      const storyRequest = page.waitForRequest(isRoutesDiff);
+      await loadPage(page);
+      expect(new URL((await storyRequest).url()).searchParams.has('w')).toBe(false);
+      await tocItem(page, 'ch1').click();
+      const chapter = storyView(page, 'ch1');
+      const chapterGroup = chapter.locator('.hunkyard-story-file-group[data-story-file="routes.go"]');
+      await expect(storyDiffRows(chapterGroup).filter({ hasText: 'http.StatusAccepted' })).toBeVisible();
+
+      const flatRequest = page.waitForRequest(isRoutesDiff);
+      await page.locator('#storyViewToggle .toggle-btn[data-story-view="diff"]').click();
+      expect(new URL((await flatRequest).url()).searchParams.get('w')).toBe('1');
+      const flat = await revealFile(page, 'routes.go');
+      const flatRows = flat.locator('code [data-content] > [data-line]');
+      await expect(flatRows.filter({ hasText: 'http.StatusAccepted' }).first()).toBeVisible();
+      // Whitespace-only import hunk is filtered out of the flat diff
+      await expect(flatRows.filter({ hasText: 'import' })).toHaveCount(0);
+
+      const restoredRequest = page.waitForRequest(isRoutesDiff);
+      await page.locator('#storyViewToggle .toggle-btn[data-story-view="story"]').click();
+      expect(new URL((await restoredRequest).url()).searchParams.has('w')).toBe(false);
+      await expect(storyDiffRows(storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]'))
+        .filter({ hasText: 'http.StatusAccepted' })).toBeVisible();
+    } finally {
+      fs.writeFileSync(routesPath, original);
+      await clearStory(request);
+      await roundComplete(request);
+    }
+  });
+
+  test('Story/Diff toggle survives switching diff scope while in Diff view', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+    await expect(page.locator('#storyViewToggle')).toBeVisible();
+
+    await page.locator('#storyViewToggle .toggle-btn[data-story-view="diff"]').click();
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-hidden/);
+    await expect(page.locator('#scopeToggle')).toBeVisible();
+
+    await page.locator('#scopeToggle .toggle-btn[data-scope="unstaged"]').click();
+    await expect(page.locator('#scopeToggle .toggle-btn[data-scope="unstaged"]')).toHaveClass(/active/);
+    await expect(page.locator('#storyViewToggle')).toBeVisible();
+    await expect(page.locator('#storyViewToggle .toggle-btn[data-story-view="diff"]')).toHaveClass(/active/);
+
+    await page.locator('#storyViewToggle .toggle-btn[data-story-view="story"]').click();
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-active/);
+    await expect(page.locator('#storyViewToggle .toggle-btn[data-story-view="story"]')).toHaveClass(/active/);
+    await expect(storyOverview(page)).toBeVisible();
+
+    await tocItem(page, 'ch1').click();
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]');
+    await expect(group).toBeVisible();
+    await expect(diffLine(group, 3)).toContainText('import (');
+    await expect(group).not.toContainText('File not loaded.');
+  });
+
+  test('Story/Diff toggle survives initial load from a persisted scoped diff view', async ({ page, request }) => {
+    await postStory(request);
+    await page.context().addCookies([{
+      name: 'hunkyard-settings',
+      value: encodeURIComponent(JSON.stringify({ diffScope: 'unstaged' })),
+      domain: 'localhost',
+      path: '/',
+    }]);
+
+    let storySideFetch = 0;
+    let fullSessionFetch = 0;
+    await page.route('**/api/session*', async route => {
+      const response = await route.fetch();
+      const json = await response.json();
+      const scope = new URL(route.request().url()).searchParams.get('scope');
+      if (scope === 'all') fullSessionFetch++;
+      if (scope === 'unstaged') delete json.story;
+      await route.fulfill({ json });
+    });
+    await page.route('**/api/story', async route => {
+      storySideFetch++;
+      await route.continue();
+    });
+
+    await loadPage(page);
+
+    expect(storySideFetch).toBeGreaterThan(0);
+    expect(fullSessionFetch).toBeGreaterThan(0);
+    await expect(page.locator('#storyViewToggle')).toBeVisible();
+    await expect(page.locator('#storyViewToggle .toggle-btn[data-story-view="story"]')).toHaveClass(/active/);
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-active/);
+    await expect(storyOverview(page)).toBeVisible();
+
+    await tocItem(page, 'ch1').click();
+    const group = storyView(page, 'ch1').locator('.hunkyard-story-file-group[data-story-file="routes.go"]');
+    await expect(group).toBeVisible();
+    await expect(diffLine(group, 3)).toContainText('import (');
+    await expect(group).not.toContainText('File not loaded.');
+  });
+
+  test('#story hash un-hides a hidden story', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+    await page.locator('#storyViewToggle .toggle-btn[data-story-view="diff"]').click();
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-hidden/);
+
+    // Navigating to the #story hash restores the story view (same affordance a
+    // deep link into a chapter would hit).
+    await page.evaluate(() => { window.location.hash = '#story'; });
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-active/);
+    await expect(storyOverview(page)).toBeVisible();
+  });
+
+  test('DELETE /api/story fully removes the story: no re-entry affordance remains', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+    await page.locator('#storyViewToggle .toggle-btn[data-story-view="diff"]').click();
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-hidden/);
+    await expect(page.locator('#storyViewToggle')).toBeVisible();
+
+    // Real removal via the API (the --clear path). The story-updated SSE with a
+    // null story must tear everything down, including the re-entry affordance.
+    const resp = await request.delete('/api/story');
+    expect(resp.ok()).toBeTruthy();
+    await expect(page.locator('body')).not.toHaveClass(/hunkyard-story-hidden/);
+    await expect(page.locator('body')).not.toHaveClass(/hunkyard-story-active/);
+    await expect(page.locator('#storyViewToggle')).toBeHidden();
+    await expect(await goSection(page)).toBeVisible();
+  });
+
+  test('a fresh story via SSE brings the story back live and un-hides after Hide', async ({ page, request }) => {
+    await ingestStoryCLI(hunkyardBin, fixtureDir, fakeHome);
+    await loadPage(page);
+    await page.locator('#storyViewToggle .toggle-btn[data-story-view="diff"]').click();
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-hidden/);
+
+    // Re-ingest (with --refresh, since a story is present) while the page stays
+    // open — the story-updated SSE must resurface the story view, clearing the
+    // hidden state without a reload.
+    await ingestStoryCLI(hunkyardBin, fixtureDir, fakeHome, { refresh: true });
+    await expect(page.locator('body')).toHaveClass(/hunkyard-story-active/, { timeout: 5000 });
+    await expect(page.locator('body')).not.toHaveClass(/hunkyard-story-hidden/);
+    await expect(storyOverview(page)).toBeVisible();
+  });
+
+  test('comments-changed SSE re-renders the story pane live while a chapter is open', async ({ page, request }) => {
+    await postStory(request);
+    await loadPage(page);
+
+    await tocItem(page, 'ch2').scrollIntoViewIfNeeded();
+    await tocItem(page, 'ch2').click();
+    await expect(storyView(page, 'ch2')).toBeVisible();
+
+    // Add the comment via the CLI (not the review-panel UI, and not the plain
+    // POST /api/file/comments path used by the addComment() helper elsewhere
+    // in this suite — that path mutates in-memory state directly and never
+    // notifies comments-changed; only external review-file writes such as
+    // `hunkyard comment` do, via the git-mode watcher's mergeExternalHunkyardJSON).
+    // This exercises the real live-agent-edit path the story-aware
+    // comments-changed re-render (web/app.js) is meant to serve.
+    execSync(`"${hunkyardBin}" comment routes.go:55 "Live SSE comment while ch2 open"`, execOptsFor(fixtureDir, fakeHome));
+
+    await expect(storyView(page, 'ch2').locator('.comment-card', { hasText: 'Live SSE comment while ch2 open' })).toBeVisible({ timeout: 5000 });
+  });
+
+  test('clicking a comment on an unchanged line opens the chapter that shows it', async ({ page, request }) => {
+    await postStory(request);
+    // Every changed line lands on a story page (auto-repair), and a comment
+    // on an unchanged line widens its file's nearest hunk to show it. So a
+    // comment between routes.go's two hunks opens ch1, which owns the first.
+    const { hunks } = await (await request.get('/api/file/diff?path=routes.go')).json();
+    expect(hunks.length).toBeGreaterThan(1);
+    const firstEnd = hunks[0].OldStart + hunks[0].OldCount - 1;
+    const gapLine = firstEnd + Math.floor((hunks[1].OldStart - firstEnd) / 2);
+    expect(gapLine).toBeGreaterThan(firstEnd);
+    expect(gapLine).toBeLessThan(hunks[1].OldStart);
+    const resp = await request.post('/api/file/comments?path=routes.go', {
+      data: { start_line: gapLine, end_line: gapLine, side: 'old', body: 'Comment on an unchanged line' },
+    });
+    await expect(resp).toBeOK();
+    const errors: string[] = [];
+    page.on('pageerror', err => errors.push(err.message));
+    await loadPage(page);
+
+    await page.keyboard.press('Shift+C');
+    const panel = page.locator('#commentsPanel');
+    const panelCard = panel.locator('.comment-card', { hasText: 'Comment on an unchanged line' });
+    await expect(panelCard).toBeVisible();
+    await panelCard.scrollIntoViewIfNeeded();
+    await panelCard.click();
+
+    await expect(page).toHaveURL(/#story\/ch1$/);
+    await expect(storyPane(page).locator('.comment-card', { hasText: 'Comment on an unchanged line' })).toBeVisible();
+    await expect(panel).not.toHaveClass(/comments-panel-hidden/);
+    expect(errors).toEqual([]);
+  });
+});

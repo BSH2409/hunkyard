@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# fake-agent.sh — a canned `agent_cmd` for story-mode tests and E2E.
+#
+# Usable as hunkyard's `agent_cmd`: hunkyard pipes the story prompt on stdin (or via a
+# {prompt} arg). This script ignores the prompt and prints a fixed story JSON
+# to stdout, so tests can exercise the exec + JSON-extraction + ingest path
+# without a real LLM. Later tasks (agent_cmd exec + JSON extraction) consume it.
+#
+# Override the emitted story with HUNKYARD_FAKE_STORY_FILE=<path> to point at any
+# canned JSON fixture (e.g. test/fixtures/story/valid-story.json).
+set -euo pipefail
+
+# Drain stdin so a writer piping the prompt doesn't get SIGPIPE.
+cat >/dev/null 2>&1 || true
+
+if [[ -n "${HUNKYARD_FAKE_STORY_FILE:-}" ]]; then
+  cat "${HUNKYARD_FAKE_STORY_FILE}"
+  exit 0
+fi
+
+cat <<'JSON'
+{
+  "version": 1,
+  "agent": "fake-agent",
+  "prologue": {
+    "title": "Canned story",
+    "overview": "A canned story for tests.",
+    "key_changes": ["Covers the fixture hunk."],
+    "risks": ["Fixture coverage depends on the app.go new-file hunk."]
+  },
+  "chapters": [
+    {
+      "id": "ch1",
+      "title": "Canned chapter",
+      "summary": "Covers the single fixture hunk.",
+      "hunk_refs": [{ "file_path": "app.go", "old_start": 0 }]
+    }
+  ]
+}
+JSON

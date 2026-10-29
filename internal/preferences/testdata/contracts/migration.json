@@ -1,0 +1,2684 @@
+{
+  "reference": "Ruby synthetic MigrationCliTest, minitest 5.26.2",
+  "events": [
+    {
+      "case": "test_audit_rejects_recorded_source_metadata_after_source_bytes_change",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_audit_rejects_recorded_source_metadata_after_source_bytes_change",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_audit_rejects_recorded_source_metadata_after_source_bytes_change",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    },
+    {
+      "case": "test_idempotent_migration_repairs_a_missing_daily_success_stamp_without_model_or_generation_write",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_idempotent_migration_repairs_a_missing_daily_success_stamp_without_model_or_generation_write",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_idempotent_migration_repairs_a_missing_daily_success_stamp_without_model_or_generation_write",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    },
+    {
+      "case": "test_legacy_reader_parses_one_safe_yaml_document_and_maps_scopes",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_legacy_reader_parses_one_safe_yaml_document_and_maps_scopes",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_legacy_reader_rejects_aliases_objects_second_fence_and_invalid_rules_shapes",
+      "kind": "read",
+      "text": "```yaml\nrules: &rules []\ncopy: *rules\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": false
+    },
+    {
+      "case": "test_legacy_reader_rejects_aliases_objects_second_fence_and_invalid_rules_shapes",
+      "kind": "read",
+      "text": "```yaml\nrules: [!ruby/object:Object {}]\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": false
+    },
+    {
+      "case": "test_legacy_reader_rejects_aliases_objects_second_fence_and_invalid_rules_shapes",
+      "kind": "read",
+      "text": "```yaml\nversion: 1\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": false
+    },
+    {
+      "case": "test_legacy_reader_rejects_aliases_objects_second_fence_and_invalid_rules_shapes",
+      "kind": "read",
+      "text": "```yaml\nrules: value\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": false
+    },
+    {
+      "case": "test_legacy_reader_rejects_aliases_objects_second_fence_and_invalid_rules_shapes",
+      "kind": "read",
+      "text": "```yaml\nrules: []\n```\n```yaml\nrules: []\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": false
+    },
+    {
+      "case": "test_migration_backup_precedes_model_apply_and_second_run_is_idempotent",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_migration_backup_precedes_model_apply_and_second_run_is_idempotent",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_migration_backup_precedes_model_apply_and_second_run_is_idempotent",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    },
+    {
+      "case": "test_migration_dry_run_validates_without_changing_the_root",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_migration_dry_run_validates_without_changing_the_root",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_migration_dry_run_validates_without_changing_the_root",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    },
+    {
+      "case": "test_migration_failure_keeps_verified_backup_without_current_or_completion_state",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_migration_failure_keeps_verified_backup_without_current_or_completion_state",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_migration_failure_keeps_verified_backup_without_current_or_completion_state",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    },
+    {
+      "case": "test_migration_plan_deduplicates_seeds_and_real_examples_without_trusting_counts",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_migration_plan_deduplicates_seeds_and_real_examples_without_trusting_counts",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_migration_plan_deduplicates_seeds_and_real_examples_without_trusting_counts",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    },
+    {
+      "case": "test_migration_retry_after_post_swap_audit_failure_excludes_processed_observations",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_migration_retry_after_post_swap_audit_failure_excludes_processed_observations",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_migration_retry_after_post_swap_audit_failure_excludes_processed_observations",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    },
+    {
+      "case": "test_migration_retry_after_post_swap_audit_failure_excludes_processed_observations",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_migration_retry_after_post_swap_audit_failure_excludes_processed_observations",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_migration_retry_after_post_swap_audit_failure_excludes_processed_observations",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    },
+    {
+      "case": "test_migration_retry_reuses_the_verified_backup_after_model_failure",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_migration_retry_reuses_the_verified_backup_after_model_failure",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_migration_retry_reuses_the_verified_backup_after_model_failure",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    },
+    {
+      "case": "test_migration_retry_reuses_the_verified_backup_after_model_failure",
+      "kind": "read",
+      "text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "scope": {
+        "kind": "global",
+        "repo_key": null
+      },
+      "accepted": true,
+      "result": {
+        "digest": "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent.",
+              "Always test observable retry behavior."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 4,
+            "legacy_usage_count": 12
+          }
+        ],
+        "rejected": 1
+      }
+    },
+    {
+      "case": "test_migration_retry_reuses_the_verified_backup_after_model_failure",
+      "kind": "read",
+      "text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "scope": {
+        "kind": "repository",
+        "repo_key": "blogvault-a1b2c3d4e5f6"
+      },
+      "accepted": true,
+      "result": {
+        "digest": "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4",
+        "rules": [
+          {
+            "legacy_id": "seed_service_boundary_project",
+            "directive": "Prefer explicit service boundaries.",
+            "source": "seed",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "persona_file": "architecture.md",
+            "safe_examples": [],
+            "first_seen": "2026-07-01T09:00:00Z",
+            "last_seen": "2026-08-01T09:00:00Z",
+            "legacy_confidence": 5,
+            "legacy_usage_count": 5
+          },
+          {
+            "legacy_id": "feedback_retry_project",
+            "directive": "Keep retries idempotent.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "testing"
+            ],
+            "persona_file": "testing.md",
+            "safe_examples": [
+              "Again, keep retries idempotent."
+            ],
+            "first_seen": "2026-08-02T09:00:00Z",
+            "last_seen": "2026-08-03T09:00:00Z",
+            "legacy_confidence": 3,
+            "legacy_usage_count": 7
+          },
+          {
+            "legacy_id": "feedback_blogvault_only",
+            "directive": "Avoid callback-driven BlogVault workflows.",
+            "source": "feedback",
+            "scope": {
+              "kind": "repository",
+              "repo_key": "blogvault-a1b2c3d4e5f6"
+            },
+            "surfaces": [
+              "rails"
+            ],
+            "persona_file": "rails.md",
+            "safe_examples": [
+              "Again, avoid callbacks for this BlogVault workflow."
+            ],
+            "first_seen": "2026-08-04T09:00:00Z",
+            "last_seen": "2026-08-05T09:00:00Z",
+            "legacy_confidence": 2,
+            "legacy_usage_count": 3
+          }
+        ],
+        "rejected": 0
+      }
+    },
+    {
+      "case": "test_migration_retry_reuses_the_verified_backup_after_model_failure",
+      "kind": "plan",
+      "global_text": "# Legacy global lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T10:00:00Z\"\nrules:\n  - id: seed_service_boundary\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 4\n    usage_count: 12\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n      - Always test observable retry behavior.\n      - Never log token sk-abcdefghijklmnopqrstuvwxyz123456.\n```\n",
+      "project_text": "# Legacy project lessons\n\n```yaml\nversion: 1\nupdated_at: \"2026-08-18T11:00:00Z\"\nrules:\n  - id: seed_service_boundary_project\n    category: architecture\n    persona_file: architecture.md\n    description: Prefer explicit service boundaries.\n    confidence: 5\n    usage_count: 5\n    first_seen: \"2026-07-01T09:00:00Z\"\n    last_seen: \"2026-08-01T09:00:00Z\"\n    status: persona\n    source: seed\n    raw_examples: []\n  - id: feedback_retry_project\n    category: testing\n    persona_file: testing.md\n    description: Keep retries idempotent.\n    confidence: 3\n    usage_count: 7\n    first_seen: \"2026-08-02T09:00:00Z\"\n    last_seen: \"2026-08-03T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, keep retries idempotent.\n  - id: feedback_blogvault_only\n    category: rails\n    persona_file: rails.md\n    description: Avoid callback-driven BlogVault workflows.\n    confidence: 2\n    usage_count: 3\n    first_seen: \"2026-08-04T09:00:00Z\"\n    last_seen: \"2026-08-05T09:00:00Z\"\n    status: lesson\n    source: feedback\n    raw_examples:\n      - Again, avoid callbacks for this BlogVault workflow.\n```\n",
+      "repo_key": "blogvault-a1b2c3d4e5f6",
+      "clock": "2026-08-19T12:00:00Z",
+      "result": {
+        "seeds": [
+          {
+            "id": "legacy_seed_b50e5089409489fd8762faba",
+            "directive": "Prefer explicit service boundaries.",
+            "scope": {
+              "kind": "global",
+              "repo_key": null
+            },
+            "surfaces": [
+              "architecture"
+            ],
+            "origin": "legacy_seed",
+            "status": "candidate",
+            "evidence": {
+              "observation_ids": [],
+              "explicit_count": 0,
+              "correction_count": 0,
+              "distinct_sessions": 0,
+              "distinct_repositories": 0
+            },
+            "created_at": "2026-07-01T09:00:00Z",
+            "updated_at": "2026-08-01T09:00:00Z"
+          }
+        ],
+        "observations": [
+          {
+            "id": "obs_61762330a1a3224dbd83a54007392f3b0dfadd36b7270b156f1aa9e64335cdd8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "fa4b6ca6747d295daf6d0c1179be2c0fe558697c68f8cce5e8e9926e9199f58f",
+            "safe_excerpt": "Again, keep retries idempotent.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_f528fe522fb50b6f4d977446a316d4e2bc0afc2f1c6ec0fd1b892501e13390e8",
+            "captured_at": "2026-08-03T09:00:00Z",
+            "source": "migration",
+            "repo_key": null,
+            "session_key": null,
+            "turn_key": "c1406e739de026fc1ff973a18b0bef1f869652d7cc39bb99389d04cd21a9b734",
+            "prompt_fingerprint": "3c376551154d2eb806c7f7a143794d31d030f4fa486534d67b6693b10879396d",
+            "safe_excerpt": "Always test observable retry behavior.",
+            "signals": {
+              "correction": false,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          },
+          {
+            "id": "obs_ed3accf5d43cc2c56c0734a018c4a3b9259bc4ade20a8fe4e48ce8eb6b38e407",
+            "captured_at": "2026-08-05T09:00:00Z",
+            "source": "migration",
+            "repo_key": "blogvault-a1b2c3d4e5f6",
+            "session_key": null,
+            "turn_key": "ab2be4457c4edb1785fe97a298c1806897a1d63f90ac618b8404df0ce6fca0fc",
+            "prompt_fingerprint": "339a648d4a6b8df203c70cf8f386cb2e09a3a66786197f8ee975e29d883a4050",
+            "safe_excerpt": "Again, avoid callbacks for this BlogVault workflow.",
+            "signals": {
+              "correction": true,
+              "durable_language": true,
+              "likely_task_local": false
+            },
+            "suggested_surfaces": []
+          }
+        ],
+        "report": {
+          "schema_version": 1,
+          "migration": "legacy_v1",
+          "input_digests": [
+            "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+            "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+          ],
+          "legacy_rules": {
+            "global": 2,
+            "project": 3
+          },
+          "seeds": {
+            "candidate": 1
+          },
+          "observations": {
+            "accepted": 3,
+            "rejected_sensitive": 1
+          },
+          "legacy_confidence": {
+            "min": 2,
+            "max": 5,
+            "count": 5
+          },
+          "legacy_usage_count": {
+            "min": 3,
+            "max": 12,
+            "count": 5
+          }
+        },
+        "input_digests": [
+          "5d8280dd995a11e64d5071d30968354833457a589c367b99577f567132765efd",
+          "644c5ae54e662e1f7816288adbae565934c01c655e63a0ea629e77792731bbd4"
+        ],
+        "legacy_global_persona_files": [
+          "architecture.md",
+          "testing.md"
+        ]
+      }
+    }
+  ]
+}

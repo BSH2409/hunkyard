@@ -1,0 +1,44 @@
+import { test, expect, type Page } from '@playwright/test';
+import { loadPage, revealFile, mdSection, diffLine } from './helpers';
+
+// The file list is virtualized, so an off-screen file has no DOM. Check that
+// every file-mode file is listed and renders its content when brought into
+// view: markdown as a rendered document, code as whole-file lines.
+async function expectAllFilesRender(page: Page) {
+  await expect(page.locator('.tree-file')).toHaveCount(3);
+  const md = await mdSection(page);
+  await expect(md.locator('.document-wrapper .line-block').first()).toBeVisible();
+  const go = await revealFile(page, 'server.go');
+  await expect(diffLine(go, 1)).toContainText('package main');
+  const js = await revealFile(page, 'handler.js');
+  await expect(diffLine(js, 1)).toContainText('Request handler');
+}
+
+test.describe('File Mode — Page Loading', () => {
+  test('page loads file sections with file-mode header chrome', async ({ page }) => {
+    await loadPage(page);
+    await expectAllFilesRender(page);
+
+    // No branch name in the header (file mode, even inside a git repo).
+    await expect(page.locator('#branchContext')).toBeHidden();
+    // Document title lists the file names instead of a branch.
+    await expect(page).toHaveTitle(/Hunkyard — .*plan\.md/);
+    // Diff mode toggle stays hidden until a round produces diffs.
+    await expect(page.locator('#diffModeToggle')).toBeHidden();
+    // File headers do not show a git status badge.
+    await expect(page.locator('.file-header-badge')).toHaveCount(0);
+    // The stack chip ✕ exit is a git-mode range control.
+    await expect(page.locator('#stackChipExit')).toBeHidden();
+  });
+});
+
+test.describe('File Mode — Scope Cookie Resilience', () => {
+  test('renders files even when git scope cookie is set', async ({ page }) => {
+    await page.context().addCookies([
+      { name: 'hunkyard-diff-scope', value: 'staged', domain: 'localhost', path: '/' },
+    ]);
+    await page.goto('/');
+    await expect(page.locator('.loading')).toBeHidden({ timeout: 10_000 });
+    await expectAllFilesRender(page);
+  });
+});

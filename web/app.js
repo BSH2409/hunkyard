@@ -1,0 +1,11098 @@
+(function() {
+  'use strict';
+
+  // GitHub's emoji shortcode table (gemoji.min.js); absent → shortcodes stay text.
+  function emojiForShortcode(name) {
+    const table = window.hunkyard.emojiShortcodes;
+    return table && Object.prototype.hasOwnProperty.call(table, name) ? table[name] : null;
+  }
+
+  // ===== Comment Markdown Renderer =====
+  // Fenced code renders plain here: comment HTML is sanitised (token styles
+  // would be stripped), so codeHighlight.upgrade() highlights the mounted
+  // <code class="language-x"> blocks afterwards (see watchCodeBlocks).
+  // hunkyard-gfm.js adds GitHub's comment syntax (task lists, alerts, math, emoji,
+  // ...); footnotes stay off, since ids from separate comments would collide.
+  // Math renders as placeholders that hunkyard-math.js upgrades once mounted.
+  const commentMd = window.hunkyard.gfm.use(window.markdownit({
+    html: true,
+    linkify: true,
+    typographer: true,
+  }), { footnotes: false, emoji: emojiForShortcode });
+  // Disable (c)/(r)/(tm) → ©/®/™ replacements so enumerated options render
+  // literally. Keep typographer (smart quotes) and disable only replacements.
+  commentMd.disable('replacements');
+
+  // ===== File Reference Inline Rule =====
+  commentMd.inline.ruler.push('file_ref', function(state, silent) {
+    const start = state.pos;
+    const max = state.posMax;
+    if (state.src.charCodeAt(start) !== 0x40 /* @ */) return false;
+    if (start > 0 && !/\s/.test(state.src[start - 1])) return false;
+    let end = start + 1;
+    while (end < max && /[a-zA-Z0-9._\-\/]/.test(state.src[end])) end++;
+    const path = state.src.substring(start + 1, end);
+    if (path.length === 0 || (path.indexOf('.') === -1 && path.indexOf('/') === -1)) return false;
+    if (!silent) {
+      const token = state.push('file_ref', '', 0);
+      token.content = path;
+    }
+    state.pos = end;
+    return true;
+  });
+  commentMd.renderer.rules.file_ref = function(tokens, idx) {
+    const path = tokens[idx].content;
+    return '<span class="file-ref">' + escapeHtml(path) + '</span>';
+  };
+
+  // Override code_inline so backtick-wrapped comment IDs render as the same chip.
+  const defaultCodeInline = commentMd.renderer.rules.code_inline || function(tokens, idx, options, _env, self) {
+    return self.renderToken(tokens, idx, options);
+  };
+  commentMd.renderer.rules.code_inline = function(tokens, idx, options, env, self) {
+    const content = tokens[idx].content;
+    if (/^(c|r|rp)_[a-f0-9]{6,}$/.test(content)) {
+      return '<span class="comment-ref comment-ref-code" data-ref-id="' + escapeHtml(content) + '" tabindex="0" role="link">' + escapeHtml(content) + '</span>';
+    }
+    return defaultCodeInline(tokens, idx, options, env, self);
+  };
+
+  function linkifyCommentRefsInDom(el) {
+    const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
+    const textNodes = [];
+    let node;
+    while ((node = walker.nextNode())) {
+      // skip text inside code/pre elements and already-linked chips
+      if (node.parentNode.closest('code, pre, .comment-ref')) continue;
+      textNodes.push(node);
+    }
+    const re = /((?:c|r|rp)_[a-f0-9]{6,})/g;
+    textNodes.forEach(function(tn) {
+      if (!re.test(tn.nodeValue)) { re.lastIndex = 0; return; }
+      re.lastIndex = 0;
+      const frag = document.createDocumentFragment();
+      let last = 0, m;
+      while ((m = re.exec(tn.nodeValue)) !== null) {
+        if (m.index > last) frag.appendChild(document.createTextNode(tn.nodeValue.slice(last, m.index)));
+        const span = document.createElement('span');
+        span.className = 'comment-ref';
+        span.dataset.refId = m[1];
+        span.textContent = m[1];
+        span.tabIndex = 0;
+        span.setAttribute('role', 'link');
+        frag.appendChild(span);
+        last = m.index + m[0].length;
+      }
+      if (last < tn.nodeValue.length) frag.appendChild(document.createTextNode(tn.nodeValue.slice(last)));
+      tn.parentNode.replaceChild(frag, tn);
+    });
+  }
+
+  // Scroll/expand/flash a comment card located anywhere in the document, given just its id.
+  // Distinct from scrollToComment(commentId, filePath) below — that one needs filePath context.
+  function scrollToCommentRef(id) {
+    if (pierreViewActive()) {
+      const owner = files.find(function(f) {
+        return (f.comments || []).some(function(c) { return c.id === id; });
+      });
+      if (owner) pierreJumpToComment(id, owner.path, flashCommentRefCard);
+      return;
+    }
+    // Story view: the card is in the chapter pane when its chapter is shown.
+    const card = document.querySelector('.comment-card[data-comment-id="' + CSS.escape(id) + '"]');
+    if (!card) return;
+    flashCommentRefCard(card);
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function flashCommentRefCard(card) {
+    const id = card.dataset.commentId;
+    if (card.classList.contains('collapsed')) {
+      card.classList.remove('collapsed');
+      if (typeof commentCollapseOverrides !== 'undefined') commentCollapseOverrides[id] = false;
+    }
+    card.classList.remove('comment-ref-flash');
+    void card.offsetWidth;
+    card.classList.add('comment-ref-flash');
+    card.addEventListener('animationend', function() {
+      card.classList.remove('comment-ref-flash');
+    }, { once: true });
+  }
+
+  document.addEventListener('click', function(e) {
+    const ref = e.target.closest && e.target.closest('.comment-ref');
+    if (!ref) return;
+    e.preventDefault();
+    scrollToCommentRef(ref.dataset.refId);
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+    const ref = e.target.closest && e.target.closest('.comment-ref');
+    if (!ref) return;
+    e.preventDefault();
+    scrollToCommentRef(ref.dataset.refId);
+  });
+
+  // ===== Attachment Image Src Rewrite =====
+  // Markdown stored in review.json uses canonical relative paths
+  // (`attachments/<uuid>.<ext>`) — never absolute URLs. Each render target
+  // rewrites at its own publish boundary; in the local UI that means
+  // pointing the browser at /api/attachments/<uuid>.<ext>. External URLs
+  // (https/http/data/absolute paths) pass through untouched so historical
+  // GitHub raw URLs or external image hosts still render after `hunkyard pull`.
+  commentMd.renderer.rules.image = function(tokens, idx, options, _env, self) {
+    const token = tokens[idx];
+    const srcIdx = token.attrIndex('src');
+    if (srcIdx >= 0) {
+      const src = token.attrs[srcIdx][1];
+      if (!/^https?:\/\/|^data:|^\//.test(src) && /^attachments\//.test(src)) {
+        token.attrs[srcIdx][1] = '/api/' + src;
+      }
+    }
+    return self.renderToken(tokens, idx, options);
+  };
+
+  // ===== Suggestion Diff Renderer =====
+  function renderSuggestionDiff(suggestionContent, originalLines) {
+    const sugLines = suggestionContent.replace(/\n$/, '').split('\n');
+    let html = '<div class="suggestion-diff">';
+    html += '<div class="suggestion-header">Suggested change</div>';
+
+    const origLen = (originalLines && originalLines.length > 0) ? originalLines.length : 0;
+    const isEmptySuggestion = sugLines.length === 1 && sugLines[0] === '' && origLen > 0;
+    const sugLen = isEmptySuggestion ? 0 : sugLines.length;
+    const pairedLen = Math.min(origLen, sugLen);
+
+    // Compute word-level diffs for paired lines
+    const delContents = [];
+    const addContents = [];
+    for (let i = 0; i < pairedLen; i++) {
+      const wd = wordDiff(originalLines[i], sugLines[i]);
+      if (wd) {
+        delContents.push(applyWordDiffToHtml(escapeHtml(originalLines[i]), wd.oldRanges, 'diff-word-del'));
+        addContents.push(applyWordDiffToHtml(escapeHtml(sugLines[i]), wd.newRanges, 'diff-word-add'));
+      } else {
+        delContents.push(escapeHtml(originalLines[i]));
+        addContents.push(escapeHtml(sugLines[i]));
+      }
+    }
+
+    // All deletion lines first (paired + unpaired)
+    for (let j = 0; j < origLen; j++) {
+      const dc = j < pairedLen ? delContents[j] : escapeHtml(originalLines[j]);
+      html += '<div class="suggestion-line suggestion-line-del">'
+        + '<span class="suggestion-line-sign">\u2212</span>'
+        + '<span class="suggestion-line-content">' + dc + '</span></div>';
+    }
+
+    // All addition lines (paired + unpaired)
+    for (let k = 0; k < sugLen; k++) {
+      const ac = k < pairedLen ? addContents[k] : escapeHtml(sugLines[k]);
+      html += '<div class="suggestion-line suggestion-line-add">'
+        + '<span class="suggestion-line-sign">+</span>'
+        + '<span class="suggestion-line-content">' + ac + '</span></div>';
+    }
+
+    html += '</div>';
+    return html;
+  }
+
+  // ===== Tab-Ready Indicator =====
+  // Prepends a bullet to document.title when a review round completes while
+  // the tab is hidden. Desktop notifications are server-side (notify_on_round_ready).
+  const tabReady = (window.hunkyard && window.hunkyard.createTabReady)
+    ? window.hunkyard.createTabReady()
+    : null;
+  const setDocumentTitle = tabReady
+    ? function(nextBase) { tabReady.setDocumentTitle(nextBase); }
+    : function(nextBase) { document.title = nextBase; };
+  const noop = function() { /* tabReady unavailable */ };
+  const setTabBadge = tabReady ? tabReady.setTabBadge : noop;
+  const clearTabBadge = tabReady ? tabReady.clearTabBadge : noop;
+  const notifyRoundReady = tabReady ? tabReady.notifyRoundReady : setTabBadge;
+
+  document.addEventListener('visibilitychange', function() {
+    if (document.visibilityState === 'visible') clearTabBadge();
+  });
+
+  // Expose for tests — only when ?test query param is present.
+  if (location.search.includes('test') && tabReady) {
+    window.__hunkyardTabBadge = {
+      set: setTabBadge,
+      clear: clearTabBadge,
+      isActive: function() { return tabReady.isBadgeActive(); },
+    };
+  }
+
+  (function() {
+    const defaultFence = commentMd.renderer.rules.fence;
+    commentMd.renderer.rules.fence = function(tokens, idx, options, env, self) {
+      const token = tokens[idx];
+      const info = token.info ? token.info.trim() : '';
+      if (info === 'suggestion') {
+        return renderSuggestionDiff(token.content, env && env.originalLines);
+      }
+      if (defaultFence) {
+        return defaultFence(tokens, idx, options, env, self);
+      }
+      return self.renderToken(tokens, idx, options);
+    };
+  })();
+  const renderCommentMarkdown = commentMd.render.bind(commentMd);
+  commentMd.render = function(src, env) {
+    src = window.hunkyard.commentHtml.normalizeCommentMarkdown(src);
+    return window.hunkyard.commentHtml.sanitize(renderCommentMarkdown(src, env));
+  };
+  const renderInlineCommentMarkdown = commentMd.renderInline.bind(commentMd);
+  commentMd.renderInline = function(src, env) {
+    src = window.hunkyard.commentHtml.normalizeCommentMarkdown(src);
+    return window.hunkyard.commentHtml.sanitize(renderInlineCommentMarkdown(src, env));
+  };
+
+  // ===== Document Markdown Renderer =====
+  // Fences are highlighted by Shiki (window.hunkyard.codeHighlight); loadSingleFile
+  // preloads each document's fence grammars before parsing.
+  // No typographer: GitHub renders quotes and dashes as written. hunkyard-gfm.js
+  // adds the GitHub-only syntax (task lists, alerts, footnotes, ...).
+  const documentMd = window.hunkyard.gfm.use(window.markdownit({
+    html: true,
+    linkify: true,
+    highlight: function(str, lang) {
+      return window.hunkyard.codeHighlight.html(str, lang);
+    }
+  }), { math: window.hunkyard.math.html, emoji: emojiForShortcode });
+
+  // Add id attributes and anchor links to headings
+  const HEADING_LINK_SVG = '<svg class="heading-anchor-icon" viewBox="0 0 16 16" width="16" height="16" aria-hidden="true"><path d="m7.775 3.275 1.25-1.25a3.5 3.5 0 1 1 4.95 4.95l-2.5 2.5a3.5 3.5 0 0 1-4.95 0 .751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018 1.998 1.998 0 0 0 2.83 0l2.5-2.5a2.002 2.002 0 0 0-2.83-2.83l-1.25 1.25a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042Zm-4.69 9.64a1.998 1.998 0 0 0 2.83 0l1.25-1.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-1.25 1.25a3.5 3.5 0 1 1-4.95-4.95l2.5-2.5a3.5 3.5 0 0 1 4.95 0 .751.751 0 0 1-.018 1.042.751.751 0 0 1-1.042.018 1.998 1.998 0 0 0-2.83 0l-2.5 2.5a2.002 2.002 0 0 0 0 2.83Z"></path></svg>';
+  // Track seen heading slugs per render pass to dedup duplicates (GitHub-style: examples, examples-1, examples-2)
+  const headingSlugCounter = new Map();
+  documentMd.renderer.rules.heading_open = function(tokens, idx, options, _env, self) {
+    const token = tokens[idx];
+    const inline = tokens[idx + 1];
+    if (inline && inline.type === 'inline') {
+      // Slug the visible text, as GitHub does: link URLs and markup drop out.
+      const text = inline.children.map(function(child) {
+        return child.type === 'text' || child.type === 'code_inline' ? child.content : '';
+      }).join('');
+      const baseSlug = window.hunkyard.lineBlocks.slugifyHeading(text);
+      if (baseSlug) {
+        const count = headingSlugCounter.get(baseSlug) || 0;
+        const slug = count === 0 ? baseSlug : baseSlug + '-' + count;
+        headingSlugCounter.set(baseSlug, count + 1);
+        token.attrSet('id', slug);
+        token.meta = Object.assign({}, token.meta, { headingText: text });
+      }
+    }
+    return self.renderToken(tokens, idx, options);
+  };
+  documentMd.renderer.rules.heading_close = function(tokens, idx, options, _env, self) {
+    const openIdx = idx - 2;
+    const id = openIdx >= 0 ? tokens[openIdx].attrGet('id') : null;
+    if (id) {
+      const label = 'Link to section: ' + (tokens[openIdx].meta && tokens[openIdx].meta.headingText || id);
+      return '<a class="heading-anchor" href="#' + id + '" aria-label="' + escapeHtml(label) + '">' + HEADING_LINK_SVG + '</a>' + self.renderToken(tokens, idx, options);
+    }
+    return self.renderToken(tokens, idx, options);
+  };
+
+  // ===== Cookie helpers (persist across random ports on 127.0.0.1) =====
+  function setCookie(name, value) {
+    document.cookie = name + '=' + encodeURIComponent(value) + '; path=/; max-age=31536000; SameSite=Strict';
+  }
+  function getCookie(name) {
+    const match = document.cookie.match('(?:^|; )' + name + '=([^;]*)');
+    return match ? decodeURIComponent(match[1]) : null;
+  }
+
+  // ===== Settings (consolidated cookie) =====
+  // All persisted view preferences live in a single `hunkyard-settings` JSON cookie.
+  // Exception: `hunkyard-templates` stays in its own cookie because it's user-defined
+  // and can be longer than the rest combined.
+  const SETTINGS_COOKIE = 'hunkyard-settings';
+
+  function loadSettings() {
+    const raw = getCookie(SETTINGS_COOKIE);
+    try { return raw ? JSON.parse(raw) : {}; }
+    catch { return {}; }
+  }
+
+  function getSetting(key, fallback) {
+    const v = loadSettings()[key];
+    return v === undefined ? fallback : v;
+  }
+
+  function setSetting(key, value) {
+    const s = loadSettings();
+    s[key] = value;
+    setCookie(SETTINGS_COOKIE, JSON.stringify(s));
+  }
+
+  // Bind Ctrl/Cmd+Enter (submit) and Escape (cancel) to a text input/textarea.
+  // opts.stopPropagation defaults to true (matches comment-form keydown behavior).
+  function bindSubmitCancelKeys(el, onSubmit, onCancel, opts) {
+    const stop = !opts || opts.stopPropagation !== false;
+    el.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (stop) e.stopPropagation();
+        onSubmit(e);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        if (stop) e.stopPropagation();
+        onCancel(e);
+      }
+    });
+  }
+
+  // ===== State =====
+  let session = {};       // { mode, branch, base_ref, review_round, files: [...] }
+  let files = [];         // [{ path, status, fileType, content, diffHunks, comments, lineBlocks, tocItems, collapsed, viewMode }]
+  let configAuthor = '';
+  let autoViewedPatterns = [];  // config auto_viewed_patterns; applied once per launch
+  let defaultMarkdownView = '';  // config default_markdown_view; 'document' inits markdown to document view in git mode
+
+  // Initial viewMode for a file. File mode always opens document view, or the
+  // rendered view for a file a pluggable renderer claims (*.mmd -> Diagram).
+  // In git mode only files with a Document/Diff toggle (markdown) honor the
+  // default_markdown_view config; everything else stays diff. Anything other
+  // than 'document' (unset, empty, 'diff') keeps the historical default.
+  function initialViewMode(fileType, path) {
+    if (session.mode !== 'git') {
+      return fileType === 'code' && window.hunkyard.renderers.forFile(path) ? 'rendered' : 'document';
+    }
+    if (fileType === 'markdown' && defaultMarkdownView === 'document') return 'document';
+    return 'diff';
+  }
+
+  let promptTrustConfig = { project_prompts_untrusted: false };
+
+  let uiState = 'reviewing';
+  let waitingNotApproved = false;
+  let hiddenUnresolved = 0;
+  let pendingUpdates = [];
+  let pendingUpdatesVersion = '';
+
+  // Returns true if at least one pending update entry has not been dismissed.
+  // Hunkyard update dismiss is keyed by version; integration dismiss is keyed per-agent
+  // by content hash (so re-prompts when we ship a new template).
+  function hasActivePendingUpdates() {
+    if (!pendingUpdates.length) return false;
+    const hunkyardDismissed = getSetting('updatesDismissed', '');
+    const intDismissed = getSetting('dismissedIntegrations', {}) || {};
+    for (let i = 0; i < pendingUpdates.length; i++) {
+      const u = pendingUpdates[i];
+      if (u.kind === 'hunkyard-update') {
+        if (hunkyardDismissed !== pendingUpdatesVersion) return true;
+      } else if (u.kind === 'integration') {
+        if (!u.hash || intDismissed[u.agent] !== u.hash) return true;
+      } else if (u.kind === 'missing-integration') {
+        if (!intDismissed['missing:' + u.agent]) return true;
+      } else {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function syncPendingUpdateButtons() {
+    const button = document.getElementById('updateBtn');
+    if (button) button.style.display = hasActivePendingUpdates() ? '' : 'none';
+  }
+
+  let reviewComments = []; // review-level (general) comments
+  let reviewCommentFormActive = false; // is the review comment form open?
+  let reviewCommentEditingId = null; // id of review comment being edited, or null
+
+  let settingsPanelOpen = false;
+  let settingsPanelTab = 'settings';
+  let cachedConfig = null; // populated on first panel open
+  let codeFontsRequest = null; // deferred until the Settings overlay opens
+
+  let diffMode = getSetting('diffMode', 'split'); // 'split' or 'unified'
+  // Mobile viewports always render unified diffs. Split is unusable in <=768px
+  // because two columns of source code don't fit. The user's saved preference
+  // is preserved so it takes effect again above the breakpoint.
+  const mobileDiffQuery = window.matchMedia ? window.matchMedia('(max-width: 768px)') : null;
+  if (mobileDiffQuery && mobileDiffQuery.matches) {
+    diffMode = 'unified';
+  }
+  if (mobileDiffQuery) {
+    // Re-evaluate on viewport changes (tablet rotation, devtools resize).
+    // When crossing into mobile, force unified; when crossing back out,
+    // restore the user's saved preference. Re-render so the change is visible.
+    mobileDiffQuery.addEventListener('change', function(ev) {
+      if (ev.matches) {
+        diffMode = 'unified';
+      } else {
+        diffMode = getSetting('diffMode', 'split');
+      }
+      renderAllFiles();
+    });
+  }
+  let diffScope = getSetting('diffScope', null); // null = no preference saved yet
+
+  // Whether code diffs are fetched with whitespace ignored (appends `&w=1` to
+  // /api/file/diff). Persisted via the consolidated `hunkyard-settings` cookie (not
+  // localStorage) so it survives random-port restarts. Only meaningful in git
+  // mode — the settings toggle is gated to git mode in renderSettingsPane().
+  let ignoreWhitespace = !!getSetting('ignoreWhitespace', false);
+
+  // Single source of truth for hide-resolved state. Persisted via the
+  // consolidated `hunkyard-settings` cookie (not localStorage) so the setting
+  // survives random-port server restarts — localStorage is scoped per origin
+  // (incl. port), cookies are host-scoped.
+  let hideResolvedState = getSetting('hideResolved', false);
+  function isHideResolved() { return hideResolvedState; }
+  function setHideResolved(v) {
+    hideResolvedState = !!v;
+    setSetting('hideResolved', hideResolvedState);
+    document.body.classList.toggle('hide-resolved', hideResolvedState);
+  }
+
+  // diffCommit is the DERIVED backend param for /api/session?commit=:
+  //   no pins          -> ''           (full range)
+  //   from only        -> '<sha>'      (single commit)
+  //   from + through   -> '<from>..<through>'
+  const VIRTUAL_WORKING_COMMIT = '__hunkyard_virtual_working_tree__';
+  let diffCommit = '';
+  let commitFrom = '';
+  let commitThrough = '';
+  let virtualCommitSelected = false;
+  let commitList = [];
+  let diffActive = false; // rendered diff view toggle for file mode
+
+  let filePickerReady = false;  // set true once /api/files/list is confirmed working
+  let userActedThisRound = false; // tracks if user made any comment/resolve/edit action this round
+
+  // Per-file active form state
+  let activeFilePath = null;
+  let activeForms = [];  // Array of { formKey, filePath, afterBlockIndex, startLine, endLine, editingId, side }
+  let prData = null;     // PR metadata from /api/config (set once on load)
+  let agentEnabled = false;
+  let agentName = 'agent';
+  const pendingAgentRequests = new Set();
+
+  // Track active reply form state so it survives DOM re-renders (commentId → { text })
+  const activeReplyForms = new Map();
+
+  // Track manually toggled collapse state (comment ID → boolean, true = collapsed)
+  const commentCollapseOverrides = {};
+
+  // SVG Icon Constants — extracted to hunkyard-icons.js (window.hunkyard.icons)
+  const ICON_CHEVRON = window.hunkyard.icons.ICON_CHEVRON;
+  const ICON_EDIT = window.hunkyard.icons.ICON_EDIT;
+  const ICON_DELETE = window.hunkyard.icons.ICON_DELETE;
+  const ICON_RESOLVE = window.hunkyard.icons.ICON_RESOLVE;
+  const ICON_UNRESOLVE = window.hunkyard.icons.ICON_UNRESOLVE;
+  const ICON_COMMENT = window.hunkyard.icons.ICON_COMMENT;
+  const ICON_FILE = window.hunkyard.icons.ICON_FILE;
+  const ICON_COPY_PATH = window.hunkyard.icons.ICON_COPY_PATH;
+  const ICON_COPY_PATH_CHECK = window.hunkyard.icons.ICON_COPY_PATH_CHECK;
+
+  function formKey(form) {
+    if (form.scope === 'review') return 'review:' + (form.editingId || 'new');
+    if (form.editingId) return form.filePath + ':edit:' + form.editingId;
+    if (form.scope === 'file') return form.filePath + ':file';
+    return form.filePath + ':' + form.startLine + ':' + form.endLine + ':' + (form.side || '');
+  }
+
+  // Convention-based form-key for edit/reply forms keyed by comment id.
+  // Used by buildCommentCard reply input + live-mode mounts.
+  // Delegates to the shared helper module so both controllers stay aligned.
+
+  function addForm(form) {
+  const sourceFile = files.find(function(file) { return file.path === form.filePath; });
+  if (sourceFile && form.contentID === undefined) {
+    form.contentID = sourceFile.fileHash;
+    form.viewID = sourceFile.viewID;
+  }
+    form.formKey = formKey(form);
+    const idx = activeForms.findIndex(function(f) { return f.formKey === form.formKey; });
+    if (idx >= 0) {
+      activeForms[idx] = form;
+    } else {
+      activeForms.push(form);
+    }
+  }
+
+  function removeForm(key) {
+    activeForms = activeForms.filter(function(f) { return f.formKey !== key; });
+    // A reopened composer has the same key but a new model and empty draft.
+    // Do not reuse the old textarea or callbacks after submit/cancel.
+    if (pierreView) pierreView.forgetAnnotation('form:' + key);
+  }
+
+  function getFormsForFile(filePath) {
+    return activeForms.filter(function(f) { return f.filePath === filePath; });
+  }
+
+  function findFormForEdit(commentId) {
+    return activeForms.find(function(f) { return f.editingId === commentId; });
+  }
+
+  // File compose only — edits use createInlineEditor in place of the card.
+  function getFileComposeForm(filePath) {
+    return getFormsForFile(filePath).find(function(f) {
+      return f.scope === 'file' && !f.editingId;
+    });
+  }
+  let selectionStart = null;
+  let selectionEnd = null;
+  let focusedBlockIndex = null;
+  let focusedFilePath = null;
+  let focusedElement = null; // currently focused navigable element
+  let navElements = []; // cached .kb-nav list, rebuilt on render
+  // Stable j/k position across re-renders (DOM refs and block indices alone are not enough).
+  let keyboardFocusTarget = null; // { filePath, blockIndex?, diffLineNum?, diffSide?, startLine?, endLine? }
+  let changeGroups = [];      // [{elements: [DOM], filePath: string}]
+  let currentChangeIdx = -1;
+
+  const enc = encodeURIComponent;
+
+  // Author color-coding for multi-reviewer comments — shared helper so
+  // live-mode mounts produce matching swatch indices. The helpers module
+  // is loaded before app.js via index.html script order, so we reference it
+  // directly without a local fallback.
+  const authorColorIndex = window.hunkyard.commentCardHelpers.authorColorIndex;
+  const pathCompare = window.hunkyard.shared.pathCompare;
+
+  // Sort comparator: directories before files at each depth, then path order
+  // matching GitHub PR diffs (ASCII byte compare, not localeCompare).
+  // In files mode the user's CLI argument order is meaningful, so preserve it
+  // (Array.prototype.sort is stable, so returning 0 keeps original order).
+  function fileSortComparator(a, b) {
+    if (session && session.mode === 'files') return 0;
+    const pa = a.path.split('/'), pb = b.path.split('/');
+    const min = Math.min(pa.length, pb.length);
+    for (let i = 0; i < min - 1; i++) {
+      if (pa[i] !== pb[i]) return pathCompare(pa[i], pb[i]);
+    }
+    if (pa.length !== pb.length) return pb.length - pa.length;
+    return pathCompare(pa[pa.length - 1], pb[pa.length - 1]);
+  }
+
+  // Fetch and build file objects from the API for a list of file infos.
+  // Files marked as lazy by the backend are returned with metadata only;
+  // their content/diff/comments are fetched on demand when expanded.
+  // The server's `lazy` flag only marks files it has not pre-loaded, and
+  // scoped sessions (e.g. scope=branch) never set it. Loading every file
+  // up front costs three requests per file — thousands on a large review —
+  // and the browser drops the overflow (ERR_INSUFFICIENT_RESOURCES), which
+  // then rendered as "No changes". Load at most EAGER_FILE_LIMIT files up
+  // front; the rest become lazy placeholders filled on demand. Orphaned
+  // files (comments only) are cheap and always load eagerly.
+  const EAGER_FILE_LIMIT = 25;
+
+  function loadsEagerly(fi, index) {
+    return !!fi.orphaned || (!fi.lazy && index < EAGER_FILE_LIMIT);
+  }
+
+  async function loadAllFileData(fileInfos, scope) {
+    const hasLazy = fileInfos.some(function(fi, i) { return !loadsEagerly(fi, i); });
+
+    if (!hasLazy) {
+      const [loaded, byPath] = await Promise.all([
+        Promise.all(fileInfos.map(function(fi) { return loadSingleFile(fi, scope); })),
+        fetchAllFileComments(),
+      ]);
+      loaded.forEach(function(f) { setCommentsFrom(f, byPath); });
+      return loaded;
+    }
+
+    // Split into eager and lazy batches
+    const eager = [];
+    const lazy = [];
+    for (let i = 0; i < fileInfos.length; i++) {
+      if (loadsEagerly(fileInfos[i], i)) {
+        eager.push(fileInfos[i]);
+      } else {
+        lazy.push(fileInfos[i]);
+      }
+    }
+
+    // Load eager files fully. Every file gets its comments from one bulk
+    // request, so lazy files' comments count in the header, tree badges and
+    // comments panel before their diffs load.
+    const [eagerFiles, commentsByPath] = await Promise.all([
+      Promise.all(eager.map(function(fi) { return loadSingleFile(fi, scope); })),
+      fetchAllFileComments(),
+    ]);
+    eagerFiles.forEach(function(f) { setCommentsFrom(f, commentsByPath); });
+
+    // Create lightweight placeholders for lazy files
+    const lazyFiles = lazy.map(function(fi) {
+      return {
+        path: fi.path,
+        oldPath: fi.old_path || '',
+        status: fi.status,
+        fileType: fi.file_type,
+        content: '',
+        previousContent: '',
+        comments: (commentsByPath && commentsByPath[fi.path]) || [],
+        diffHunks: [],
+        lineBlocks: null,
+        previousLineBlocks: null,
+        tocItems: [],
+        collapsed: false,
+        viewMode: initialViewMode(fi.file_type, fi.path),
+        additions: fi.additions || 0,
+        deletions: fi.deletions || 0,
+        lazy: true,
+        generated: !!fi.generated,
+        fileHash: '',
+      };
+    });
+
+    return eagerFiles.concat(lazyFiles);
+  }
+
+  // Every file's comments in one request, keyed by path (files with none
+  // are absent). Returns null on failure so callers keep what they have.
+  async function fetchAllFileComments() {
+    try {
+      const res = await fetch('/api/files/comments');
+      if (!res.ok) return null;
+      const byPath = await res.json();
+      return byPath && typeof byPath === 'object' ? byPath : null;
+    } catch {
+      return null;
+    }
+  }
+
+  // Set a freshly loaded file's comments from a fetchAllFileComments result
+  // (empty when the fetch failed).
+  function setCommentsFrom(f, byPath) {
+    if (!f) return;
+    const comments = byPath && byPath[f.path];
+    f.comments = Array.isArray(comments) ? comments : [];
+  }
+
+  // Set each file's comments from a fetchAllFileComments result. A null
+  // result (failed fetch) leaves the current comments alone.
+  function applyAllFileComments(byPath) {
+    if (!byPath) return;
+    for (const f of files) {
+      const comments = byPath[f.path];
+      f.comments = Array.isArray(comments) ? comments : [];
+    }
+  }
+
+  // Load a single file's content and diff from the API. Comments are not
+  // loaded here: they come from the bulk /api/files/comments request
+  // (loadAllFileData), and a lazy file keeps the list it already has, so a
+  // slow load never overwrites comments added while it ran.
+  async function loadSingleFile(fi, scope, signal) {
+    // Orphaned files have no content or diff, only comments
+    if (fi.orphaned) {
+      return {
+        path: fi.path,
+        status: fi.status,
+        fileType: fi.file_type,
+        content: '',
+        previousContent: '',
+        diffHunks: [],
+        lineBlocks: null,
+        previousLineBlocks: null,
+        tocItems: [],
+        collapsed: false,
+        viewMode: 'document',
+        additions: 0,
+        deletions: 0,
+        lazy: false,
+        orphaned: true,
+        generated: false,
+        fileHash: '',
+      };
+    }
+    let diffUrl = '/api/file/diff?path=' + enc(fi.path);
+    if (scope && scope !== 'all') {
+      diffUrl += '&scope=' + enc(scope);
+    }
+    if (diffCommit) {
+      diffUrl += '&commit=' + enc(diffCommit);
+    }
+    // Story references use raw-diff hunk coordinates.
+    if (ignoreWhitespace && !storyNeedsRawDiff()) {
+      diffUrl += '&w=1';
+    }
+    const [fileRes, diffRes] = await Promise.all([
+      fetch('/api/file?path=' + enc(fi.path), { signal }).then(function(r) { return r.ok ? r.json() : { content: '' }; }).catch(function() { return { content: '' }; }),
+      fetch(diffUrl, { signal }).then(function(r) { return r.ok ? r.json() : { hunks: [] }; }).catch(function() { return { hunks: [] }; }),
+    ]);
+    if (signal && signal.aborted) return null;
+    const content = Object.prototype.hasOwnProperty.call(diffRes, 'content')
+      ? diffRes.content
+      : (fileRes.content || '');
+
+    const f = {
+      path: fi.path,
+      oldPath: fi.old_path || '',
+      status: fi.status,
+      fileType: fi.file_type,
+      content: content,
+      previousContent: diffRes.previous_content || '',
+      diffHunks: diffRes.hunks || [],
+      lineBlocks: null,
+      previousLineBlocks: null,
+      tocItems: [],
+      collapsed: fi.status === 'deleted' || fi.generated === true ||
+        (fi.status === 'renamed' && !fi.additions && !fi.deletions),
+      viewMode: initialViewMode(fi.file_type, fi.path),
+      additions: fi.additions || 0,
+      deletions: fi.deletions || 0,
+      lazy: false,
+      orphaned: false,
+      generated: !!fi.generated,
+      fileHash: fileRes.file_hash || '',
+      viewID: fileRes.view_id || '',
+    };
+
+    // Parse markdown content into line blocks. Fenced code is tokenized in
+    // Pierre's workers first, so the blocks render highlighted. Files mode
+    // needs the previous round's blocks for the round diff; git mode builds
+    // the Before blocks on first use (ensurePreviousLineBlocks).
+    if (f.fileType === 'markdown') {
+      const current = parseMarkdownTokens(f.content);
+      const previous = f.previousContent && session.mode !== 'git' ? parseMarkdownTokens(f.previousContent) : null;
+      await Promise.all([
+        window.hunkyard.codeHighlight.prime(fencesIn(current).concat(previous ? fencesIn(previous) : [])),
+        primeMath([current, previous]),
+      ]);
+      const parsed = buildMarkdown(current, f.content);
+      f.lineBlocks = parsed.blocks;
+      f.tocItems = parsed.tocItems;
+      if (previous) {
+        f.previousLineBlocks = buildMarkdown(previous, f.previousContent).blocks;
+      }
+    }
+    const fileRenderer = fileRendererFor(f);
+    if (fileRenderer) f.lineBlocks = renderedFileBlocks(f, fileRenderer);
+
+    return f;
+  }
+
+  // Pluggable file renderer claiming this code file, or null.
+  // A deleted file has nothing to render; it keeps the deleted-file diff.
+  function fileRendererFor(file) {
+    return file && file.fileType === 'code' && !file.orphaned && file.status !== 'deleted'
+      ? window.hunkyard.renderers.forFile(file.path)
+      : null;
+  }
+
+  // The rendered view of a file renderer's file: one block spanning the whole
+  // file, so comments on any line sit below the rendering, and the gutter
+  // comments on the whole file's lines.
+  function renderedFileBlocks(file, renderer) {
+    const content = file.content || '';
+    const lines = window.hunkyard.renderers.lineCount(content);
+    if (!lines) return [];
+    return [{
+      startLine: 1, endLine: lines, isEmpty: false, cssClass: 'render-block',
+      html: window.hunkyard.renderers.targetHTML(renderer.name, 'file', content, { startLine: 1, endLine: lines }),
+    }];
+  }
+
+  // Git mode only: can this markdown file show the Rendered (Before/After)
+  // view? Files mode has the header-level round diff instead.
+  function hasRenderedDiff(file) {
+    return session.mode === 'git' && file.fileType === 'markdown' && !!file.previousContent &&
+      !!file.diffHunks && file.diffHunks.length > 0;
+  }
+
+  // Build a markdown file's Before blocks the first time the Rendered view
+  // needs them. Most files never open it, so loading skips this work.
+  async function ensurePreviousLineBlocks(file) {
+    if (file.previousLineBlocks || !file.previousContent || file.fileType !== 'markdown') return;
+    const content = file.previousContent;
+    const previous = parseMarkdownTokens(content);
+    await Promise.all([window.hunkyard.codeHighlight.prime(fencesIn(previous)), primeMath([previous])]);
+    if (file.previousContent !== content || file.previousLineBlocks) return;
+    file.previousLineBlocks = buildMarkdown(previous, content).blocks;
+  }
+
+  // ===== Viewed State =====
+  // Stable hash of the current file set — identifies this review's localStorage
+  // namespace. Shared by the viewed-state key and the auto-viewed applied marker
+  // so both live under the same identity.
+  function viewedIdentityHash() {
+    const paths = files.map(function(f) { return f.path; }).sort().join('\n');
+    let hash = 0;
+    for (let i = 0; i < paths.length; i++) {
+      hash = ((hash << 5) - hash + paths.charCodeAt(i)) | 0;
+    }
+    return (hash >>> 0).toString(36);
+  }
+
+  function viewedStorageKey() {
+    return 'hunkyard-viewed-' + viewedIdentityHash();
+  }
+
+  // Marker key recording that auto_viewed_patterns were already applied for this
+  // review. localStorage is origin-scoped (incl. port); hunkyard uses random ports,
+  // so a new launch gets a fresh namespace and patterns apply once. A refresh on
+  // the same port sees this marker and skips re-applying — manual un-marks the
+  // user saved via toggleViewed therefore win.
+  function autoViewedMarkerKey() {
+    return 'hunkyard-autoviewed-' + viewedIdentityHash();
+  }
+
+  // Apply auto_viewed_patterns ONCE per launch: mark matching files viewed +
+  // collapsed. Must run AFTER restoreViewedState() (so a prior refresh's manual
+  // un-marks are already loaded and not clobbered) and BEFORE first render.
+  function applyAutoViewedOnce(patterns) {
+    if (!patterns || !patterns.length) return;
+    const globMatch = window.hunkyard && window.hunkyard.globMatch;
+    if (!globMatch) return;
+    try {
+      if (localStorage.getItem(autoViewedMarkerKey())) return; // already applied this launch
+    } catch { return; }
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      if (f.viewed) continue; // respect existing/restored viewed state
+      if (globMatch.matchAny(f.path, patterns)) {
+        f.viewed = true;
+        f.collapsed = true;
+      }
+    }
+    saveViewedState();
+    try { localStorage.setItem(autoViewedMarkerKey(), '1'); } catch {}
+  }
+
+  function saveViewedState() {
+    const viewed = {};
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].viewed) viewed[files[i].path] = true;
+    }
+    try { localStorage.setItem(viewedStorageKey(), JSON.stringify(viewed)); } catch {}
+  }
+
+  function restoreViewedState() {
+    try {
+      const data = JSON.parse(localStorage.getItem(viewedStorageKey()) || '{}');
+      for (let i = 0; i < files.length; i++) {
+        files[i].viewed = !!data[files[i].path];
+        if (files[i].viewed) files[i].collapsed = true;
+      }
+    } catch {}
+  }
+
+  function toggleViewed(filePath) {
+    const file = getFileByPath(filePath);
+    if (!file) return;
+    file.viewed = !file.viewed;
+    saveViewedState();
+    updateViewedCount();
+    updateTreeViewedState();
+    if (pierreView && pierreViewActive()) {
+      // Header is rebuilt by the item update (checkbox state included).
+      pierreView.setCollapsed(file, file.viewed ? true : file.collapsed);
+      hunkyardFind.filesChanged();
+      return;
+    }
+    // Update the checkbox in the file header
+    const section = document.getElementById('file-section-' + filePath);
+    if (section) {
+      const cb = section.querySelector('.file-header-viewed input');
+      if (cb) cb.checked = file.viewed;
+      // Collapse when marking as viewed
+      if (file.viewed && section.open) {
+        if (section.getBoundingClientRect().top < 0) {
+          section.scrollIntoView({ behavior: 'instant' });
+        }
+        section.open = false;
+        file.collapsed = true;
+      }
+    }
+  }
+
+  // Wraps hunkyard.shared.waitForSession with the app.js-specific UI:
+  // an elapsed-seconds "Initializing..." loader in #filesContainer, a
+  // server-disconnected message on network failure, and a body.message
+  // surfacing on HTTP 500. Returns the parsed JSON payload (matches
+  // the previous .then(r => r.json()) call sites at the seam).
+  async function fetchWhenReady(url) {
+    function renderLoading(text) {
+      const el = document.getElementById('filesContainer');
+      if (el) {
+        el.innerHTML =
+          '<div class="loading" style="padding: 40px; text-align: center; color: var(--hunkyard-editor-fg-muted);">' +
+          text + '</div>';
+      }
+    }
+    try {
+      return await window.hunkyard.shared.waitForSession({
+        url: url,
+        intervalMs: 500,
+        maxWaitMs: 5 * 60 * 1000,
+        onProgress: function (elapsedMs) {
+          const elapsed = Math.round(elapsedMs / 1000);
+          renderLoading('Initializing\u2026 (' + elapsed + 's)');
+        },
+      });
+    } catch (err) {
+      if (err && err.status === 500 && err.response) {
+        let body = {};
+        try { body = await err.response.json(); } catch {}
+        const msg = body.message || 'Server initialization failed';
+        renderLoading(msg);
+        throw new Error(msg);
+      }
+      if (err && err.name === 'TypeError') {
+        // fetch() rejects with TypeError on network failure (server shutdown during init).
+        renderLoading('Server disconnected');
+        throw new Error('Server disconnected');
+      }
+      throw err;
+    }
+  }
+
+  // ===== Init =====
+  async function init() {
+    watchCodeBlocks();
+    installRenderAnchorComments();
+    initTheme();
+    initWidth();
+    // Code font is a pure CSS-variable override; no mode-specific work here,
+    // so the shared helper owns read + apply.
+    if (window.hunkyard && window.hunkyard.shared) {
+      window.hunkyard.shared.applyCodeFontFromCookie();
+      window.hunkyard.shared.applyDisplayAttributes();
+    }
+    initSidebarWidths();
+    setFileTreeCollapsed(getSetting('fileTree', 'open') === 'collapsed');
+    // Comments panel starts hidden (no persistence yet, unlike file tree).
+    // Animation mirrors the left sidebar slide; persistence can be added later
+    // by reading getSetting('commentsPanel') here.
+    setCommentsPanelCollapsed(true);
+
+    // Measure actual header height and set CSS variable for sticky offsets
+    function updateHeaderHeight() {
+      const h = document.querySelector('.header');
+      const picker = document.getElementById('mobileFilePickerBar');
+      if (h) {
+        const height = h.getBoundingClientRect().height;
+        document.documentElement.style.setProperty('--header-height', height + 'px');
+        document.documentElement.style.setProperty('--review-chrome-height', (height + picker.getBoundingClientRect().height) + 'px');
+      }
+    }
+    updateHeaderHeight();
+    window.addEventListener('resize', updateHeaderHeight);
+    const chromeObserver = new ResizeObserver(updateHeaderHeight);
+    chromeObserver.observe(document.querySelector('.header'));
+    chromeObserver.observe(document.getElementById('mobileFilePickerBar'));
+    document.getElementById('fileTreeFilter').addEventListener('input', renderFileTree);
+    document.getElementById('singleFileToggle').addEventListener('click', function() {
+      singleFileReview = !singleFileReview;
+      this.setAttribute('aria-pressed', String(singleFileReview));
+      renderPierreFiles();
+      const file = getFileByPath(activeTreePath) || files[0];
+      if (file) scrollToFile(file.path);
+    });
+
+    showFilesMessage('Loading...');
+
+    const initialResponses = await Promise.all([
+      fetchWhenReady('/api/session' + (diffScope ? '?scope=' + enc(diffScope) : '')),
+      fetchWhenReady('/api/config'),
+    ]);
+    let sessionRes = initialResponses[0];
+    const configRes = initialResponses[1];
+
+    sessionRes = await hydrateStoryIfMissing(sessionRes);
+    sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
+    session = sessionRes;
+    reviewComments = sessionRes.review_comments || [];
+
+    // Fire-and-forget: verify file list endpoint is available for @-mention autocomplete
+    fetch('/api/files/list')
+      .then(r => { if (r.ok) filePickerReady = true; })
+      .catch(() => { /* fire-and-forget */ });
+
+    // Config
+    autoViewedPatterns = Array.isArray(configRes.auto_viewed_patterns) ? configRes.auto_viewed_patterns : [];
+    defaultMarkdownView = configRes.default_markdown_view === 'document' ? 'document' : '';
+    configAuthor = configRes.author || '';
+    agentEnabled = configRes.agent_cmd_enabled || false;
+    agentName = configRes.agent_name || 'agent';
+
+    promptTrustConfig = {
+      project_prompts_untrusted: !!configRes.project_prompts_untrusted,
+      project_prompt_sources: configRes.project_prompt_sources || [],
+      project_prompt_preview: configRes.project_prompt_preview || '',
+      project_prompt_content_hash: configRes.project_prompt_content_hash || '',
+    };
+    window.hunkyard.shared.applyProjectPromptTrustUI(promptTrustConfig, document.getElementById('finishBtn'));
+
+    // Update notifications (Hunkyard release + stale integrations)
+    pendingUpdates = [];
+    const hasHunkyardUpdate = !configRes.no_update_check && configRes.latest_version && configRes.version && configRes.latest_version !== configRes.version;
+    if (hasHunkyardUpdate) {
+      pendingUpdates.push({
+        kind: 'hunkyard-update',
+        version: configRes.latest_version,
+        label: 'Hunkyard ' + configRes.latest_version + ' available',
+        labelUrl: 'https://github.com/BSH2409/hunkyard/releases/tag/v' + configRes.latest_version,
+        hint: 'Open Updates for release-specific update instructions'
+      });
+    }
+    if (configRes.stale_integrations) {
+      configRes.stale_integrations.forEach(function(si) {
+        // Capitalize agent name for display
+        const name = si.agent.replace(/\b\w/g, function(c) { return c.toUpperCase(); }).replace(/-/g, ' ');
+        pendingUpdates.push({
+          kind: 'integration',
+          agent: si.agent,
+          hash: si.hash || '',
+          label: name + ' plugin outdated',
+          hint: si.hint
+        });
+      });
+    }
+    if (configRes.missing_integrations) {
+      configRes.missing_integrations.forEach(function(agent) {
+        const name = agent.replace(/\b\w/g, function(c) { return c.toUpperCase(); }).replace(/-/g, ' ');
+        pendingUpdates.push({
+          kind: 'missing-integration',
+          agent: agent,
+          label: name + ' detected — install integration',
+          hint: 'hunkyard install ' + agent
+        });
+      });
+    }
+
+    pendingUpdatesVersion = configRes.latest_version || configRes.version || '';
+    syncPendingUpdateButtons();
+
+    // Header context: branch name in git mode, filename in single-file file mode
+    if (session.mode === 'git' && session.branch) {
+      document.getElementById('branchContext').style.display = '';
+      document.getElementById('branchName').textContent = session.branch;
+      const branchCopyBtn = document.createElement('button');
+      branchCopyBtn.className = 'header-copy-path';
+      branchCopyBtn.setAttribute('aria-label', 'Copy branch name');
+      branchCopyBtn.type = 'button';
+      branchCopyBtn.innerHTML = ICON_COPY_PATH;
+      branchCopyBtn.addEventListener('click', function() {
+        const originalLabel = branchCopyBtn.getAttribute('aria-label');
+        navigator.clipboard.writeText(session.branch).then(function() {
+          branchCopyBtn.innerHTML = ICON_COPY_PATH_CHECK;
+          branchCopyBtn.setAttribute('aria-label', 'Copied!');
+          setTimeout(function() { branchCopyBtn.innerHTML = ICON_COPY_PATH; branchCopyBtn.setAttribute('aria-label', originalLabel); }, 1500);
+        }).catch(function() { /* best-effort */ });
+      });
+      document.getElementById('branchContext').appendChild(branchCopyBtn);
+      // Base branch picker: show in git mode when on a feature branch
+      if (session.base_ref) {
+        currentCompareTarget = session.base_branch_name || '';
+        document.getElementById('baseBranchLabel').textContent = compareTargetChipLabel(currentCompareTarget) || 'base';
+        document.getElementById('baseBranchArrow').style.display = '';
+      }
+    } else if (session.mode !== 'git' && session.files && session.files.length === 1) {
+      document.getElementById('branchContext').style.display = '';
+      document.querySelector('.branch-icon').innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M3.75 1.5a.25.25 0 0 0-.25.25v11.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6H9.75A1.75 1.75 0 0 1 8 4.25V1.5H3.75zm5.75.56v2.19c0 .138.112.25.25.25h2.19L9.5 2.06zM2 1.75C2 .784 2.784 0 3.75 0h5.086c.464 0 .909.184 1.237.513l3.414 3.414c.329.328.513.773.513 1.237v8.086A1.75 1.75 0 0 1 12.25 15h-8.5A1.75 1.75 0 0 1 2 13.25V1.75z"/></svg>';
+      document.getElementById('branchName').textContent = session.files[0].path.split('/').pop();
+      const headerCopyBtn = document.createElement('button');
+      headerCopyBtn.className = 'header-copy-path';
+      headerCopyBtn.setAttribute('aria-label', 'Copy file path');
+      headerCopyBtn.type = 'button';
+      headerCopyBtn.innerHTML = ICON_COPY_PATH;
+      headerCopyBtn.addEventListener('click', function() {
+        const originalLabel = headerCopyBtn.getAttribute('aria-label');
+        const abs = session.cwd ? session.cwd + '/' + session.files[0].path : session.files[0].path;
+        navigator.clipboard.writeText(abs).then(function() {
+          headerCopyBtn.innerHTML = ICON_COPY_PATH_CHECK;
+          headerCopyBtn.setAttribute('aria-label', 'Copied!');
+          setTimeout(function() { headerCopyBtn.innerHTML = ICON_COPY_PATH; headerCopyBtn.setAttribute('aria-label', originalLabel); }, 1500);
+        }).catch(function() { /* best-effort */ });
+      });
+      document.getElementById('branchContext').appendChild(headerCopyBtn);
+    }
+
+    // PR overview panel toggle
+    if (configRes.pr_url && configRes.pr_number) {
+      prData = configRes;
+      const prToggle = document.getElementById('prToggle');
+      prToggle.style.display = '';
+      document.getElementById('prToggleNumber').textContent = '#' + configRes.pr_number;
+      if (configRes.pr_is_draft) prToggle.classList.add('pr-toggle-draft');
+    }
+
+    // Show diff mode toggle in git mode (always has diffs)
+    // In file mode, it gets shown later via updateDiffModeToggle() once diffs exist
+    if (session.mode === 'git') {
+      document.getElementById('diffModeToggle').style.display = '';
+      document.querySelectorAll('#diffModeToggle .toggle-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.mode === diffMode);
+      });
+      document.getElementById('tocToggle').style.display = 'none';
+
+      // Show scope toggle and hide unavailable scopes
+      const scopeToggle = document.getElementById('scopeToggle');
+      scopeToggle.style.display = '';
+      const scopes = session.available_scopes || ['all', 'staged', 'unstaged'];
+      scopeToggle.querySelectorAll('.toggle-btn').forEach(function(b) {
+        // Clear previous disabled state before re-evaluating
+        b.disabled = false;
+        b.classList.remove('disabled');
+        if (b.dataset.scope !== 'all' && scopes.indexOf(b.dataset.scope) === -1) {
+          b.disabled = true;
+          b.classList.add('disabled');
+        }
+      });
+      // Range focus pins the file list to BaseSHA..HeadSHA server-side;
+      // working-tree scopes (branch/staged/unstaged) don't apply. Skip
+      // the scope re-fetch — the initial /api/session response is already
+      // correct, and the scope toggle will be hidden once the range chrome
+      // renders.
+      const inRangeFocus = session.focus && session.focus.kind === 'range';
+      // Working-tree scopes (branch/staged/unstaged) filter against HEAD;
+      // range focus diffs are pinned to BaseSHA..HeadSHA server-side.
+      if (inRangeFocus) {
+        diffScope = 'all';
+      } else if (diffScope === null) {
+        // Include staged and working-tree changes in the initial review.
+        diffScope = 'all';
+      } else if (scopes.indexOf(diffScope) === -1) {
+        diffScope = 'all';
+        setSetting('diffScope', 'all');
+        // Re-fetch session with corrected scope — the initial fetch used the
+        // stale cookie value and may have returned an empty file list.
+        const corrected = await hydrateStoryIfMissing(await fetchWhenReady('/api/session?scope=all'));
+        session = corrected;
+        reviewComments = corrected.review_comments || [];
+      }
+      scopeToggle.querySelectorAll('.toggle-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.scope === diffScope);
+      });
+
+      updateCompareAndCommitChrome();
+    }
+
+    updateHeaderRound();
+    setDocumentTitle(session.mode === 'git'
+      ? 'Hunkyard — ' + (session.branch || 'review')
+      : 'Hunkyard — ' + (session.files || []).map(f => f.path).join(', '));
+
+    files = await loadAllFileData(session.files || [], currentFileDataScope());
+    hiddenUnresolved = session.hidden_unresolved || 0;
+
+    files.sort(fileSortComparator);
+
+    restoreViewedState();
+    applyAutoViewedOnce(autoViewedPatterns);
+    updateDiffModeToggle();
+    renderFileTree();
+    // The Pierre bundle loads as an ES module in parallel with this script.
+    if (window.hunkyardPierreReady) await window.hunkyardPierreReady;
+    applyHunkyardPalette();
+    renderAllFiles();
+    buildToc();
+    updateCommentCount();
+    updateViewedCount();
+    restoreDrafts();
+    applyHideResolved();
+    scrollToHashHeading();
+    // Story layer (opt-in). No-op when session.story is absent.
+    applyStoryPresence();
+    updateDiffModeToggle();
+  }
+
+  // Show/hide the Toggle Diff button and Split/Unified toggle in file mode
+  function updateDiffModeToggle() {
+    if (storyActive()) {
+      document.querySelector('.header-right').insertBefore(document.getElementById('diffModeToggle'), document.getElementById('settingsToggle'));
+      document.getElementById('diffModeToggle').style.display = '';
+      document.querySelectorAll('#diffModeToggle .toggle-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.mode === diffMode);
+      });
+      return;
+    }
+    document.getElementById('reviewToolbar').appendChild(document.getElementById('diffModeToggle'));
+    if (session.mode === 'git') return; // git mode handles this in init
+    const hasDiffs = files.some(function(f) {
+      return f.fileType === 'markdown' && f.previousLineBlocks && f.previousLineBlocks.length > 0;
+    });
+    const diffToggleBtn = document.getElementById('diffToggle');
+    if (diffToggleBtn) {
+      diffToggleBtn.style.display = hasDiffs ? '' : 'none';
+      diffToggleBtn.classList.toggle('active', diffActive);
+    }
+    // Show Split/Unified toggle only when diff view is active
+    document.getElementById('diffModeToggle').style.display = (hasDiffs && diffActive) ? '' : 'none';
+    document.getElementById('reviewToolbar').hidden = files.length === 1 && !(hasDiffs && diffActive);
+    if (hasDiffs && diffActive) {
+      document.querySelectorAll('#diffModeToggle .toggle-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.mode === diffMode);
+      });
+    }
+  }
+
+  // ===== Markdown Parsing =====
+  function parseMarkdownTokens(content) {
+    return documentMd.parse(rewriteFrontmatterAsYamlFence(content), {});
+  }
+
+  // Load KaTeX before building blocks with inline math, so formulas render
+  // in place. A failed load leaves the source placeholders (upgraded later).
+  function primeMath(tokenLists) {
+    const needed = tokenLists.some(function(tokens) { return tokens && window.hunkyard.math.needed(tokens); });
+    return needed ? window.hunkyard.math.load().catch(function() { /* placeholders stay */ }) : Promise.resolve();
+  }
+
+  function fencesIn(tokens) {
+    return tokens.filter(function(t) { return t.type === 'fence'; }).map(function(t) {
+      return { code: t.content, lang: t.info.trim().split(/\s+/)[0] };
+    }).filter(function(f) { return f.lang && !window.hunkyard.renderers.forFence(f.lang); });
+  }
+
+  // Heading slugs are assigned while rendering, so the counter resets here,
+  // right before this synchronous build.
+  function buildMarkdown(tokens, content) {
+    headingSlugCounter.clear();
+    const blocks = buildLineBlocks(tokens, documentMd, content);
+    const tocItems = extractTocItems(tokens);
+    return { blocks, tocItems };
+  }
+
+  function extractTocItems(tokens) {
+    const items = [];
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i].type === 'heading_open' && tokens[i].map) {
+        const level = parseInt(tokens[i].tag.slice(1));
+        const inline = tokens[i + 1];
+        if (inline && inline.type === 'inline') {
+          items.push({ level, text: inline.content, startLine: tokens[i].map[0] + 1 });
+        }
+      }
+    }
+    return items;
+  }
+
+  // Line-block building — extracted to hunkyard-line-blocks.js (window.hunkyard.lineBlocks)
+  const buildLineBlocks = window.hunkyard.lineBlocks.buildLineBlocks;
+  const rewriteFrontmatterAsYamlFence = window.hunkyard.lineBlocks.rewriteFrontmatterAsYamlFence;
+
+  // ===== Utility Functions =====
+  function resolveImagePath(filePath, src) {
+    const fileDir = filePath.includes('/') ? filePath.replace(/\/[^/]*$/, '') : '';
+    const combined = fileDir ? fileDir + '/' + src : src;
+    const parts = combined.split('/');
+    const stack = [];
+    for (let i = 0; i < parts.length; i++) {
+      const p = parts[i];
+      if (!p || p === '.') continue;
+      if (p === '..') { if (stack.length) stack.pop(); }
+      else stack.push(p);
+    }
+    return stack.join('/');
+  }
+
+  function rewriteImageSrcs(html, filePath) {
+    return html.replace(/(<img\s[^>]*src=")([^"]+)(")/gi, function(match, pre, src, post) {
+      if (/^https?:\/\/|^data:|^\//.test(src)) return match;
+      return pre + '/files/' + resolveImagePath(filePath || '', src) + post;
+    });
+  }
+
+  // Pure rendering helpers live in hunkyard-comment-card-helpers.js so live-mode
+  // rows render with the same primitives. The helpers module is loaded before
+  // app.js via index.html script order, so we reference it directly.
+  const _ccHelpers = window.hunkyard.commentCardHelpers;
+  const escapeHtml = _ccHelpers.escapeHtml;
+  const relativeTime = _ccHelpers.relativeTime;
+  const formatTime = _ccHelpers.formatTime;
+
+  function getFileByPath(path) {
+    return files.find(f => f.path === path);
+  }
+
+  // ===== File Tree Sidebar =====
+  let activeTreePath = null;
+  let singleFileReview = false;
+  let singleFilePath = null;
+  let ignoreTreeObserverUntil = 0;
+  // A jump that centers a line (find, comment navigation) leaves another file
+  // at the top of the list, and the scroll can keep settling after the
+  // ignore window on a slow machine. Keep the target active while it is on
+  // screen; the pin holds for the first 2s while the list is still moving.
+  let treePin = null; // { path, until }
+  function pinTreeActive(path) {
+    treePin = { path: path, until: Date.now() + 2000 };
+    ignoreTreeObserverUntil = Date.now() + 400;
+    updateTreeActive(path);
+  }
+  const treeFolderState = {}; // { 'src': true, 'src/components': false } — true = collapsed
+
+  function buildFileTree(fileList) {
+    // Build a nested tree from flat paths
+    const root = { children: {}, files: [] };
+    for (let i = 0; i < fileList.length; i++) {
+      const f = fileList[i];
+      const parts = f.path.split('/');
+      let node = root;
+      for (let j = 0; j < parts.length - 1; j++) {
+        const dirName = parts[j];
+        if (!node.children[dirName]) {
+          node.children[dirName] = { children: {}, files: [] };
+        }
+        node = node.children[dirName];
+      }
+      node.files.push(f);
+    }
+    return root;
+  }
+
+  function collapseCommonPrefixes(tree) {
+    // Collapse single-child directories: src/ -> components/ -> Foo.tsx becomes src/components/
+    const dirs = Object.keys(tree.children);
+    const result = { children: {}, files: tree.files };
+    for (let i = 0; i < dirs.length; i++) {
+      let name = dirs[i];
+      let child = tree.children[name];
+      // Recursively collapse child first
+      child = collapseCommonPrefixes(child);
+      // If child has exactly one subdirectory and no files, merge
+      let childDirs = Object.keys(child.children);
+      while (childDirs.length === 1 && child.files.length === 0) {
+        name = name + '/' + childDirs[0];
+        child = child.children[childDirs[0]];
+        child = collapseCommonPrefixes(child);
+        childDirs = Object.keys(child.children);
+      }
+      result.children[name] = child;
+    }
+    return result;
+  }
+
+  function renderFileTree() {
+    const panel = document.getElementById('fileTreePanel');
+    if (files.length <= 1 && session.mode !== 'git') {
+      panel.style.display = 'none';
+      syncSidebarToggleVisibility();
+      renderMobileFilePicker();
+      return;
+    }
+    panel.style.display = '';
+    syncSidebarToggleVisibility();
+
+    // Stats
+    let totalAdd = 0, totalDel = 0;
+    for (let i = 0; i < files.length; i++) { totalAdd += files[i].additions; totalDel += files[i].deletions; }
+    const statsEl = document.getElementById('fileTreeStats');
+    statsEl.innerHTML =
+      '<span>' + files.length + '</span>' +
+      (totalAdd ? ' <span class="tree-stat-add">+' + totalAdd + '</span>' : '') +
+      (totalDel ? ' <span class="tree-stat-del">-' + totalDel + '</span>' : '');
+
+    // Collapse/expand all button
+    const existingBtn = document.querySelector('.file-tree-collapse-btn');
+    if (existingBtn) existingBtn.remove();
+    if (files.length > 1) {
+      const collapseBtn = document.createElement('button');
+      collapseBtn.className = 'file-tree-collapse-btn';
+      const initiallyExpanded = files.some(function(f) { return !f.collapsed; });
+      collapseBtn.title = initiallyExpanded ? 'Collapse all files' : 'Expand all files';
+      collapseBtn.classList.toggle('all-collapsed', !initiallyExpanded);
+      // Stacked chevron SVG
+      collapseBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M4.22 3.22a.75.75 0 0 1 1.06 0L8 5.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 4.28a.75.75 0 0 1 0-1.06zm0 5a.75.75 0 0 1 1.06 0L8 10.94l2.72-2.72a.75.75 0 1 1 1.06 1.06l-3.25 3.25a.75.75 0 0 1-1.06 0L4.22 9.28a.75.75 0 0 1 0-1.06z"/></svg>';
+      collapseBtn.addEventListener('click', function() {
+        const anyExpanded = files.some(function(f) { return !f.collapsed; });
+        if (pierreViewActive() && pierreView) {
+          pierreView.setAllCollapsed(files, anyExpanded);
+          hunkyardFind.filesChanged();
+        } else {
+          for (let i = 0; i < files.length; i++) {
+            files[i].collapsed = anyExpanded;
+          }
+        }
+        collapseBtn.title = anyExpanded ? 'Expand all files' : 'Collapse all files';
+        collapseBtn.classList.toggle('all-collapsed', anyExpanded);
+      });
+      const headerEl = document.querySelector('.file-tree-header');
+      headerEl.appendChild(collapseBtn);
+    }
+
+    // Build and render tree
+    const query = document.getElementById('fileTreeFilter').value.trim().toLowerCase();
+    const matchingFiles = files.filter(function(file) { return file.path.toLowerCase().includes(query); });
+    let tree = buildFileTree(matchingFiles);
+    tree = collapseCommonPrefixes(tree);
+    const body = document.getElementById('fileTreeBody');
+    body.innerHTML = '';
+
+    // Review Conversation pseudo-row sits in its own section above FILES.
+    const conversationSection = document.getElementById('treeConversationSection');
+    conversationSection.innerHTML = '';
+    conversationSection.appendChild(buildReviewConversationTreeRow());
+
+    renderTreeNode(body, tree, 0, '');
+    if (query && !matchingFiles.length) body.textContent = 'No matching files.';
+
+    renderMobileFilePicker();
+  }
+
+  // Mobile (≤768px) replaces the file-tree sidebar with a sticky <select>.
+  // Populates options from the current session files; clicking an option
+  // scrolls that file's section into view. No-op (and hidden) when there's
+  // only one file.
+  function renderMobileFilePicker() {
+    const bar = document.getElementById('mobileFilePickerBar');
+    const select = document.getElementById('mobileFilePicker');
+    if (!bar || !select) return;
+
+    if (files.length <= 1) {
+      bar.classList.add('mobile-file-picker-hidden');
+      return;
+    }
+    bar.classList.remove('mobile-file-picker-hidden');
+
+    const currentValue = select.value;
+    select.innerHTML = '';
+    for (let i = 0; i < files.length; i++) {
+      const opt = document.createElement('option');
+      opt.value = files[i].path;
+      opt.textContent = files[i].path;
+      select.appendChild(opt);
+    }
+
+    if (currentValue && files.some(function(f) { return f.path === currentValue; })) {
+      select.value = currentValue;
+    }
+
+    if (!select._mobilePickerBound) {
+      select._mobilePickerBound = true;
+      select.addEventListener('change', function() {
+        scrollToFile(select.value);
+      });
+    }
+  }
+
+  function buildReviewConversationTreeRow() {
+    const row = document.createElement('div');
+    row.className = 'tree-conversation-row' + (activeTreePath === REVIEW_CONVERSATION_PATH ? ' active' : '');
+    row.dataset.treePath = REVIEW_CONVERSATION_PATH;
+    let inner =
+      '<span class="tree-conversation-icon">' + ICON_REVIEW_CONVERSATION + '</span>' +
+      '<span class="tree-conversation-name">Review conversation</span>';
+    const unresolved = reviewComments.filter(function(c) { return !c.resolved; }).length;
+    if (unresolved > 0) {
+      inner += '<span class="tree-conversation-badge">' + unresolved + '</span>';
+    }
+    row.innerHTML = inner;
+    row.addEventListener('click', scrollToReviewConversation);
+    return row;
+  }
+
+  function fileStatusIcon(status) {
+    // GitHub-style: document icon with colored +/- badge
+    const doc = '<path fill-rule="evenodd" d="M3.75 1.5a.25.25 0 0 0-.25.25v11.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6H9.75A1.75 1.75 0 0 1 8 4.25V1.5H3.75zm5.75.56v2.19c0 .138.112.25.25.25h2.19L9.5 2.06zM2 1.75C2 .784 2.784 0 3.75 0h5.086c.464 0 .909.184 1.237.513l3.414 3.414c.329.328.513.773.513 1.237v8.086A1.75 1.75 0 0 1 12.25 15h-8.5A1.75 1.75 0 0 1 2 13.25V1.75z"/>';
+    if (status === 'added' || status === 'untracked') {
+      return '<svg class="tree-file-status-icon added" viewBox="0 0 16 16">' + doc +
+        '<rect x="8" y="8" width="7" height="7" rx="1.5" fill="var(--hunkyard-green)"/>' +
+        '<path d="M11.5 10v1.5H13v1h-1.5V14h-1v-1.5H9v-1h1.5V10z" fill="var(--hunkyard-editor-bg-card)"/></svg>';
+    }
+    if (status === 'deleted') {
+      return '<svg class="tree-file-status-icon deleted" viewBox="0 0 16 16">' + doc +
+        '<rect x="8" y="8" width="7" height="7" rx="1.5" fill="var(--hunkyard-red)"/>' +
+        '<path d="M9.5 11.5h4v1h-4z" fill="var(--hunkyard-editor-bg-card)"/></svg>';
+    }
+    if (status === 'modified') {
+      return '<svg class="tree-file-status-icon modified" viewBox="0 0 16 16">' + doc +
+        '<circle cx="11.5" cy="11.5" r="3.5" fill="var(--hunkyard-yellow)"/>' +
+        '<circle cx="11.5" cy="11.5" r="1.5" fill="var(--hunkyard-editor-bg-card)"/>' +
+        '</svg>';
+    }
+    if (status === 'removed') {
+      return '<svg class="tree-file-status-icon removed" viewBox="0 0 16 16">' + doc +
+        '<rect x="8" y="8" width="7" height="7" rx="1.5" fill="var(--hunkyard-editor-fg-muted)"/>' +
+        '<path d="M10 10.5l3 3m0-3l-3 3" stroke="var(--hunkyard-editor-bg-card)" stroke-width="1.2" fill="none"/></svg>';
+    }
+    // renamed or other
+    return '<svg class="tree-file-status-icon" viewBox="0 0 16 16">' + doc + '</svg>';
+  }
+
+  function renderTreeNode(container, node, depth, pathPrefix) {
+    const folderSVG = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M1.75 1A1.75 1.75 0 0 0 0 2.75v10.5C0 14.216.784 15 1.75 15h12.5A1.75 1.75 0 0 0 16 13.25v-8.5A1.75 1.75 0 0 0 14.25 3H7.5a.25.25 0 0 1-.2-.1l-.9-1.2C6.07 1.26 5.55 1 5 1H1.75Z"/></svg>';
+
+    // Render subdirectories. Sort on the first segment like fileSortComparator,
+    // so a collapsed 'a/b' still precedes its sibling 'a.c' as in the list.
+    const dirs = Object.keys(node.children).sort(function(a, b) {
+      return pathCompare(a.split('/')[0], b.split('/')[0]);
+    });
+    for (let d = 0; d < dirs.length; d++) {
+      const dirName = dirs[d];
+      const fullPath = pathPrefix ? pathPrefix + '/' + dirName : dirName;
+      const child = node.children[dirName];
+      const isCollapsed = treeFolderState[fullPath] === true;
+
+      const folder = document.createElement('div');
+      folder.className = 'tree-folder' + (isCollapsed ? ' collapsed' : '');
+      folder.dataset.folderPath = fullPath;
+
+      const row = document.createElement('div');
+      row.className = 'tree-folder-row';
+      row.style.paddingLeft = (8 + depth * 16) + 'px';
+
+      row.innerHTML =
+        '<span class="tree-folder-chevron">&#9662;</span>' +
+        '<span class="tree-folder-icon">' + folderSVG + '</span>' +
+        '<span class="tree-folder-name">' + escapeHtml(dirName) + '</span>';
+
+      (function(fp, folderEl) {
+        row.addEventListener('click', function() {
+          treeFolderState[fp] = !treeFolderState[fp];
+          folderEl.classList.toggle('collapsed');
+        });
+      })(fullPath, folder);
+
+      folder.appendChild(row);
+
+      const childContainer = document.createElement('div');
+      childContainer.className = 'tree-folder-children';
+      renderTreeNode(childContainer, child, depth + 1, fullPath);
+      folder.appendChild(childContainer);
+
+      container.appendChild(folder);
+    }
+
+    // Render files. In files mode preserve user-provided CLI order.
+    const sortedFiles = session.mode === 'files'
+      ? node.files.slice()
+      : node.files.slice().sort(function(a, b) { return pathCompare(a.path, b.path); });
+    for (let fi = 0; fi < sortedFiles.length; fi++) {
+      const f = sortedFiles[fi];
+      const fileName = f.path.split('/').pop();
+      const fileEl = document.createElement('div');
+      fileEl.className = 'tree-file' + (activeTreePath === f.path ? ' active' : '') + (f.viewed ? ' viewed' : '');
+      fileEl.dataset.treePath = f.path;
+      fileEl.style.paddingLeft = (24 + depth * 16) + 'px';
+
+      // In file mode, show plain file icon (no git status badge)
+      const iconHtml = session.mode === 'git' ? fileStatusIcon(f.status) : fileStatusIcon('');
+      let innerHtml =
+        '<span class="tree-file-icon">' + iconHtml + '</span>' +
+        '<span class="tree-file-name">' + escapeHtml(fileName) + '</span>';
+
+      if (f.viewed) {
+        innerHtml += '<span class="tree-viewed-check" title="Viewed">&#10003;</span>';
+      }
+      const unresolvedCount = f.comments.filter(function(c) { return !c.resolved; }).length;
+      if (unresolvedCount > 0) {
+        innerHtml += '<span class="tree-comment-badge">' + unresolvedCount + '</span>';
+      }
+
+      fileEl.innerHTML = innerHtml;
+
+      (function(path) {
+        fileEl.addEventListener('click', function() {
+          // In story view, clicking a file activates its owning chapter and
+          // scrolls to its hunk group; otherwise use the flat-view scroll.
+          const chipPage = storyState && storyState.fileChapters.has(path)
+            ? storyPageId(storyState.pages[Array.from(storyState.fileChapters.get(path))[0]])
+            : null;
+          if (storyActive() && chipPage) {
+            showStory(chipPage);
+            requestAnimationFrame(function () {
+              const pane = document.getElementById('storyPane');
+              const group = pane && pane.querySelector('.hunkyard-story-file-group[data-story-file="' + CSS.escape(path) + '"]');
+              if (group) group.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            });
+            return;
+          }
+          scrollToFile(path);
+        });
+      })(f.path);
+
+      container.appendChild(fileEl);
+    }
+  }
+
+  function updateTreeActive(filePath) {
+    // Anything else that moves the active file (j/k, a click) ends the pin.
+    if (treePin && treePin.path !== filePath) treePin = null;
+    if (filePath === activeTreePath) return;
+    activeTreePath = filePath;
+    const allRows = document.querySelectorAll('.tree-file, .tree-conversation-row');
+    for (let i = 0; i < allRows.length; i++) {
+      allRows[i].classList.toggle('active', allRows[i].dataset.treePath === filePath);
+    }
+    // Scroll active item into view within the tree panel (manual scroll
+    // to avoid scrollIntoView affecting ancestor scroll containers)
+    const activeEl = document.querySelector('.tree-file.active, .tree-conversation-row.active');
+    if (activeEl) {
+      const panel = document.getElementById('fileTreeBody');
+      const rect = activeEl.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+      if (rect.top < panelRect.top) {
+        panel.scrollTop += rect.top - panelRect.top;
+      } else if (rect.bottom > panelRect.bottom) {
+        panel.scrollTop += rect.bottom - panelRect.bottom;
+      }
+    }
+  }
+
+  // Unresolved-comment badges in the tree. Pass a path to update just that
+  // row (per-file changes; a full pass walks every row of a large tree).
+  function updateTreeCommentBadges(onlyPath) {
+    const allFiles = onlyPath
+      ? document.querySelectorAll('.tree-file[data-tree-path="' + CSS.escape(onlyPath) + '"]')
+      : document.querySelectorAll('.tree-file');
+    const byPath = new Map(files.map(function(f) { return [f.path, f]; }));
+    for (let i = 0; i < allFiles.length; i++) {
+      const el = allFiles[i];
+      const path = el.dataset.treePath;
+      const file = byPath.get(path);
+      if (!file) continue;
+      let badge = el.querySelector('.tree-comment-badge');
+      const count = file.comments.filter(function(c) { return !c.resolved; }).length;
+      if (count > 0) {
+        if (badge) {
+          badge.textContent = count;
+        } else {
+          badge = document.createElement('span');
+          badge.className = 'tree-comment-badge';
+          badge.textContent = count;
+          el.appendChild(badge);
+        }
+      } else if (badge) {
+        badge.remove();
+      }
+    }
+  }
+
+  function updateTreeViewedState() {
+    const allFiles = document.querySelectorAll('.tree-file');
+    for (let i = 0; i < allFiles.length; i++) {
+      const el = allFiles[i];
+      const path = el.dataset.treePath;
+      const file = getFileByPath(path);
+      if (!file) continue;
+      el.classList.toggle('viewed', !!file.viewed);
+      let check = el.querySelector('.tree-viewed-check');
+      if (file.viewed) {
+        if (!check) {
+          check = document.createElement('span');
+          check.className = 'tree-viewed-check';
+          check.title = 'Viewed';
+          check.textContent = '\u2713';
+          // Insert before comment badge if present, else append
+          const badge = el.querySelector('.tree-comment-badge');
+          if (badge) el.insertBefore(check, badge);
+          else el.appendChild(check);
+        }
+      } else if (check) {
+        check.remove();
+      }
+    }
+  }
+
+  async function scrollToFile(filePath) {
+    // The tree remains available while a scope/view reload rebuilds the list.
+    // Preserve a click made during that reload instead of dropping it when
+    // the old viewer has already been disposed.
+    while (reloadInFlight) await reloadInFlight;
+    if (!pierreView || !pierreViewActive()) return;
+    const file = getFileByPath(filePath);
+    if (file && file.collapsed) pierreView.setCollapsed(file, false);
+    ignoreTreeObserverUntil = Date.now() + 400;
+    updateTreeActive(filePath);
+    return pierreView.scrollToFile(filePath);
+  }
+
+  function renderAllFiles() {
+    if (!storyActive()) {
+      renderPierreFiles();
+      return;
+    }
+    // Story view renders chapters in its own pane and the review list is
+    // hidden; drop the list until the reader switches back to Diff.
+    disposePierreView();
+    document.getElementById('filesContainer').replaceChildren();
+    renderReviewConversation();
+    rebuildNavList();
+    applyHideResolved();
+  }
+
+  // ===== Pierre review view (the review list, git and files mode) =====
+  // @pierre/diffs CodeView owns the multi-file surface: rendering,
+  // virtualization, Shiki highlighting (worker pool), word diffs, sticky
+  // headers and hunk expansion. Hunkyard keeps the product model (comments,
+  // forms, drafts, viewed, keyboard) and hands Pierre annotations, a custom
+  // header and callbacks via window.hunkyard.pierreView. See docs/frontend-js.md.
+  let pierreView = null;
+  let pierreWorkerController = null;
+  let pierreUnsubscribeTree = null;
+
+  // The review list always renders through Pierre (git and files mode; the
+  // story pane hosts its own Pierre FileDiffs). If the bundle failed to load
+  // there is no second engine to fall back to — renderAllFiles shows an
+  // error instead.
+  function pierreViewActive() {
+    return !storyActive();
+  }
+
+  function pierreThreadKey(commentId) { return 'thread:' + commentId; }
+
+  // Hunks as Hunkyard presents them: small gaps merged and gaps that hold a
+  // comment pulled in, so comment anchors stay visible. Same model the story
+  // view and outdated-comment logic use.
+  function pierrePreparedHunks(file) {
+    autoExpandSmallGaps(file);
+    expandHunksForComments(file);
+    return file.diffHunks || [];
+  }
+
+  function renderedDiffLineKeys(hunks) {
+    const keys = new Set();
+    for (let i = 0; i < hunks.length; i++) {
+      const lines = hunks[i].Lines || [];
+      for (let j = 0; j < lines.length; j++) {
+        const line = lines[j];
+        if (line.Type !== 'add' && line.OldNum) keys.add(line.OldNum + ':old');
+        if (line.Type !== 'del' && line.NewNum) keys.add(line.NewNum + ':');
+      }
+    }
+    return keys;
+  }
+
+  function pierreIsDocumentView(file) {
+    if (file.viewMode === 'rendered') return !!fileRendererFor(file);
+    return file.fileType === 'markdown' && (file.viewMode === 'document' || file.viewMode === 'rendered-diff');
+  }
+
+  // A file with nothing to render gets Hunkyard's placeholder text instead of an
+  // empty diff (same messages as the classic body).
+  function pierrePlaceholderText(file) {
+    if (file.lazy) return null;
+    if (file.orphaned) return 'This file is no longer part of the review.';
+    if (file.fileType === 'binary') return 'Binary file changed. Its bytes and Git metadata are preserved in the review snapshot.';
+    const noHunks = !file.diffHunks || file.diffHunks.length === 0;
+    if (file.viewMode === 'document' || file.viewMode === 'rendered-diff' || file.viewMode === 'rendered' || !noHunks) return null;
+    if (file.status === 'deleted') return 'This file was deleted.';
+    if (file.status === 'renamed') return 'File renamed without changes.';
+    return null;
+  }
+
+  // Files-mode code file: the whole file as a Pierre file item.
+  function pierreIsFileView(file) {
+    return file.fileType === 'code' && file.viewMode === 'document' && !file.orphaned;
+  }
+
+  function pierreLineCount(file) {
+    const content = file.content || '';
+    if (!content) return 0;
+    return content.split('\n').length - (content.endsWith('\n') ? 1 : 0);
+  }
+
+  function pierreAnnotationsFor(file) {
+    const A = window.hunkyard.pierreAdapter;
+    const out = [];
+    const hideResolved = isHideResolved();
+    if (pierrePlaceholderText(file)) {
+      // No lines to anchor to: file-level threads, every line comment as
+      // outdated, then the placeholder.
+      const lineComments = (file.comments || []).filter(function(c) {
+        return c.scope !== 'file' && !(hideResolved && c.resolved);
+      });
+      for (let i = 0; i < (file.comments || []).length; i++) {
+        const c = file.comments[i];
+        if (c.scope === 'file' && !(hideResolved && c.resolved)) out.push(A.annotationForComment(c));
+      }
+      if (lineComments.length) out.push({ side: 'additions', lineNumber: 0, metadata: { kind: 'outdated', id: file.path } });
+      out.push({ side: 'additions', lineNumber: 0, metadata: { kind: 'placeholder', id: file.path } });
+      return out;
+    }
+    if (pierreIsDocumentView(file)) {
+      // Line comments and forms live inside the rendered document; only
+      // file-level threads and the file form sit above it.
+      for (let i = 0; i < (file.comments || []).length; i++) {
+        const c = file.comments[i];
+        if (c.scope === 'file' && !(hideResolved && c.resolved)) out.push(A.annotationForComment(c));
+      }
+      const fileForm = getFileComposeForm(file.path);
+      if (fileForm && !fileForm.editingId) out.push(A.annotationForForm(fileForm));
+      out.push({ side: 'additions', lineNumber: 0, metadata: { kind: 'document', id: file.path } });
+      return out;
+    }
+    if (pierreIsFileView(file)) {
+      const lineCount = pierreLineCount(file);
+      let beyondEnd = false;
+      for (let i = 0; i < (file.comments || []).length; i++) {
+        const c = file.comments[i];
+        if (hideResolved && c.resolved) continue;
+        if (c.scope !== 'file' && (c.side === 'old' || c.end_line > lineCount)) { beyondEnd = true; continue; }
+        out.push(A.annotationForComment(c));
+      }
+      if (beyondEnd) out.push({ side: 'additions', lineNumber: 0, metadata: { kind: 'outdated', id: file.path } });
+      const fileForms = getFormsForFile(file.path);
+      for (let i = 0; i < fileForms.length; i++) {
+        if (!fileForms[i].editingId) out.push(A.annotationForForm(fileForms[i]));
+      }
+      return out;
+    }
+    const lineKeys = renderedDiffLineKeys(pierrePreparedHunks(file));
+    // File-level threads and the outdated notice sit together, on the old
+    // side (left of a split diff) unless the file has none.
+    const fileSide = A.fileLevelSide(file.status);
+    let outdated = false;
+    for (let i = 0; i < (file.comments || []).length; i++) {
+      const c = file.comments[i];
+      if (hideResolved && c.resolved) continue;
+      if (c.scope !== 'file' && !lineKeys.has(c.end_line + ':' + (c.side === 'old' ? 'old' : ''))) {
+        outdated = true;
+        continue;
+      }
+      out.push(A.annotationForComment(c, fileSide));
+    }
+    if (outdated) {
+      out.push({ side: fileSide, lineNumber: 0, metadata: { kind: 'outdated', id: file.path } });
+    }
+    const forms = getFormsForFile(file.path);
+    for (let i = 0; i < forms.length; i++) {
+      if (!forms[i].editingId) out.push(A.annotationForForm(forms[i], fileSide));
+    }
+    return out;
+  }
+
+  // Markdown Document view: Hunkyard's rendered document (line blocks, inline
+  // comments, gutter drag, mermaid) as the file-level annotation of an empty
+  // Pierre file item. Pierre owns the header, collapse and virtualization.
+  // The wrapper keeps the classic section shape so document helpers (TOC,
+  // visual selection, comment focus) find it by id.
+  function buildPierreLoading() {
+    const el = document.createElement('div');
+    el.className = 'diff-deleted-placeholder pierre-loading';
+    el.textContent = 'Loading diff\u2026';
+    return el;
+  }
+
+  function buildPierrePlaceholder(filePath) {
+    const file = getFileByPath(filePath);
+    const text = file && pierrePlaceholderText(file);
+    if (!text) return null;
+    const el = document.createElement('div');
+    el.className = 'diff-deleted-placeholder' + (file.orphaned ? ' orphaned-placeholder' : '') +
+      (file.status === 'renamed' ? ' rename-placeholder' : '');
+    el.textContent = text;
+    return el;
+  }
+
+  function buildPierreDocument(filePath) {
+    const file = getFileByPath(filePath);
+    if (!file || file.lazy) return null;
+    const section = document.createElement('div');
+    section.className = 'file-section pierre-document';
+    section.id = 'file-section-' + filePath;
+    section.open = true;
+    const body = document.createElement('div');
+    body.className = 'file-body';
+    section.appendChild(body);
+    populateDocumentBody(body, file);
+    highlightQuotesInSection(section, file);
+    return section;
+  }
+
+  // Re-render a mounted document's contents in place. Swapping the
+  // annotation element instead makes Pierre drop it before measuring the new
+  // one; the item collapses for a frame and the list scroll clamps to the top.
+  // A document scrolled out of the list is only marked stale; it re-renders
+  // when it mounts again (onPierrePostRender), so a full render never pays
+  // for off-screen plans.
+  const pierreStaleDocuments = new Set();
+  function refreshPierreDocument(filePath) {
+    const section = pierreView && pierreView.annotationElement('document:' + filePath);
+    if (!section) return;
+    if (!section.isConnected) { pierreStaleDocuments.add(filePath); return; }
+    pierreStaleDocuments.delete(filePath);
+    const file = getFileByPath(filePath);
+    if (!file || file.lazy || !pierreIsDocumentView(file)) return;
+    saveOpenFormContent(filePath);
+    const body = section.querySelector(':scope > .file-body');
+    populateDocumentBody(body, file);
+    highlightQuotesInSection(section, file);
+    if (section.isConnected) renderPluggableBlocks();
+  }
+
+  function buildPierreThread(filePath, commentId) {
+    const file = getFileByPath(filePath);
+    if (!file) return null;
+    const comment = file.comments.find(function(c) { return c.id === commentId; });
+    if (!comment) return null;
+    const el = comment.resolved ? createResolvedElement(comment, filePath) : createCommentElement(comment, filePath);
+    if (el) el.classList.add('pierre-annotation');
+    if (el && comment.scope === 'file') el.classList.add('pierre-file-level');
+    if (el && comment.scope !== 'file') el.classList.add(comment.side === 'old' ? 'diff-comment-left' : 'diff-comment-right');
+    return el;
+  }
+
+  // Is a line comment anchored to a line the current view renders?
+  // Predicate: is a comment anchored to a line this file's view renders?
+  // Built once per file so callers looping over comments do the work once.
+  function pierreAnchorTest(file) {
+    if (pierrePlaceholderText(file)) return function(c) { return c.scope === 'file'; };
+    if (pierreIsFileView(file)) {
+      const count = pierreLineCount(file);
+      return function(c) { return c.scope === 'file' || (c.side !== 'old' && c.end_line <= count); };
+    }
+    const keys = renderedDiffLineKeys(pierrePreparedHunks(file));
+    return function(c) { return c.scope === 'file' || keys.has(c.end_line + ':' + (c.side === 'old' ? 'old' : '')); };
+  }
+
+  function buildPierreOutdated(filePath) {
+    const file = getFileByPath(filePath);
+    if (!file) return null;
+    const section = document.createElement('div');
+    section.className = 'outdated-diff-comments';
+    const anchored = pierreAnchorTest(file);
+    for (let i = 0; i < file.comments.length; i++) {
+      const c = file.comments[i];
+      if (anchored(c)) continue;
+      if (isHideResolved() && c.resolved) continue;
+      const el = c.resolved ? createResolvedElement(c, filePath) : createCommentElement(c, filePath);
+      el.classList.add('outdated-comment');
+      const headerLeft = el.querySelector('.comment-header-left');
+      if (headerLeft) {
+        const badge = document.createElement('span');
+        badge.className = 'outdated-badge';
+        badge.textContent = 'Outdated';
+        headerLeft.appendChild(badge);
+      }
+      section.appendChild(el);
+    }
+    return section;
+  }
+
+  function buildPierreForm(_filePath, key) {
+    const form = activeForms.find(function(f) { return f.formKey === key; });
+    if (!form) return null;
+    const el = form.scope === 'file' ? createFileCommentForm(form) : createCommentForm(form);
+    el.classList.add('pierre-annotation');
+    if (form.scope === 'file') el.classList.add('pierre-file-level');
+    if (form.scope !== 'file') el.classList.add(form.side === 'old' ? 'diff-comment-left' : 'diff-comment-right');
+    return el;
+  }
+
+  function buildPierreFileHeader(filePath) {
+    const file = getFileByPath(filePath);
+    if (!file) return null;
+    const header = document.createElement('div');
+    header.className = 'file-header hunkyard-review-file-header pierre-file-header' + (file.collapsed ? ' collapsed' : '');
+    header.dataset.filePath = filePath;
+    populateFileHeader(file, header);
+    // Pierre rebuilds the header on collapse; retain keyboard focus.
+    const chevron = header.querySelector('.file-header-chevron');
+    chevron.setAttribute('aria-expanded', String(!file.collapsed));
+    function toggle() {
+      const refocus = document.activeElement === chevron;
+      pierreView.setCollapsed(file, !file.collapsed);
+      hunkyardFind.filesChanged();
+      header.classList.toggle('collapsed', !!file.collapsed);
+      chevron.setAttribute('aria-expanded', String(!file.collapsed));
+      if (refocus) keepChevronFocus(filePath);
+    }
+    chevron.addEventListener('click', function(e) {
+      e.stopPropagation();
+      toggle();
+    });
+    return header;
+  }
+
+  // Refocus the file's chevron for ~20 frames whenever a header rebuild
+  // drops focus to the body. A pointerdown means the user moved on, so stop.
+  function keepChevronFocus(filePath) {
+    let frames = 0;
+    let stopped = false;
+    function stop() { stopped = true; }
+    document.addEventListener('pointerdown', stop, { capture: true, once: true });
+    (function poll() {
+      if (stopped) return;
+      const current = document.querySelector('#filesContainer .pierre-file-header[data-file-path="' + CSS.escape(filePath) + '"] .file-header-chevron');
+      const active = document.activeElement;
+      if (current && active !== current && (!active || active === document.body)) current.focus();
+      if (++frames < 20) requestAnimationFrame(poll);
+      else document.removeEventListener('pointerdown', stop, { capture: true });
+    })();
+  }
+
+  // Load a lazy file's diff/content without touching the DOM; Pierre swaps
+  // the stub item in place once this resolves.
+  const pierreLoader = window.hunkyard.pierreRuntime.createLoader({
+    getFile: getFileByPath,
+    // loadSingleFile returns no comments, so the placeholder keeps its list.
+    load: function(file, signal) {
+      return loadSingleFile({
+        path: file.path, old_path: file.oldPath, status: file.status, file_type: file.fileType,
+        additions: file.additions, deletions: file.deletions, generated: file.generated,
+      }, currentFileDataScope(), signal).then(function(loaded) {
+        if (!loaded || file.viewMode !== 'rendered-diff') return loaded;
+        // A Rendered view restored while the file was lazy: build its
+        // Before blocks, or fall back to Document without base content.
+        if (!hasRenderedDiff(loaded)) {
+          file.viewMode = 'document';
+          return loaded;
+        }
+        return ensurePreviousLineBlocks(loaded).then(function() { return loaded; });
+      });
+    },
+    changed: updateTreeCommentBadges,
+  });
+  const loadPierreFile = pierreLoader.load;
+
+  function pierreDisplayOptions() {
+    return Object.assign(window.hunkyard.pierreAdapter.displayOptions(getSetting), {
+      theme: window.hunkyard.themeBoost.themes(window.PierreDiffs,
+        window.hunkyard.themePalette.pair(loadSettings(), window.hunkyard.palettes),
+        getSetting('boostContrast', 'off') === 'on'),
+    });
+  }
+
+  function pierreListLayout() {
+    const styles = getComputedStyle(document.getElementById('filesContainer'));
+    return {
+      gap: 16,
+      paddingTop: parseFloat(styles.getPropertyValue('--hunkyard-review-pad-top')) || 16,
+      paddingBottom: parseFloat(styles.getPropertyValue('--hunkyard-review-pad-bottom')) || 80,
+    };
+  }
+
+  function ensurePierreWorkerPool() {
+    if (!pierreWorkerController) {
+      pierreWorkerController = window.hunkyard.pierreRuntime.createWorkerController({
+        create: function() {
+          const display = pierreDisplayOptions();
+          return window.PierreDiffs.getOrCreateWorkerPoolSingleton({
+            poolOptions: {
+              workerFactory: function() { return new Worker('pierre/pierre-worker.js', { type: 'module' }); },
+              poolSize: Math.max(1, Math.min(4, (navigator.hardwareConcurrency || 4) - 1)),
+            },
+            highlighterOptions: {
+              theme: display.theme,
+              lineDiffType: display.lineDiffType,
+              preferredHighlighter: 'shiki-js',
+            },
+          });
+        },
+        onFailure: function(error) {
+          console.warn('Highlight workers unavailable; rendering without workers.', error);
+          window.hunkyard.codeHighlight.configure({ pool: pierreWorkerPoolReady });
+          requestAnimationFrame(function() {
+            disposePierreView();
+            renderAllFiles();
+            if (storyActive()) renderStory();
+          });
+        },
+      });
+    }
+    return pierreWorkerController.get();
+  }
+
+  // The worker pool once the Pierre bundle has loaded (null if it failed).
+  // Calling ensurePierreWorkerPool() before then would find no
+  // window.PierreDiffs and turn workers off for the session.
+  function pierreWorkerPoolReady() {
+    return window.hunkyardPierreReady.then(function(P) { return P ? ensurePierreWorkerPool() : null; });
+  }
+
+  function ensurePierreView() {
+    if (pierreView) return pierreView;
+    const P = window.PierreDiffs;
+    const container = document.getElementById('filesContainer');
+    container.innerHTML = '';
+    const display = pierreDisplayOptions();
+    pierreView = window.hunkyard.pierreView.createPierreView({
+      pierre: P,
+      root: container,
+      workerPool: ensurePierreWorkerPool(),
+      diffStyle: diffMode,
+      themeType: window.hunkyard.pierreAdapter.themeTypeFor(getSetting('theme', 'system')),
+      ...display,
+      layout: pierreListLayout(),
+      // paddingBottom: the file border (style.css) adds 1px below an open
+      // file's body; Pierre's estimate must include it or scroll positions
+      // drift 1px per open file. The top border replaces the header's own.
+      itemMetrics: { lineHeight: 20, diffHeaderHeight: 41, paddingTop: 0, paddingBottom: 1 },
+      annotations: pierreAnnotationsFor,
+      prepareHunks: pierrePreparedHunks,
+      isDocumentView: function(file) { return pierreIsDocumentView(file) || !!pierrePlaceholderText(file); },
+      isFileView: pierreIsFileView,
+      loadFile: loadPierreFile,
+      buildHeader: buildPierreFileHeader,
+      onNavigateFile: function(path) {
+        if (!singleFileReview || singleFilePath === path) return;
+        const file = getFileByPath(path);
+        if (!file) return;
+        updateTreeActive(path);
+        renderPierreFiles();
+      },
+      buildAnnotation: function(kind, filePath, id) {
+        if (kind === 'form') return buildPierreForm(filePath, id);
+        if (kind === 'outdated') return buildPierreOutdated(filePath);
+        if (kind === 'document') return buildPierreDocument(filePath);
+        if (kind === 'placeholder') return buildPierrePlaceholder(filePath);
+        if (kind === 'loading') return buildPierreLoading();
+        return buildPierreThread(filePath, id);
+      },
+      buildListHeader: function() { return document.getElementById('reviewConversation'); },
+      onPostRender: onPierrePostRender,
+      unsafeCSS: PIERRE_UNSAFE_CSS,
+      onGutterUtilityClick: function(filePath, range) {
+        if (!filePath || !range) return;
+        openForm({ filePath: filePath, afterBlockIndex: null, startLine: range.startLine, endLine: range.endLine, side: range.side });
+      },
+      onLineNumberClick: function(props, filePath) { pierreTouchComment(props, filePath); },
+      onLineEnter: pierreLineEnter,
+    });
+    if (pierreUnsubscribeTree) pierreUnsubscribeTree();
+    let treeSyncQueued = false;
+    pierreUnsubscribeTree = pierreView.viewer.subscribeToScroll(function() {
+      hunkyardFind.rowsChanged();
+      if (treeSyncQueued) return;
+      treeSyncQueued = true;
+      requestAnimationFrame(function() { treeSyncQueued = false; syncTreeActiveFromPierre(); });
+    });
+    return pierreView;
+  }
+
+  // ----- Keyboard focus (model-driven; Pierre rows are virtualized) -----
+  let pierreFocus = null; // { path, line, side }
+  let pierreVisualAnchor = null; // same shape, set by Shift+V
+
+  // Keyboard rows for a file: diff rows, or the rendered document's blocks
+  // when a markdown file is in Document view (same stops as the classic view).
+  function pierreNavRows(file) {
+    if (pierreIsDocumentView(file)) {
+      return (file.lineBlocks || []).map(function(b, i) {
+        return { line: b.startLine, endLine: b.endLine, side: '', block: i };
+      });
+    }
+    if (pierreIsFileView(file)) {
+      const count = pierreLineCount(file);
+      const rows = new Array(count);
+      for (let n = 1; n <= count; n++) rows[n - 1] = { line: n, side: '' };
+      return rows;
+    }
+    return window.hunkyard.pierreAdapter.navRowsForHunks(pierrePreparedHunks(file), diffMode);
+  }
+
+  // Blocks marked by a document visual range (Shift+V). Tracked so clearing
+  // them leaves drag and form selections (also .selected) alone.
+  let pierreDocVisualMarked = [];
+  function clearPierreDocVisual() {
+    pierreDocVisualMarked.forEach(function(b) { b.classList.remove('selected'); });
+    pierreDocVisualMarked = [];
+  }
+
+  function pierreDocBlockElement(path, blockIndex) {
+    return document.querySelector('#filesContainer .line-block.kb-nav[data-file-path="' + CSS.escape(path) +
+      '"][data-block-index="' + blockIndex + '"]');
+  }
+
+  // Document focus/visual range: the classic .focused/.selected classes on
+  // the rendered blocks. Returns false while the document is not mounted.
+  // `stay` re-marks without scrolling (after a rebuild).
+  function markPierreDocFocus(focus, anchor, stay) {
+    const el = pierreDocBlockElement(focus.path, focus.block);
+    if (!el) return false;
+    document.querySelectorAll('.kb-nav.focused').forEach(function(n) { n.classList.remove('focused'); });
+    el.classList.add('focused');
+    focusedElement = el;
+    clearPierreDocVisual();
+    if (anchor) {
+      const start = Math.min(anchor.line, focus.line);
+      const end = Math.max(anchor.endLine, focus.endLine);
+      el.closest('.pierre-document').querySelectorAll('.line-block.kb-nav').forEach(function(b) {
+        if (parseInt(b.dataset.startLine) >= start && parseInt(b.dataset.endLine) <= end) {
+          b.classList.add('selected');
+          pierreDocVisualMarked.push(b);
+        }
+      });
+    }
+    if (!stay) el.scrollIntoView({ block: 'nearest' });
+    return true;
+  }
+
+  function showPierreFocus() {
+    if (!pierreView) return;
+    if (!pierreFocus) { pierreView.setSelectedLine(null); return; }
+    if (pierreFocus.block !== undefined) {
+      const focus = pierreFocus;
+      const anchor = pierreVisualAnchor && pierreVisualAnchor.path === focus.path ? pierreVisualAnchor : null;
+      pierreView.setSelectedLine(null);
+      keyboardFocusTarget = { filePath: focus.path, blockIndex: String(focus.block), startLine: String(focus.line), endLine: String(focus.endLine) };
+      focusedFilePath = focus.path;
+      focusedBlockIndex = focus.block;
+      if (!markPierreDocFocus(focus, anchor)) {
+        pierreView.scrollToFile(focus.path).then(function() {
+          whenMounted(function() { return pierreFocus !== focus || markPierreDocFocus(focus, anchor); });
+        });
+      }
+      updateTreeActive(focus.path);
+      return;
+    }
+    document.querySelectorAll('.kb-nav.focused').forEach(function(n) { n.classList.remove('focused'); });
+    keyboardFocusTarget = {
+      filePath: pierreFocus.path,
+      diffLineNum: String(pierreFocus.line),
+      diffSide: pierreFocus.side,
+    };
+    if (pierreVisualAnchor && pierreVisualAnchor.path === pierreFocus.path) {
+      const start = Math.min(pierreVisualAnchor.line, pierreFocus.line);
+      const end = Math.max(pierreVisualAnchor.line, pierreFocus.line);
+      const side = pierreVisualAnchor.side === 'old' ? 'deletions' : 'additions';
+      pierreView.viewer.setSelectedLines({ id: pierreFocus.path, range: { start: start, end: end, side: side, endSide: side } });
+    } else {
+      pierreView.setSelectedLine(pierreFocus.path, pierreFocus.line, pierreFocus.side);
+    }
+    pierreSelectionShown = true;
+    pierreView.scrollToLine(pierreFocus.path, pierreFocus.line, pierreFocus.side, 'nearest');
+    updateTreeActive(pierreFocus.path);
+  }
+
+  // j/k: next/previous diff row across files (collapsed files are skipped,
+  // lazy files load first). Visual mode stays within the anchor's file.
+  function navigatePierre(direction) {
+    const order = files.filter(function(f) { return !f.collapsed && !f.orphaned; });
+    if (order.length === 0) return;
+    const fileIdx = pierreFocus ? order.findIndex(function(f) { return f.path === pierreFocus.path; }) : -1;
+    function step(file, rows, fromIdx) {
+      const nextIdx = fromIdx + direction;
+      if (nextIdx >= 0 && nextIdx < rows.length) {
+        pierreFocus = Object.assign({ path: file.path }, rows[nextIdx]);
+        showPierreFocus();
+        return;
+      }
+      if (pierreVisualAnchor) return; // visual selection stays in one file
+      const nextFileIdx = order.indexOf(file) + direction;
+      if (nextFileIdx < 0 || nextFileIdx >= order.length) return;
+      enter(order[nextFileIdx]);
+    }
+    function enter(file) {
+      pierreView.ensureLoaded(file.path).then(function() {
+        const loaded = getFileByPath(file.path);
+        const rows = pierreNavRows(loaded);
+        if (rows.length === 0) { step(loaded, rows, direction > 0 ? -1 : 0); return; }
+        step(loaded, rows, direction > 0 ? -1 : rows.length);
+      });
+    }
+    if (fileIdx < 0) {
+      enter(order[direction > 0 ? 0 : order.length - 1]);
+      return;
+    }
+    const file = order[fileIdx];
+    const rows = pierreNavRows(file);
+    const cur = rows.findIndex(function(r) { return r.line === pierreFocus.line && r.side === pierreFocus.side; });
+    step(file, rows, cur < 0 ? (direction > 0 ? -1 : rows.length) : cur);
+  }
+
+  // After a Pierre scroll the target renders on a later frame: poll `find`
+  // once per frame (up to ~1s) and hand its truthy result to `found`
+  // (optional: `find` may do the work itself).
+  function whenMounted(find, found) {
+    let frames = 0;
+    (function poll() {
+      const hit = find();
+      if (hit) { if (found) found(hit); return; }
+      if (++frames < 60) requestAnimationFrame(poll);
+    })();
+  }
+
+  // Pierre can resolve scrollToFile as soon as a virtualized target is
+  // mounted, while its smooth scroll is still moving the list. A document
+  // comment's inner alignment must wait for that outer scroll to settle or
+  // the pending file scroll can pull the comment back offscreen.
+  // `isCurrent` (optional) stops the poll once a newer jump has started.
+  function whenListScrollSettled(root, done, isCurrent) {
+    const startedAt = performance.now();
+    let previous = root.scrollTop;
+    let lastMovementAt = startedAt;
+    (function poll() {
+      if (isCurrent && !isCurrent()) return;
+      const now = performance.now();
+      const current = root.scrollTop;
+      if (current !== previous) lastMovementAt = now;
+      previous = current;
+      // Wait out the deferred start of a smooth scroll too. A few quiet
+      // animation frames can occur before the browser begins moving it.
+      if ((now - startedAt >= 250 && now - lastMovementAt >= 120) || now - startedAt >= 4000) {
+        done();
+        return;
+      }
+      requestAnimationFrame(poll);
+    })();
+  }
+
+  // Scroll inside Pierre's list without asking the browser to find every
+  // ancestor scroll container. The comments panel and other fixed chrome can
+  // otherwise make native scrollIntoView move the document instead of the
+  // virtualized review list.
+  function scrollPierreElementIntoView(el) {
+    const root = document.getElementById('filesContainer');
+    if (!root || !el) return;
+    let frames = 0;
+    (function align() {
+      const rootRect = root.getBoundingClientRect();
+      const elRect = el.getBoundingClientRect();
+      const offset = elRect.top - rootRect.top - (root.clientHeight - elRect.height) / 2;
+      if (Math.abs(offset) < 2 || frames++ >= 12) return;
+      // Make each layout correction immediate instead of starting overlapping
+      // browser scroll animations during the bounded alignment loop.
+      root.scrollTo({ top: root.scrollTop + offset, behavior: 'instant' });
+      requestAnimationFrame(align);
+    })();
+  }
+
+  // Jump to a comment: load/expand its file, let Pierre scroll the anchor
+  // line into place, then hand the mounted card to `done` (flash/highlight).
+  // Outdated and file-level comments anchor at the file top.
+  // Each jump takes a sequence number; a jump that a newer one has replaced
+  // (rapid next-comment navigation) skips its alignment and `done`.
+  let pierreJumpSeq = 0;
+  function pierreJumpToComment(commentId, filePath, done) {
+    if (!pierreView) return;
+    const seq = ++pierreJumpSeq;
+    const isCurrent = function() { return seq === pierreJumpSeq; };
+    const card = function() {
+      return document.querySelector('#filesContainer .comment-card[data-comment-id="' + CSS.escape(commentId) + '"]');
+    };
+    pierreView.ensureLoaded(filePath).then(function() {
+      if (!isCurrent()) return;
+      const file = getFileByPath(filePath);
+      if (!file) return;
+      if (file.collapsed) pierreView.setCollapsed(file, false);
+      const comment = (file.comments || []).find(function(c) { return c.id === commentId; });
+      const inDocument = pierreIsDocumentView(file) && comment && comment.scope !== 'file';
+      const anchored = comment && comment.scope !== 'file' && !inDocument && pierreAnchorTest(file)(comment);
+      if (anchored) pinTreeActive(filePath);
+      else {
+        ignoreTreeObserverUntil = Date.now() + 400;
+        updateTreeActive(filePath);
+      }
+      const scrolled = anchored
+        ? pierreView.scrollToLine(filePath, comment.end_line, comment.side, 'center')
+        : pierreView.scrollToFile(filePath);
+      scrolled.then(function() {
+        whenMounted(card, function(el) {
+          if (!isCurrent()) return;
+          // Diff jumps don't wait for the list to settle. The view's scrollTo
+          // passes no smooth behavior, so the list is already in place, and
+          // Pierre itself places an anchored line. Waiting would add 250ms+
+          // to every next-comment step. Only document comments need the
+          // inner alignment below, after the outer scroll stops.
+          if (!inDocument) { done(el); return; }
+          whenListScrollSettled(document.getElementById('filesContainer'), function() {
+            whenMounted(card, function(mountedCard) {
+              if (!isCurrent()) return;
+              scrollPierreElementIntoView(mountedCard);
+              done(mountedCard);
+            });
+          }, isCurrent);
+        });
+      });
+    });
+  }
+
+  // Story FileDiffs by container. Each one subscribes to the worker pool's
+  // theme changes until cleanUp(), so story re-renders clean up the diffs
+  // inside the DOM they are about to drop.
+  const storyFileDiffs = new Map();
+  function cleanUpStoryDiffs(root) {
+    storyFileDiffs.forEach(function(diff, container) {
+      if (root && !root.contains(container)) return;
+      diff.cleanUp();
+      storyFileDiffs.delete(container);
+    });
+  }
+
+  // Inline (non-virtualized) Pierre FileDiff for a story chapter group
+  // (filtered hunks; #storyPane scrolls). The group keeps Hunkyard's header and
+  // re-renders as a whole on comment changes, so no element cache is needed.
+  function renderPierreInlineDiff(clone) {
+    const P = window.PierreDiffs;
+    const container = document.createElement('div');
+    container.className = 'pierre-story-diff';
+    const annotations = pierreAnnotationsFor(clone).filter(function(a) { return a.lineNumber !== 0; });
+    const A = window.hunkyard.pierreAdapter;
+    const diff = new P.FileDiff(Object.assign(A.baseOptions(A.themeTypeFor(getSetting('theme', 'system')), diffMode), pierreDisplayOptions(), {
+      disableFileHeader: true,
+      unsafeCSS: PIERRE_UNSAFE_CSS,
+      onLineNumberClick: function(props) { pierreTouchComment(props, clone.path); },
+      onLineEnter: pierreLineEnter,
+      onPostRender: function(node, _instance, phase) { onPierrePostRender(clone.path, node, phase); },
+      renderAnnotation: function(annotation) {
+        const m = annotation.metadata;
+        if (m.kind === 'form') return buildPierreForm(clone.path, m.id);
+        return buildPierreThread(clone.path, m.id);
+      },
+      onGutterUtilityClick: function(range) {
+        const r = A.formRangeFromSelection(range);
+        if (r) openForm({ filePath: clone.path, afterBlockIndex: null, startLine: r.startLine, endLine: r.endLine, side: r.side });
+      },
+    }), ensurePierreWorkerPool());
+    diff.render({
+      fileDiff: A.buildFileDiff(P, clone, clone.diffHunks, 'story:' + clone.path + ':' + (clone.fileHash || '') + ':' + clone.diffHunks.map(function(h) { return h.OldStart; }).join(','), clone.allDiffHunks),
+      lineAnnotations: annotations,
+      containerWrapper: container,
+    });
+    storyFileDiffs.set(container, diff);
+    return container;
+  }
+
+  // ----- Find in diff (Cmd/Ctrl+F) -----
+  // Pierre only mounts rows near the viewport, so the browser's find misses
+  // the rest. hunkyard-find.js searches the model and jumps with Pierre's scroll
+  // API. Rows match what Pierre shows: the prepared hunks for diffs, the
+  // whole file in files mode. Collapsed (and viewed) files, rendered
+  // documents and placeholders show no code rows and are skipped.
+  // Rows are cached per file while what they are built from is unchanged,
+  // so re-searching (as lazy files land) does not rebuild every file. Hunks
+  // are compared one by one: comment and small-gap expansion splice merged
+  // hunks into the same array.
+  const pierreFindRowCache = new WeakMap();
+  function pierreFindRows(file) {
+    if (!file || file.lazy || file.orphaned || file.collapsed) return [];
+    if (pierreIsDocumentView(file) || pierrePlaceholderText(file)) return [];
+    const fileView = pierreIsFileView(file);
+    const hunks = fileView ? [] : pierrePreparedHunks(file);
+    const cached = pierreFindRowCache.get(file);
+    if (cached && cached.fileView === fileView && cached.content === file.content &&
+        cached.hunks.length === hunks.length && cached.hunks.every(function(h, i) { return h === hunks[i]; })) {
+      return cached.rows;
+    }
+    const rows = fileView ? pierreFileFindRows(file) : pierreDiffFindRows(hunks);
+    pierreFindRowCache.set(file, { fileView: fileView, content: file.content, hunks: hunks.slice(), rows: rows });
+    return rows;
+  }
+
+  function pierreFileFindRows(file) {
+    const lines = (file.content || '').split('\n');
+    return lines.map(function(text, i) { return { side: '', line: i + 1, text: text }; });
+  }
+
+  function pierreDiffFindRows(hunks) {
+    const rows = [];
+    for (let h = 0; h < hunks.length; h++) {
+      const lines = hunks[h].Lines || [];
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        if (l.Type === 'del') rows.push({ side: 'old', line: l.OldNum, text: l.Content || '' });
+        else rows.push({ side: '', line: l.NewNum, text: l.Content || '' });
+      }
+    }
+    return rows;
+  }
+
+  const hunkyardFind = window.hunkyard.find.createFind({
+    // Story chapters are Pierre hosts too; only the review list is searched.
+    hostSelector: '#filesContainer diffs-container',
+    // Esc from here (or the page body) closes the bar.
+    scopeSelector: '#filesContainer',
+    files: function() { return files; },
+    linesFor: pierreFindRows,
+    // With only rendered documents (a plan review) there is nothing to
+    // search; leave Cmd+F to the browser.
+    isActive: function() {
+      // The diagram overlay (z-index 500) covers the bar (300).
+      return !!pierreView && pierreViewActive() && !settingsPanelOpen &&
+        !document.querySelector('.diagram-overlay.active') &&
+        files.some(function(f) { return !f.orphaned && !pierreIsDocumentView(f) && !pierrePlaceholderText(f); });
+    },
+    isPending: function(file) { return !!file.lazy && !file.collapsed; },
+    // Start from the file at the top of the list, like the browser's find
+    // starts from the viewport.
+    startFile: function() {
+      const viewer = pierreView && pierreView.viewer;
+      const paths = pierreView ? pierreView.renderedPaths() : [];
+      if (!viewer || paths.length === 0) return null;
+      const top = viewer.getScrollTop();
+      let topPath = paths[0];
+      for (let i = 0; i < paths.length; i++) {
+        if (viewer.getTopForItem(paths[i]) <= top + 60) topPath = paths[i];
+      }
+      return topPath;
+    },
+    load: function(path) { return pierreView ? pierreView.ensureLoaded(path) : null; },
+    reveal: function(match, isCurrent) {
+      if (!pierreView) return null;
+      return pierreView.ensureLoaded(match.path).then(function() {
+        if (!pierreView || !isCurrent()) return null;
+        pinTreeActive(match.path);
+        return pierreView.scrollToLine(match.path, match.line, match.side, 'center');
+      });
+    },
+  });
+
+  // ----- Quote highlights inside Pierre (CSS Custom Highlight API) -----
+  // Comments created from a text selection carry `quote` (+ quote_offset).
+  // Pierre owns the code DOM (shadow roots, virtualized), so instead of
+  // wrapping text in <mark> we register Ranges with CSS.highlights; the
+  // ::highlight(hunkyard-quote) rule is injected into Pierre via unsafeCSS.
+  const PIERRE_UNSAFE_CSS = window.hunkyard.pierreDOM.unsafeCSS + window.hunkyard.find.unsafeCSS;
+  const pierreDecorations = window.hunkyard.pierreDOM.createDecorations();
+
+  function pierreQuotedComments(file) {
+    if (!file) return [];
+    const quoted = (file.comments || []).filter(function(c) { return c.quote && !c.resolved && c.scope !== 'file'; })
+      .map(function(c) { return { start: c.start_line, end: c.end_line, side: c.side || '', quote: c.quote, offset: c.quote_offset }; })
+      .concat(getFormsForFile(file.path).filter(function(f) { return f.quote && !f.editingId; })
+        .map(function(f) { return { start: f.startLine, end: f.endLine, side: f.side || '', quote: f.quote, offset: f.quoteOffset }; }));
+    return quoted;
+  }
+
+  // Line tints, like the classic views: lines a comment covers, and the range
+  // of each open form (form-selected, which wins). Pierre has no per-line
+  // decoration option, so this is CSS in its shadow roots keyed on the host's
+  // data-hunkyard-path. Resolved comments drop out while hide-resolved is on.
+  // Selectors are cached per file (only the current layout's are emitted),
+  // so a refresh re-derives only files whose ranges or hunks changed.
+  const pierreRangeCache = new Map(); // path → { key, commented, forming }
+  function pierreCommentRangeCSS() {
+    const hideResolved = isHideResolved();
+    const unified = diffMode === 'unified';
+    const commented = [];
+    const forming = [];
+    for (let i = 0; i < files.length; i++) {
+      const f = files[i];
+      const commentRanges = (f.comments || []).filter(function(c) {
+        return c.scope !== 'file' && !(hideResolved && c.resolved);
+      }).map(function(c) { return { start: c.start_line, end: c.end_line, old: c.side === 'old' }; });
+      const formRanges = getFormsForFile(f.path).filter(function(form) {
+        return form.scope !== 'file' && form.startLine && (form.afterBlockIndex === null || form.afterBlockIndex === undefined);
+      }).map(function(form) { return { start: form.startLine, end: form.endLine, old: form.side === 'old' }; });
+      if (!commentRanges.length && !formRanges.length) continue;
+      const key = (unified ? 'u' : 's') + JSON.stringify([commentRanges, formRanges]) +
+        (f.fileHash || '') + ':' + (f.diffHunks || []).length + ':' + f.viewMode;
+      let hit = pierreRangeCache.get(f.path);
+      if (!hit || hit.key !== key) {
+        hit = { key: key, commented: window.hunkyard.pierreDOM.pierreLineSelectors(f, commentRanges, unified, pierreIsFileView(f), pierrePreparedHunks(f)), forming: window.hunkyard.pierreDOM.pierreLineSelectors(f, formRanges, unified, pierreIsFileView(f), pierrePreparedHunks(f)) };
+        pierreRangeCache.set(f.path, hit);
+      }
+      commented.push.apply(commented, hit.commented);
+      forming.push.apply(forming, hit.forming);
+    }
+    let css = '';
+    if (commented.length) css += Array.from(new Set(commented)).join(',\n') + ' { background-color: var(--hunkyard-comment-range-bg); }';
+    if (forming.length) css += Array.from(new Set(forming)).join(',\n') + ' { background-color: var(--hunkyard-brand-subtle); }';
+    return css;
+  }
+
+  // The line tints live in one constructable stylesheet adopted by every
+  // Pierre shadow root (onPierrePostRender). Updating it restyles in place;
+  // changing Pierre's unsafeCSS option instead re-renders every item, and a
+  // tall rendered document loses its measured height mid-render (the list
+  // jumps).
+
+  function syncPierreCommentRanges() {
+    pierreDecorations.setRangeCSS(pierreCommentRangeCSS());
+  }
+  function onPierrePostRender(filePath, node, phase) {
+    const host = window.hunkyard.pierreDOM.hostFor(node);
+    if (!host) return;
+    hunkyardFind.rowsChanged();
+    if (phase === 'unmount') { pierreDecorations.unmount(host); return; }
+    host.toggleAttribute('data-hunkyard-file-view', session.mode === 'files' && pierreIsFileView(getFileByPath(filePath)));
+    pierreDecorations.mount(host, filePath, pierreQuotedComments(getFileByPath(filePath)));
+    if (host.querySelector('.pierre-document')) {
+      if (pierreStaleDocuments.has(filePath)) refreshPierreDocument(filePath);
+      // Render new targets, and re-render ones Pierre kept detached while
+      // the theme changed (they remount in the old theme otherwise).
+      if (window.hunkyard.renderers.needsRender(host)) renderPluggableBlocks();
+    }
+  }
+
+  // Public Pierre callbacks handle touch commenting and hover focus.
+  function pierreTouchComment(props, filePath) {
+    if (!props.event || props.event.pointerType !== 'touch' || !filePath) return;
+    props.event.preventDefault();
+    openForm({ filePath: filePath, afterBlockIndex: null, startLine: props.lineNumber, endLine: props.lineNumber,
+      side: props.annotationSide === 'deletions' ? 'old' : undefined });
+  }
+
+  function pierreLineEnter(props) {
+    if (props.event.pointerType === 'mouse' && !pierreVisualAnchor) hidePierreSelection();
+  }
+
+  // A form opened from a sticky file header (or the keyboard) may belong to
+  // a part of the file that is scrolled away — e.g. the file-level form sits
+  // at the top of a long file. Bring it into view, then focus it once Pierre
+  // has mounted the annotation. Line forms use 'nearest', so a gutter click
+  // on a visible line does not move the page.
+  function pierreRevealForm(form) {
+    if (!pierreView || !pierreViewActive() || !form) return;
+    const textarea = function() {
+      return document.querySelector('#filesContainer .comment-form[data-form-key="' + CSS.escape(form.formKey) + '"] textarea');
+    };
+    const root = document.getElementById('filesContainer').getBoundingClientRect();
+    const current = textarea();
+    const r = current && current.getBoundingClientRect();
+    if (r && r.height > 0 && r.top >= root.top && r.bottom <= root.bottom) {
+      current.focus({ preventScroll: true });
+      return; // already visible — don't move the page
+    }
+    if (r && r.height > 0) {
+      // Mounted but partly off screen: move just enough to show it.
+      current.scrollIntoView({ block: 'nearest' });
+      current.focus({ preventScroll: true });
+      return;
+    }
+    // Not mounted yet: have Pierre bring its line (or file) into the list.
+    // Forms in a rendered document have no Pierre line to target.
+    const file = getFileByPath(form.filePath);
+    const byFile = form.scope === 'file' || (file && pierreIsDocumentView(file));
+    const scrolled = byFile
+      ? pierreView.scrollToFile(form.filePath)
+      : pierreView.scrollToLine(form.filePath, form.endLine, form.side, 'nearest');
+    scrolled.then(function() {
+      whenMounted(function() {
+        const ta = textarea();
+        return ta && ta.getBoundingClientRect().height > 0 ? ta : null;
+      }, function(ta) {
+        if (byFile) ta.scrollIntoView({ block: 'nearest' });
+        ta.focus({ preventScroll: true });
+      });
+    });
+  }
+
+  function clearPierreFocus() {
+    pierreFocus = null;
+    pierreVisualAnchor = null;
+    hidePierreSelection();
+    clearPierreDocVisual();
+    document.querySelectorAll('#filesContainer .kb-nav.focused').forEach(function(el) { el.classList.remove('focused'); });
+  }
+
+  // Keyboard focus in diffs is shown with Pierre's line selection. Pierre
+  // also anchors its hover "+" to a selected line, so the selection is
+  // dropped as soon as the mouse is over code; the focus model (pierreFocus)
+  // stays and j/k continue from it.
+  let pierreSelectionShown = false;
+  function hidePierreSelection() {
+    if (pierreView && pierreSelectionShown) pierreView.setSelectedLine(null);
+    pierreSelectionShown = false;
+  }
+
+  function pinnedOnScreen(paths, viewer, top) {
+    if (Date.now() < treePin.until) return true;
+    const i = paths.indexOf(treePin.path);
+    if (i < 0) return false;
+    const root = document.getElementById('filesContainer');
+    const bottom = top + (root ? root.clientHeight : 0);
+    const itemTop = viewer.getTopForItem(treePin.path);
+    const itemBottom = i + 1 < paths.length ? viewer.getTopForItem(paths[i + 1]) : Infinity;
+    return itemBottom > top && itemTop < bottom;
+  }
+
+  function syncTreeActiveFromPierre() {
+    if (Date.now() < ignoreTreeObserverUntil) return;
+    const paths = pierreView ? pierreView.renderedPaths() : [];
+    const viewer = pierreView && pierreView.viewer;
+    if (!viewer || paths.length === 0) return;
+    const top = viewer.getScrollTop();
+    if (treePin && pinnedOnScreen(paths, viewer, top)) {
+      updateTreeActive(treePin.path);
+      return;
+    }
+    treePin = null;
+    // Above the first file sits the review conversation (the list header).
+    const conversation = document.getElementById('reviewConversation');
+    let best = conversation && !conversation.hidden && top + 60 < viewer.getTopForItem(paths[0])
+      ? REVIEW_CONVERSATION_PATH : paths[0];
+    for (let i = 0; i < paths.length; i++) {
+      if (viewer.getTopForItem(paths[i]) <= top + 60) best = paths[i];
+    }
+    updateTreeActive(best);
+  }
+
+  function disposePierreView() {
+    pierreLoader.invalidate();
+    if (pierreUnsubscribeTree) { pierreUnsubscribeTree(); pierreUnsubscribeTree = null; }
+    // The review conversation is CodeView's list header while the view is
+    // up; put it back in front of the list before the view goes away.
+    const conversation = document.getElementById('reviewConversation');
+    const container = document.getElementById('filesContainer');
+    if (conversation && container && container.contains(conversation)) {
+      container.parentNode.insertBefore(conversation, container);
+    }
+    if (pierreView) { pierreView.destroy(); pierreView = null; }
+    document.body.classList.remove('pierre-review');
+  }
+
+  // Replace the file list with a status message (loading, empty scope). Tears
+  // down the Pierre view first; the next render builds a fresh one.
+  function showFilesMessage(text) {
+    disposePierreView();
+    const message = document.createElement('div');
+    message.className = 'loading';
+    message.style.cssText = 'padding: 40px; text-align: center; color: var(--hunkyard-editor-fg-muted);';
+    message.textContent = text;
+    document.getElementById('filesContainer').replaceChildren(message);
+  }
+
+  function renderPierreFiles() {
+    if (!window.PierreDiffs) {
+      const container = document.getElementById('filesContainer');
+      container.innerHTML = '<div class="pierre-load-error" role="alert">The diff renderer failed to load. Reload the page; if this persists, rebuild hunkyard (make build).</div>';
+      return;
+    }
+    document.body.classList.add('pierre-review');
+    renderReviewConversation();
+    const view = ensurePierreView();
+    view.setRenderOptions(Object.assign(pierreDisplayOptions(), { layout: pierreListLayout() }));
+    view.setDiffStyle(diffMode);
+    syncPierreCommentRanges();
+    const selectedFile = getFileByPath(activeTreePath) || files[0];
+    singleFilePath = singleFileReview && selectedFile ? selectedFile.path : null;
+    const visibleFiles = singleFileReview && selectedFile ? [selectedFile] : files;
+    view.setFiles(visibleFiles);
+    visibleFiles.forEach(function(f) { if (pierreIsDocumentView(f)) refreshPierreDocument(f.path); });
+    rebuildNavList();
+    applyHideResolved();
+    hunkyardFind.filesChanged();
+  }
+
+  // Re-publish one file after a comment/form change. Thread cards are
+  // rebuilt (cheap, always current); open forms keep their cached element so
+  // focus, caret and typed text survive.
+  function refreshPierreFile(filePath) {
+    const file = getFileByPath(filePath);
+    if (!file || !pierreView) return;
+    const keys = [];
+    for (let i = 0; i < file.comments.length; i++) keys.push(pierreThreadKey(file.comments[i].id));
+    keys.push('outdated:' + filePath, 'placeholder:' + filePath);
+    pierreView.refreshFile(file, keys);
+    hunkyardFind.filesChanged();
+    // The document keeps its element; its contents (line comments, forms,
+    // typed text via saveOpenFormContent) are rebuilt in place.
+    refreshPierreDocument(filePath);
+    syncPierreCommentRanges();
+    // Keep keyboard focus visible across the rebuild (and after a form on
+    // this file closes, where main left the commented line focused).
+    const focus = pierreFocus;
+    if (focus && focus.path === filePath) {
+      requestAnimationFrame(function() {
+        if (pierreFocus !== focus) return;
+        if (focus.block !== undefined) {
+          markPierreDocFocus(focus, pierreVisualAnchor && pierreVisualAnchor.path === filePath ? pierreVisualAnchor : null, true);
+        } else if (getFormsForFile(filePath).length === 0) {
+          pierreView.setSelectedLine(focus.path, focus.line, focus.side);
+          pierreSelectionShown = true;
+        }
+      });
+    }
+  }
+
+  // Hide-resolved: cards are CSS (`body.hide-resolved`). Line highlights are
+  // baked in at render time via isHideResolved(), so toggle them in place on
+  // currently-mounted bodies instead of wiping #filesContainer.
+  // Hide-resolved changes which threads show and which lines are tinted.
+  // The body class hides resolved cards (story included) and applyHideResolved
+  // re-syncs the tints; the review list also drops or restores the
+  // annotations themselves, in one batched render.
+  function refreshHideResolvedView() {
+    applyHideResolved();
+    if (pierreView && pierreViewActive()) renderPierreFiles();
+  }
+
+  function rebuildNavList() {
+    navElements = Array.from(document.querySelectorAll('.kb-nav'));
+    buildChangeGroups();
+    restoreKeyboardFocus();
+  }
+
+  // j/k. The review list is Pierre's; story chapters have their own keys.
+  function navigateBlock(direction) {
+    if (pierreView && pierreViewActive()) navigatePierre(direction);
+  }
+
+  function rememberKeyboardFocusTarget(target) {
+    if (!target || !target.filePath) return;
+    keyboardFocusTarget = target;
+  }
+
+  function rememberKeyboardFocusFromForm(formObj) {
+    if (!formObj || !formObj.filePath || formObj.scope === 'file') return;
+    if (pierreViewActive()) {
+      // j/k continue from the commented line once the form closes.
+      const file = getFileByPath(formObj.filePath);
+      const bi = formObj.afterBlockIndex;
+      const block = file && bi !== null && bi !== undefined && file.lineBlocks ? file.lineBlocks[bi] : null;
+      pierreFocus = block
+        ? { path: formObj.filePath, line: block.startLine, endLine: block.endLine, side: '', block: bi }
+        : { path: formObj.filePath, line: formObj.endLine || formObj.startLine, side: formObj.side || '' };
+      pierreVisualAnchor = null;
+    }
+    const target = { filePath: formObj.filePath };
+    if (formObj.afterBlockIndex !== null && formObj.afterBlockIndex !== undefined) {
+      target.blockIndex = String(formObj.afterBlockIndex);
+    }
+    if (formObj.startLine) target.startLine = String(formObj.startLine);
+    if (formObj.endLine) target.endLine = String(formObj.endLine);
+    if (formObj.afterBlockIndex === null && formObj.startLine) {
+      target.diffLineNum = String(formObj.startLine);
+      target.diffSide = formObj.side || '';
+    }
+    rememberKeyboardFocusTarget(target);
+  }
+
+  // Focus target for a line-block nav element (Pierre diff rows are
+  // model-driven; see pierreFocus).
+  function navFocusTargetFromElement(el) {
+    if (!el) return null;
+    const fp = el.dataset.filePath;
+    if (!fp) return null;
+    const target = { filePath: fp };
+    if (el.dataset.blockIndex !== undefined) {
+      target.blockIndex = el.dataset.blockIndex;
+      if (el.dataset.startLine) target.startLine = el.dataset.startLine;
+      if (el.dataset.endLine) target.endLine = el.dataset.endLine;
+    }
+    return target;
+  }
+
+  function clearKeyboardFocusTarget() {
+    keyboardFocusTarget = null;
+  }
+
+  function getKeyboardFocusTarget() {
+    if (keyboardFocusTarget) return keyboardFocusTarget;
+    if (!focusedFilePath && !focusedElement) return null;
+    if (focusedElement) {
+      const fromEl = navFocusTargetFromElement(focusedElement);
+      if (fromEl) return fromEl;
+    }
+    const fp = focusedFilePath || (focusedElement && focusedElement.dataset.filePath);
+    if (!fp) return null;
+    const target = { filePath: fp };
+    if (focusedBlockIndex !== null && focusedBlockIndex !== undefined && !isNaN(focusedBlockIndex)) {
+      target.blockIndex = String(focusedBlockIndex);
+    }
+    return target;
+  }
+
+  function findNavElementForFocusTarget(target) {
+    if (!target) return null;
+    for (let i = 0; i < navElements.length; i++) {
+      const n = navElements[i];
+      if (target.blockIndex !== undefined && n.dataset.filePath === target.filePath && n.dataset.blockIndex === target.blockIndex) {
+        return n;
+      }
+      if (target.startLine && n.dataset.filePath === target.filePath &&
+          n.dataset.startLine === target.startLine &&
+          (n.dataset.endLine || target.startLine) === (target.endLine || target.startLine)) {
+        return n;
+      }
+    }
+    return null;
+  }
+
+  // Line the keyboard focus sits on: a markdown block (files mode) or a
+  // Pierre diff row (keyboardFocusTarget.diffLineNum, set by pierreFocus).
+  function getFocusedCommentLocation() {
+    const target = getKeyboardFocusTarget();
+    if (!target) return null;
+    return {
+      filePath: target.filePath,
+      blockIndex: target.blockIndex !== undefined ? parseInt(target.blockIndex) : undefined,
+      lineNum: target.diffLineNum ? parseInt(target.diffLineNum) :
+        (target.startLine ? parseInt(target.startLine) : undefined),
+      side: target.diffSide || '',
+    };
+  }
+
+  function restoreKeyboardFocus() {
+    const target = getKeyboardFocusTarget();
+    if (!target) return;
+    const match = findNavElementForFocusTarget(target);
+    if (!match) return;
+    document.querySelectorAll('.kb-nav.focused').forEach(function(el) { el.classList.remove('focused'); });
+    focusedElement = match;
+    match.classList.add('focused');
+    focusedFilePath = match.dataset.filePath;
+    focusedBlockIndex = parseInt(match.dataset.blockIndex);
+  }
+
+  function changeNavAnchorFromIdx(idx) {
+    if (idx < 0 || idx >= changeGroups.length) return null;
+    const g = changeGroups[idx];
+    let fileGroupIdx = 0;
+    for (let i = 0; i < idx; i++) {
+      if (changeGroups[i].filePath === g.filePath) fileGroupIdx++;
+    }
+    return { filePath: g.filePath, fileGroupIdx: fileGroupIdx };
+  }
+
+  function findChangeIdxForAnchor(anchor) {
+    if (!anchor) return -1;
+    let fileGroupIdx = 0;
+    for (let i = 0; i < changeGroups.length; i++) {
+      if (changeGroups[i].filePath !== anchor.filePath) continue;
+      if (fileGroupIdx === anchor.fileGroupIdx) return i;
+      fileGroupIdx++;
+    }
+    // File still present but group count shrank — land on its last group.
+    let last = -1;
+    for (let i = 0; i < changeGroups.length; i++) {
+      if (changeGroups[i].filePath === anchor.filePath) last = i;
+    }
+    return last;
+  }
+
+  function buildChangeGroups() {
+    // A document re-render rebuilds the groups and would otherwise wipe
+    // currentChangeIdx, breaking atEnd/atStart and wrap chaining on retry.
+    const prevAnchor = changeNavAnchorFromIdx(currentChangeIdx);
+    changeGroups = [];
+    // Document view: color-coded change blocks + deletion markers
+    // Hunkyard owns and caches document annotations across Pierre unmounts. Keep
+    // their change groups available even when another file is in view.
+    const documents = pierreView && pierreViewActive()
+      ? files.map(function(file) { return pierreView.annotationElement('document:' + file.path); }).filter(Boolean)
+      : [document];
+    const docEls = documents.flatMap(function(root) {
+      return Array.from(root.querySelectorAll('.line-block-added, .line-block-modified, .deletion-marker'));
+    })
+      .map(function(el) { return el.closest('.native-table-annotation') || el; })
+      .filter(function(el, index, elements) { return elements.indexOf(el) === index; });
+    // Diff view: diff-added and diff-removed blocks in rendered diff (file mode)
+    const diffEls = document.querySelectorAll('.diff-view .line-block.diff-added, .diff-view .line-block.diff-removed, .diff-view-unified .line-block.diff-added, .diff-view-unified .line-block.diff-removed');
+    const all = docEls.length > 0 ? docEls : diffEls;
+    if (all.length === 0) { currentChangeIdx = -1; updateChangeCounters(); return; }
+    let group = null;
+    for (let i = 0; i < all.length; i++) {
+      const el = all[i];
+      const fp = el.dataset.filePath;
+      // Start new group if file changes or elements aren't consecutive siblings
+      if (!group || group.filePath !== fp || !isConsecutiveSibling(group.elements[group.elements.length - 1], el)) {
+        group = { elements: [el], filePath: fp };
+        changeGroups.push(group);
+      } else {
+        group.elements.push(el);
+      }
+    }
+    currentChangeIdx = findChangeIdxForAnchor(prevAnchor);
+    updateChangeCounters();
+  }
+
+  function isConsecutiveSibling(a, b) {
+    // Check if b immediately follows a, skipping comment elements between them
+    let node = nextLogicalTableSibling(a);
+    while (node && node !== b) {
+      // A non-changed line-block in between breaks the group
+      if (node.classList.contains('line-block') &&
+          !node.classList.contains('line-block-added') &&
+          !node.classList.contains('line-block-modified') &&
+          !node.classList.contains('diff-added') &&
+          !node.classList.contains('diff-removed')) return false;
+      // Deletion markers don't break the group
+      if (node.classList.contains('deletion-marker')) { node = nextLogicalTableSibling(node); continue; }
+      node = nextLogicalTableSibling(node);
+    }
+    return node === b;
+  }
+
+  function nextLogicalTableSibling(node) {
+    if (node.nextElementSibling) return node.nextElementSibling;
+    const section = node.parentElement;
+    if (!section || section.tagName !== 'THEAD') return null;
+    const table = section.closest('table.native-table');
+    return table && table.tBodies.length ? table.tBodies[0].firstElementChild : null;
+  }
+
+  function navigateToChange(dir) {
+    if (changeGroups.length === 0) return;
+
+    // Remove previous flash
+    document.querySelectorAll('.change-flash').forEach(function(el) { el.classList.remove('change-flash'); });
+
+    const viewCenter = window.innerHeight / 2;
+    const threshold = 50;
+    let targetIdx = -1;
+
+    // Check if the previously navigated change is still near viewport center
+    // (i.e. user hasn't scrolled away manually)
+    let currentIsCentered = false;
+    if (currentChangeIdx >= 0 && currentChangeIdx < changeGroups.length) {
+      const curRect = changeGroups[currentChangeIdx].elements[0].getBoundingClientRect();
+      const curCenter = (curRect.top + curRect.bottom) / 2;
+      currentIsCentered = Math.abs(curCenter - viewCenter) < threshold * 3;
+    }
+
+    if (currentIsCentered) {
+      // User hasn't scrolled away — use index-based next/prev with wrapping
+      if (dir > 0) {
+        targetIdx = (currentChangeIdx + 1) % changeGroups.length;
+      } else {
+        targetIdx = (currentChangeIdx - 1 + changeGroups.length) % changeGroups.length;
+      }
+    } else {
+      // User scrolled manually — find next/prev relative to viewport position
+      if (dir > 0) {
+        for (let i = 0; i < changeGroups.length; i++) {
+          const rect = changeGroups[i].elements[0].getBoundingClientRect();
+          const elCenter = (rect.top + rect.bottom) / 2;
+          if (elCenter > viewCenter + threshold) { targetIdx = i; break; }
+        }
+        if (targetIdx === -1) targetIdx = 0;
+      } else {
+        for (let i = changeGroups.length - 1; i >= 0; i--) {
+          const rect = changeGroups[i].elements[0].getBoundingClientRect();
+          const elCenter = (rect.top + rect.bottom) / 2;
+          if (elCenter < viewCenter - threshold) { targetIdx = i; break; }
+        }
+        if (targetIdx === -1) targetIdx = changeGroups.length - 1;
+      }
+    }
+
+    currentChangeIdx = targetIdx;
+    const group = changeGroups[currentChangeIdx];
+    const anchor = changeNavAnchorFromIdx(currentChangeIdx);
+    function focusGroup() {
+      // A stale document may have rebuilt while its file was mounting.
+      buildChangeGroups();
+      const index = findChangeIdxForAnchor(anchor);
+      if (index < 0) return;
+      currentChangeIdx = index;
+      const mounted = changeGroups[index];
+      if (!mounted.elements[0].isConnected) return;
+      mounted.elements[0].scrollIntoView({ block: 'center', behavior: 'instant' });
+      mounted.elements.forEach(function(el) { el.classList.add('change-flash'); });
+      focusedElement = mounted.elements[0];
+      focusedFilePath = mounted.filePath;
+      const bi = parseInt(mounted.elements[0].dataset.blockIndex);
+      if (!isNaN(bi)) focusedBlockIndex = bi;
+      updateChangeCounters();
+    }
+    if (!group.elements[0].isConnected && pierreView && pierreViewActive()) {
+      pierreView.scrollToFile(group.filePath).then(function() {
+        whenMounted(function() {
+          const annotation = pierreView && pierreView.annotationElement('document:' + group.filePath);
+          return annotation && annotation.isConnected;
+        }, focusGroup);
+      });
+    } else focusGroup();
+  }
+
+  function updateChangeCounters() {
+    const labels = document.querySelectorAll('.change-nav-label');
+    labels.forEach(function(label) {
+      const fp = label.dataset.filePath;
+      // Count groups for this file
+      const fileGroups = changeGroups.filter(function(g) { return g.filePath === fp; });
+      const total = fileGroups.length;
+      // Find current index within this file's groups
+      let current = 0;
+      if (currentChangeIdx >= 0) {
+        const globalGroup = changeGroups[currentChangeIdx];
+        if (globalGroup.filePath === fp) {
+          current = fileGroups.indexOf(globalGroup) + 1;
+        }
+      }
+      label.textContent = (current || '-') + ' / ' + total + ' change' + (total !== 1 ? 's' : '');
+    });
+  }
+
+  // Re-render only a single file section (preserves scroll position)
+  function saveOpenFormContent(filePath) {
+    const fileForms = getFormsForFile(filePath);
+    for (let i = 0; i < fileForms.length; i++) {
+      const ta = formTextarea(fileForms[i].formKey);
+      if (ta) fileForms[i].draftBody = ta.value;
+    }
+    // Save expanded reply form state before DOM re-render
+    const section = document.getElementById('file-section-' + filePath);
+    if (section) {
+      const expandedForms = section.querySelectorAll('.reply-form.expanded');
+      for (let i = 0; i < expandedForms.length; i++) {
+        const card = expandedForms[i].closest('.comment-card');
+        if (card && card.dataset.commentId) {
+          const ta = expandedForms[i].querySelector('.reply-textarea');
+          activeReplyForms.set(card.dataset.commentId, { text: ta ? ta.value : '', expanded: true });
+        }
+      }
+    }
+  }
+
+  function renderFileByPath(filePath) {
+    const file = getFileByPath(filePath);
+    if (!file) return;
+    saveOpenFormContent(filePath);
+    if (storyActive()) {
+      if (!renderStoryFileByPath(filePath)) renderStory();
+      return;
+    }
+    if (!pierreView) { renderAllFiles(); return; }
+    refreshPierreFile(filePath);
+    updateTreeCommentBadges(filePath);
+  }
+
+  function currentRenderedFileSection(filePath) {
+    if (storyActive()) {
+      const page = storyPageById(storyView);
+      if (page) {
+        const view = document.getElementById('hunkyard-story-view-' + storyPageId(page));
+        if (view) {
+          const storySection = view.querySelector('.hunkyard-story-file-group[data-story-file="' + CSS.escape(filePath) + '"]');
+          if (storySection) return storySection;
+        }
+      }
+    }
+    return document.getElementById('file-section-' + filePath);
+  }
+
+  // Fill a file header (name, badge, stats, markdown toggle, change nav,
+  // file-comment button, viewed checkbox). Shared by the classic <summary>
+  // header and Pierre's custom header slot.
+  function populateFileHeader(file, header) {
+    const dirParts = file.path.split('/');
+    const fileName = dirParts.pop();
+    const dirPath = dirParts.length > 0 ? dirParts.join('/') + '/' : '';
+
+    // In file mode, hide the badge (status like "modified" is only meaningful in git mode)
+    // Exception: orphaned files always show their "Removed" badge
+    const showBadge = (session.mode === 'git' && file.status !== 'modified') || file.orphaned;
+    let badgeLabel = file.status.charAt(0).toUpperCase() + file.status.slice(1);
+    if (file.status === 'untracked') badgeLabel = 'New';
+    if (file.status === 'added') badgeLabel = 'New';
+    if (file.status === 'removed') badgeLabel = 'Removed';
+    if (file.status === 'renamed') badgeLabel = 'Renamed';
+
+    // In single-file file mode, hide the file header (filename is shown in the header bar)
+    const singleFileMode = session.mode !== 'git' && files.length === 1;
+    if (singleFileMode) header.style.display = 'none';
+
+    const renameHeader = file.status === 'renamed' && file.oldPath
+      ? '<span class="rename-paths"><span class="rename-old">' + escapeHtml(file.oldPath) + '</span>' +
+        '<span class="rename-arrow"> → </span><span class="rename-new">' + escapeHtml(file.path) + '</span></span>'
+      : '<span class="dir">' + escapeHtml(dirPath) + '</span><span class="filename">' + escapeHtml(fileName) + '</span>';
+
+    header.innerHTML =
+      '<button type="button" class="file-header-chevron" aria-label="Toggle ' + escapeHtml(file.path) + '"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg></button>' +
+      ICON_FILE +
+      '<span class="file-header-name">' + renameHeader +
+        '<button type="button" class="file-header-copy-path" aria-label="Copy file path">' + ICON_COPY_PATH + '</button>' +
+      '</span>' +
+      (showBadge ? '<span class="file-header-badge ' + escapeHtml(file.status) + '">' + escapeHtml(badgeLabel) + '</span>' : '') +
+      (file.additions || file.deletions ? '<span class="file-header-stats">' +
+        (file.additions ? '<span class="add">+' + file.additions + '</span>' : '') +
+        (file.deletions ? '<span class="del">-' + file.deletions + '</span>' : '') +
+      '</span>' : '') +
+      '';
+
+    (function(filePath) {
+      const copyPathBtn = header.querySelector('.file-header-copy-path');
+      copyPathBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const originalLabel = copyPathBtn.getAttribute('aria-label');
+        const abs = session.cwd ? session.cwd + '/' + filePath : filePath;
+        navigator.clipboard.writeText(abs).then(function() {
+          copyPathBtn.innerHTML = ICON_COPY_PATH_CHECK;
+          copyPathBtn.setAttribute('aria-label', 'Copied!');
+          setTimeout(function() { copyPathBtn.innerHTML = ICON_COPY_PATH; copyPathBtn.setAttribute('aria-label', originalLabel); }, 1500);
+        }).catch(function() { /* best-effort */ });
+      });
+    })(file.path);
+
+    // Add document/diff toggle for markdown files that have diff hunks.
+    // In git mode with base content available, offer a third Rendered view:
+    // Previous-vs-Current split/unified (follows the existing split/unified
+    // toggle). Markdown only. Hide when diffActive is on (header-level
+    // rendered diff overrides per-file toggle).
+    if (file.fileType === 'markdown' && file.diffHunks && file.diffHunks.length > 0 && !diffActive) {
+      const hasRendered = hasRenderedDiff(file);
+      const toggle = document.createElement('div');
+      toggle.className = 'file-header-toggle';
+      toggle.setAttribute('role', 'group');
+      toggle.setAttribute('aria-label', 'View for ' + file.path);
+      toggle.innerHTML =
+        '<button type="button" class="toggle-btn' + (file.viewMode === 'document' ? ' active' : '') + '" data-mode="document" aria-pressed="' + (file.viewMode === 'document' ? 'true' : 'false') + '">Document</button>' +
+        (hasRendered ? '<button type="button" class="toggle-btn' + (file.viewMode === 'rendered-diff' ? ' active' : '') + '" data-mode="rendered-diff" aria-pressed="' + (file.viewMode === 'rendered-diff' ? 'true' : 'false') + '">Rendered</button>' : '') +
+        '<button type="button" class="toggle-btn' + (file.viewMode === 'diff' ? ' active' : '') + '" data-mode="diff" aria-pressed="' + (file.viewMode === 'diff' ? 'true' : 'false') + '">Diff</button>';
+      toggle.addEventListener('click', function(e) {
+        const btn = e.target.closest('.toggle-btn');
+        if (!btn) return;
+        e.preventDefault(); // Don't toggle the <details>
+        const fileForms = getFormsForFile(file.path);
+        fileForms.forEach(function(f) { removeForm(f.formKey); });
+        if (activeFilePath === file.path) {
+          selectionStart = null;
+          selectionEnd = null;
+        }
+        const mode = btn.dataset.mode;
+        // A later click wins even if this one is still waiting on the Before blocks.
+        const token = file._viewModeToken = (file._viewModeToken || 0) + 1;
+        const ready = mode === 'rendered-diff' ? ensurePreviousLineBlocks(file) : null;
+        Promise.resolve(ready).then(function() {
+          if (file._viewModeToken !== token) return;
+          file.viewMode = mode;
+          renderFileByPath(file.path);
+        });
+      });
+      header.appendChild(toggle);
+
+      // Change navigation widget (file mode, both document and diff view)
+      if (session.mode !== 'git') {
+        const changeNav = document.createElement('div');
+        changeNav.className = 'change-nav';
+        const sc = window.hunkyard && window.hunkyard.shortcuts;
+        const prevChangeKeys = (sc && sc.getBinding('previous_change')) || 'Shift+N';
+        const nextChangeKeys = (sc && sc.getBinding('next_change')) || 'n';
+        changeNav.innerHTML =
+          '<button class="change-nav-btn" data-dir="-1" title="Previous change (' + escapeHtml(prevChangeKeys) + ')">&#9650;</button>' +
+          '<span class="change-nav-label" data-file-path="' + escapeHtml(file.path) + '"></span>' +
+          '<button class="change-nav-btn" data-dir="1" title="Next change (' + escapeHtml(nextChangeKeys) + ')">&#9660;</button>';
+        changeNav.addEventListener('click', function(e) {
+          const btn = e.target.closest('.change-nav-btn');
+          if (!btn) return;
+          e.preventDefault();
+          e.stopPropagation();
+          navigateToChange(parseInt(btn.dataset.dir));
+        });
+        header.appendChild(changeNav);
+      }
+    }
+
+    // <label> / Source toggle for a file a pluggable renderer claims. Source
+    // is the file's usual view: the diff in git mode, the file in files mode.
+    const fileRenderer = fileRendererFor(file);
+    if (fileRenderer || (session.mode === 'git' && file.fileType === 'code' && !file.orphaned && file.status !== 'deleted')) {
+      const sourceMode = session.mode === 'git' ? 'diff' : 'document';
+      const toggle = document.createElement('div');
+      toggle.className = 'file-header-toggle';
+      toggle.setAttribute('role', 'group');
+      toggle.setAttribute('aria-label', 'View for ' + file.path);
+      const toggleBtn = function(mode, label) {
+        const on = file.viewMode === mode;
+        return '<button type="button" class="toggle-btn' + (on ? ' active' : '') + '" data-mode="' + mode +
+          '" aria-pressed="' + on + '">' + escapeHtml(label) + '</button>';
+      };
+      toggle.innerHTML = fileRenderer
+        ? toggleBtn('rendered', fileRenderer.label) + toggleBtn(sourceMode, 'Source')
+        : toggleBtn('diff', 'Diff') + toggleBtn('document', 'File');
+      toggle.addEventListener('click', function(e) {
+        const btn = e.target.closest('.toggle-btn');
+        if (!btn) return;
+        e.preventDefault();
+        if (btn.dataset.mode === file.viewMode) return;
+        getFormsForFile(file.path).forEach(function(f) { removeForm(f.formKey); });
+        if (activeFilePath === file.path) {
+          selectionStart = null;
+          selectionEnd = null;
+        }
+        file.viewMode = btn.dataset.mode;
+        renderFileByPath(file.path);
+      });
+      header.appendChild(toggle);
+    }
+
+    // File comment button — not for orphaned files (no point adding comments to removed files)
+    if (!file.orphaned) {
+      const fileCommentBtn = document.createElement('button');
+      fileCommentBtn.className = 'file-comment-btn';
+      fileCommentBtn.title = 'Add file-level comment';
+      fileCommentBtn.setAttribute('aria-label', 'Add file-level comment');
+      fileCommentBtn.innerHTML = ICON_COMMENT;
+      fileCommentBtn.addEventListener('click', function(e) {
+        e.stopPropagation(); // Don't toggle the <details>
+        e.preventDefault();
+        openFileCommentForm(file.path);
+      });
+      header.appendChild(fileCommentBtn);
+    }
+
+    // Viewed checkbox
+    const viewedLabel = document.createElement('label');
+    viewedLabel.className = 'file-header-viewed';
+    viewedLabel.title = 'Viewed';
+    viewedLabel.innerHTML = '<input type="checkbox"' + (file.viewed ? ' checked' : '') + '><span>Viewed</span>';
+    viewedLabel.addEventListener('click', function(e) {
+      e.stopPropagation(); // Don't toggle the <details>
+    });
+    viewedLabel.querySelector('input').addEventListener('change', function() {
+      toggleViewed(file.path);
+    });
+    header.appendChild(viewedLabel);
+  }
+
+  // Body of a markdown file in Document view: the inter-round rendered diff
+  // when that toggle is on (files mode), otherwise the rendered document.
+  function populateDocumentBody(body, file) {
+    const roundDiff = diffActive && file.previousLineBlocks && file.previousLineBlocks.length > 0;
+    const renderedDiff = file.viewMode === 'rendered-diff' && file.previousLineBlocks && file.previousLineBlocks.length > 0;
+    body.replaceChildren((roundDiff || renderedDiff)
+      ? (diffMode === 'split' ? renderRenderedDiffSplit(file) : renderRenderedDiffUnified(file))
+      : renderDocumentView(file));
+  }
+
+  // ===== Rendered Diff View (Markdown, file mode) =====
+
+  // Build sets of added/removed line numbers from diff hunks
+  function buildDiffLineSetFromHunks(hunks) {
+    const added = new Set();
+    const removed = new Set();
+    for (let h = 0; h < hunks.length; h++) {
+      const lines = hunks[h].Lines || [];
+      for (let l = 0; l < lines.length; l++) {
+        if (lines[l].Type === 'add' && lines[l].NewNum) added.add(lines[l].NewNum);
+        if (lines[l].Type === 'del' && lines[l].OldNum) removed.add(lines[l].OldNum);
+      }
+    }
+    return { added: added, removed: removed };
+  }
+
+  // Classify a block as diff-added, diff-removed, or unchanged
+  function classifyBlock(block, changedLines) {
+    for (let ln = block.startLine; ln <= block.endLine; ln++) {
+      if (changedLines.has(ln)) return true;
+    }
+    return false;
+  }
+
+  function applyBlockSelectionState(el, filePath, startLine, endLine, blockIndex) {
+    const fileForms = getFormsForFile(filePath);
+    const hasForm = fileForms.some(function(f) {
+      return !f.editingId && startLine >= f.startLine && endLine <= f.endLine;
+    });
+    const inSelection = activeFilePath === filePath && selectionStart !== null && selectionEnd !== null &&
+      startLine >= selectionStart && endLine <= selectionEnd;
+    el.classList.toggle('selected', inSelection);
+    el.classList.toggle('form-selected', hasForm && !inSelection);
+
+    if (blockIndex !== undefined) {
+      if (focusedFilePath === filePath && focusedBlockIndex === blockIndex) {
+        el.classList.add('focused');
+      }
+    }
+  }
+
+  // Annotate blocks with isDiff flag based on changed line numbers
+  function annotateBlocks(blocks, changedLines) {
+    return blocks.map(function(b) {
+      return Object.assign({}, b, { isDiff: classifyBlock(b, changedLines) });
+    });
+  }
+
+  function renderRenderedDiffSplit(file) {
+    const container = document.createElement('div');
+    container.className = 'diff-view';
+
+    const lineSets = buildDiffLineSetFromHunks(file.diffHunks);
+    const prevBlocks = annotateBlocks(file.previousLineBlocks, lineSets.removed);
+    const currBlocks = annotateBlocks(file.lineBlocks, lineSets.added);
+
+    // Compute word-level diffs for paired changed blocks.
+    // Only apply when blocks are sufficiently similar (>30% token overlap) to avoid noise.
+    const prevDiffBlocks = prevBlocks.filter(function(b) { return b.isDiff; });
+    const currDiffBlocks = currBlocks.filter(function(b) { return b.isDiff; });
+    const pairCount = Math.min(prevDiffBlocks.length, currDiffBlocks.length);
+    for (let p = 0; p < pairCount; p++) {
+      applyWordDiffPair(prevDiffBlocks[p], currDiffBlocks[p]);
+    }
+
+    // Labels row (mode-aware: rounds in files mode, Before/After in git mode)
+    const leftLabel = document.createElement('div');
+    leftLabel.className = 'diff-view-side-label';
+    leftLabel.textContent = session.mode === 'git' ? 'Before' : 'Previous round';
+    container.appendChild(leftLabel);
+    const rightLabel = document.createElement('div');
+    rightLabel.className = 'diff-view-side-label';
+    rightLabel.textContent = session.mode === 'git' ? 'After' : 'Current round';
+    container.appendChild(rightLabel);
+
+    // Two-pointer merge for horizontal alignment
+    const { commentsMap, oldCommentsMap, rangeSet: commentRangeSet } = buildCommentIndices(file.comments);
+    const fileForms = getFormsForFile(file.path);
+    const placedOld = new Set();
+    function oldBlock(idx, diffClass) {
+      const frag = renderUnifiedBlock(prevBlocks[idx], diffClass, file, false, idx, null, null, fileForms);
+      frag.appendChild(oldSideBlockComments(prevBlocks[idx], oldCommentsMap, file, placedOld));
+      return frag;
+    }
+    let oldIdx = 0, newIdx = 0;
+
+    while (oldIdx < prevBlocks.length || newIdx < currBlocks.length) {
+      const leftCell = document.createElement('div');
+      leftCell.className = 'diff-view-cell';
+      const rightCell = document.createElement('div');
+      rightCell.className = 'diff-view-cell';
+
+      if (oldIdx >= prevBlocks.length) {
+        // Old exhausted — remaining new blocks are additions
+        rightCell.appendChild(renderUnifiedBlock(currBlocks[newIdx], 'diff-added', file, true, newIdx, commentsMap, commentRangeSet, fileForms));
+        newIdx++;
+      } else if (newIdx >= currBlocks.length) {
+        // New exhausted — remaining old blocks are deletions
+        leftCell.appendChild(oldBlock(oldIdx, 'diff-removed'));
+        oldIdx++;
+      } else if (prevBlocks[oldIdx].isDiff && currBlocks[newIdx].isDiff) {
+        // Both changed — paired change
+        leftCell.appendChild(oldBlock(oldIdx, 'diff-removed'));
+        rightCell.appendChild(renderUnifiedBlock(currBlocks[newIdx], 'diff-added', file, true, newIdx, commentsMap, commentRangeSet, fileForms));
+        oldIdx++;
+        newIdx++;
+      } else if (prevBlocks[oldIdx].isDiff) {
+        // Old removed only — spacer on right
+        leftCell.appendChild(oldBlock(oldIdx, 'diff-removed'));
+        oldIdx++;
+      } else if (currBlocks[newIdx].isDiff) {
+        // New added only — spacer on left
+        rightCell.appendChild(renderUnifiedBlock(currBlocks[newIdx], 'diff-added', file, true, newIdx, commentsMap, commentRangeSet, fileForms));
+        newIdx++;
+      } else {
+        // Both unchanged — render both, advance both
+        leftCell.appendChild(oldBlock(oldIdx, null));
+        rightCell.appendChild(renderUnifiedBlock(currBlocks[newIdx], null, file, true, newIdx, commentsMap, commentRangeSet, fileForms));
+        oldIdx++;
+        newIdx++;
+      }
+
+      container.appendChild(leftCell);
+      container.appendChild(rightCell);
+    }
+
+    attachDocGutterMouseHandler(container);
+    // Leftover old-side comments go above the grid: a grid child would
+    // shift the odd/even cell borders.
+    const unplaced = renderOldSideComments(file, oldCommentsMap, placedOld);
+    if (!unplaced) return container;
+    const frag = document.createDocumentFragment();
+    frag.appendChild(unplaced);
+    frag.appendChild(container);
+    return frag;
+  }
+
+  function buildContentClasses(block) {
+    let classes = 'line-content';
+    if (block.isEmpty) classes += ' empty-line';
+    if (block.cssClass) classes += ' ' + block.cssClass;
+    return classes;
+  }
+
+  // Render a single block for the unified diff view.
+  // When commentable=true, includes gutter, keyboard nav, comments. Otherwise read-only.
+  // fileForms is threaded down from the top-level render (one filtered array
+  // per file render instead of one per block); callers must pass it.
+  function renderUnifiedBlock(block, diffClass, file, commentable, blockIndex, commentsMap, commentRangeSet, fileForms) {
+    const frag = document.createDocumentFragment();
+
+    const lineBlockEl = document.createElement('div');
+    lineBlockEl.className = 'line-block';
+    lineBlockEl.dataset.filePath = file.path;
+    if (commentable) {
+      lineBlockEl.classList.add('kb-nav');
+      lineBlockEl.dataset.blockIndex = blockIndex;
+      lineBlockEl.dataset.startLine = block.startLine;
+      lineBlockEl.dataset.endLine = block.endLine;
+    }
+    if (diffClass) lineBlockEl.classList.add(diffClass);
+
+    let blockComments = null;
+    if (commentable) {
+      blockComments = getCommentsForBlock(block, commentsMap);
+      let blockInCommentRange = false;
+      for (let ln = block.startLine; ln <= block.endLine; ln++) {
+        if (commentRangeSet.has(ln + ':')) { blockInCommentRange = true; break; }
+      }
+      if (blockInCommentRange) lineBlockEl.classList.add('has-comment');
+
+      applyBlockSelectionState(lineBlockEl, file.path, block.startLine, block.endLine, blockIndex);
+
+      const commentGutter = document.createElement('div');
+      commentGutter.className = 'line-comment-gutter';
+      commentGutter.dataset.startLine = block.startLine;
+      commentGutter.dataset.endLine = block.endLine;
+      commentGutter.dataset.filePath = file.path;
+      const lineAdd = document.createElement('span');
+      lineAdd.className = 'line-add';
+      lineAdd.textContent = '+';
+      commentGutter.appendChild(lineAdd);
+      // Mousedown is delegated once per container (attachDocGutterMouseHandler),
+      // not per gutter.
+      lineBlockEl.appendChild(commentGutter);
+    } else {
+      // Non-commentable block: still add gutter but mark as read-only
+      const roGutter = document.createElement('div');
+      roGutter.className = 'line-comment-gutter diff-no-comment';
+      lineBlockEl.appendChild(roGutter);
+    }
+
+    // Line number gutter
+    const gutter = document.createElement('div');
+    gutter.className = 'line-gutter';
+    const lineNum = document.createElement('span');
+    lineNum.className = 'line-num';
+    lineNum.textContent = block.startLine;
+    gutter.appendChild(lineNum);
+    lineBlockEl.insertBefore(gutter, lineBlockEl.firstChild);
+
+    const contentEl = document.createElement('div');
+    contentEl.className = buildContentClasses(block);
+    const html = rewriteImageSrcs(block.wordDiffHtml || block.html, file.path);
+    contentEl.innerHTML = html;
+    lineBlockEl.appendChild(contentEl);
+
+    frag.appendChild(lineBlockEl);
+
+    // Comments after block (only on commentable/new side)
+    if (commentable && blockComments) {
+      for (let ci = 0; ci < blockComments.length; ci++) {
+        if (blockComments[ci].resolved) {
+          frag.appendChild(createResolvedElement(blockComments[ci], file.path));
+        } else {
+          frag.appendChild(createCommentElement(blockComments[ci], file.path));
+        }
+      }
+      const forms = fileForms || getFormsForFile(file.path);
+      for (let fi = 0; fi < forms.length; fi++) {
+        if (!forms[fi].editingId && forms[fi].afterBlockIndex === blockIndex) {
+          frag.appendChild(createCommentForm(forms[fi]));
+        }
+      }
+    }
+
+    return frag;
+  }
+
+  function renderRenderedDiffUnified(file) {
+    const container = document.createElement('div');
+    container.className = 'diff-view-unified';
+
+    const lineSets = buildDiffLineSetFromHunks(file.diffHunks);
+    const oldBlocks = file.previousLineBlocks;
+    const newBlocks = file.lineBlocks;
+
+    const { commentsMap, oldCommentsMap, rangeSet: commentRangeSet } = buildCommentIndices(file.comments);
+    const fileForms = getFormsForFile(file.path);
+    const placedOld = new Set();
+    function oldBlock(idx) {
+      const frag = renderUnifiedBlock(oldBlocks[idx], 'diff-removed', file, false, idx, null, null, fileForms);
+      frag.appendChild(oldSideBlockComments(oldBlocks[idx], oldCommentsMap, file, placedOld));
+      return frag;
+    }
+
+    // Two-pointer merge: walk both block lists simultaneously
+    let oldIdx = 0;
+    let newIdx = 0;
+
+    while (oldIdx < oldBlocks.length || newIdx < newBlocks.length) {
+      if (oldIdx >= oldBlocks.length) {
+        // Old exhausted — remaining new blocks are additions
+        container.appendChild(renderUnifiedBlock(newBlocks[newIdx], 'diff-added', file, true, newIdx, commentsMap, commentRangeSet, fileForms));
+        newIdx++;
+      } else if (newIdx >= newBlocks.length) {
+        // New exhausted — remaining old blocks are deletions
+        container.appendChild(oldBlock(oldIdx));
+        oldIdx++;
+      } else if (classifyBlock(oldBlocks[oldIdx], lineSets.removed)) {
+        // Collect consecutive removed blocks
+        const removedRun = [];
+        while (oldIdx < oldBlocks.length && classifyBlock(oldBlocks[oldIdx], lineSets.removed)) {
+          removedRun.push(oldIdx);
+          oldIdx++;
+        }
+        // Collect consecutive added blocks
+        const addedRun = [];
+        while (newIdx < newBlocks.length && classifyBlock(newBlocks[newIdx], lineSets.added)) {
+          addedRun.push(newIdx);
+          newIdx++;
+        }
+        // Pair removed/added blocks by similarity for word diff
+        const rmTexts = removedRun.map(function(idx) { return htmlToText(oldBlocks[idx].html); });
+        const adTexts = addedRun.map(function(idx) { return htmlToText(newBlocks[idx].html); });
+        const mdPairs = bestWordDiffPairing(rmTexts, adTexts);
+        for (let rp = 0; rp < mdPairs.length; rp++) {
+          applyWordDiffPair(oldBlocks[removedRun[mdPairs[rp][0]]], newBlocks[addedRun[mdPairs[rp][1]]]);
+        }
+        // Emit all removed then all added
+        for (let ri = 0; ri < removedRun.length; ri++) {
+          container.appendChild(oldBlock(removedRun[ri]));
+        }
+        for (let ai = 0; ai < addedRun.length; ai++) {
+          container.appendChild(renderUnifiedBlock(newBlocks[addedRun[ai]], 'diff-added', file, true, addedRun[ai], commentsMap, commentRangeSet, fileForms));
+        }
+      } else if (classifyBlock(newBlocks[newIdx], lineSets.added)) {
+        // New block is added (no preceding removal) — emit with green highlight + comments
+        container.appendChild(renderUnifiedBlock(newBlocks[newIdx], 'diff-added', file, true, newIdx, commentsMap, commentRangeSet, fileForms));
+        newIdx++;
+      } else {
+        // Both unchanged — emit new block once (with comments), advance both.
+        // Old-side comments on the unchanged old block follow it.
+        container.appendChild(renderUnifiedBlock(newBlocks[newIdx], null, file, true, newIdx, commentsMap, commentRangeSet, fileForms));
+        container.appendChild(oldSideBlockComments(oldBlocks[oldIdx], oldCommentsMap, file, placedOld));
+        newIdx++;
+        oldIdx++;
+      }
+    }
+
+    const unplaced = renderOldSideComments(file, oldCommentsMap, placedOld);
+    if (unplaced) container.insertBefore(unplaced, container.firstChild);
+
+    attachDocGutterMouseHandler(container);
+    return container;
+  }
+
+  // ===== Change Detection (for inter-round diffs in document view) =====
+  // Returns { added: Set<NewNum>, modified: Set<NewNum>, deletionPoints: [{afterLine, count}] }
+  // added = pure additions (green), modified = changed lines (amber), deletionPoints = where lines were removed (red)
+  function getChangeInfo(file) {
+    if (!file.diffHunks || file.diffHunks.length === 0) return null;
+    const added = new Set();
+    const modified = new Set();
+    const deletionPoints = [];
+
+    for (let h = 0; h < file.diffHunks.length; h++) {
+      const lines = file.diffHunks[h].Lines || [];
+      let lastContextNewNum = file.diffHunks[h].NewStart > 0 ? file.diffHunks[h].NewStart - 1 : 0;
+      let i = 0;
+      while (i < lines.length) {
+        if (lines[i].Type === 'context') {
+          lastContextNewNum = lines[i].NewNum;
+          i++;
+        } else {
+          // Collect consecutive change group (dels then adds, or interleaved)
+          const dels = [], adds = [];
+          while (i < lines.length && lines[i].Type !== 'context') {
+            if (lines[i].Type === 'del') dels.push(lines[i]);
+            if (lines[i].Type === 'add') adds.push(lines[i]);
+            i++;
+          }
+          if (dels.length > 0 && adds.length > 0) {
+            // Modification: mark add lines as modified (amber)
+            for (let a = 0; a < adds.length; a++) {
+              if (adds[a].NewNum) modified.add(adds[a].NewNum);
+            }
+          } else if (adds.length > 0) {
+            // Pure addition (green)
+            for (let a = 0; a < adds.length; a++) {
+              if (adds[a].NewNum) added.add(adds[a].NewNum);
+            }
+          } else if (dels.length > 0) {
+            // Pure deletion — record where marker should appear
+            deletionPoints.push({ afterLine: lastContextNewNum, count: dels.length });
+          }
+          // Update last context position if we saw adds
+          if (adds.length > 0) {
+            lastContextNewNum = adds[adds.length - 1].NewNum;
+          }
+        }
+      }
+    }
+    if (added.size === 0 && modified.size === 0 && deletionPoints.length === 0) return null;
+    return { added: added, modified: modified, deletionPoints: deletionPoints };
+  }
+
+  // ===== Document View (Markdown) =====
+  function renderDocumentView(file) {
+    const container = document.createElement('div');
+    container.className = 'document-wrapper' + (file.fileType === 'code' ? ' code-document' : '');
+    if (!file.lineBlocks) return container;
+
+    const { commentsMap, oldCommentsMap, rangeSet: commentRangeSet } = buildCommentIndices(file.comments);
+    const oldSideComments = renderOldSideComments(file, oldCommentsMap, null);
+    if (oldSideComments) container.appendChild(oldSideComments);
+
+    const changeInfo = file.viewMode === 'document' ? getChangeInfo(file) : null;
+    // Build a map of afterLine -> deletion marker for quick lookup
+    const deletionMarkerMap = {};
+    if (changeInfo) {
+      for (let dp = 0; dp < changeInfo.deletionPoints.length; dp++) {
+        const pt = changeInfo.deletionPoints[dp];
+        deletionMarkerMap[pt.afterLine] = pt;
+      }
+    }
+
+    let activeTableId = null;
+    let activeTableHead = null;
+    let activeTableBody = null;
+
+    function nativeTableColCount(section) {
+      const table = section.closest('table');
+      const sample = table && table.querySelector('tr.line-block:not(.native-table-separator)');
+      return (sample && sample.cells.length) || 1;
+    }
+
+    function appendTableAnnotation(section, element) {
+      const row = document.createElement('tr');
+      row.className = 'native-table-annotation';
+      if (element.dataset.filePath) row.dataset.filePath = element.dataset.filePath;
+      const cell = document.createElement('td');
+      cell.colSpan = nativeTableColCount(section);
+      cell.appendChild(element);
+      row.appendChild(cell);
+      section.appendChild(row);
+    }
+
+    // Hoisted: one filtered array per render instead of one per block
+    // (activeForms is stable within a synchronous render pass).
+    const docFileForms = getFormsForFile(file.path);
+
+    for (let bi = 0; bi < file.lineBlocks.length; bi++) {
+      const block = file.lineBlocks[bi];
+      const isTableBlock = !!block.tableId;
+      if (isTableBlock && block.tableId !== activeTableId) {
+        const wrapper = document.createElement('div');
+        wrapper.className = 'native-table-wrapper';
+        const table = document.createElement('table');
+        table.className = 'native-table';
+        activeTableHead = document.createElement('thead');
+        activeTableBody = document.createElement('tbody');
+        table.appendChild(activeTableHead);
+        table.appendChild(activeTableBody);
+        wrapper.appendChild(table);
+        container.appendChild(wrapper);
+        activeTableId = block.tableId;
+      } else if (!isTableBlock) {
+        activeTableId = null;
+        activeTableHead = null;
+        activeTableBody = null;
+      }
+      const tableSection = isTableBlock && block.tableSection === 'thead'
+        ? activeTableHead
+        : activeTableBody;
+
+      const lineBlockEl = document.createElement(isTableBlock ? 'tr' : 'div');
+      lineBlockEl.className = 'line-block kb-nav';
+      if (isTableBlock && block.cssClass) {
+        block.cssClass.split(/\s+/).forEach(function(className) {
+          if (className) lineBlockEl.classList.add(className);
+        });
+      }
+      lineBlockEl.dataset.blockIndex = bi;
+      lineBlockEl.dataset.startLine = block.startLine;
+      lineBlockEl.dataset.endLine = block.endLine;
+      lineBlockEl.dataset.filePath = file.path;
+
+      const blockComments = getCommentsForBlock(block, commentsMap);
+      // Highlight all blocks in the comment's line range
+      let blockInCommentRange = false;
+      for (let ln = block.startLine; ln <= block.endLine; ln++) {
+        if (commentRangeSet.has(ln + ':')) { blockInCommentRange = true; break; }
+      }
+      if (blockInCommentRange) lineBlockEl.classList.add('has-comment');
+
+      // Mark blocks that overlap inter-round changes (color-coded)
+      if (changeInfo) {
+        let blockChangeType = null;
+        for (let ln = block.startLine; ln <= block.endLine; ln++) {
+          if (changeInfo.modified.has(ln)) { blockChangeType = 'modified'; break; }
+          if (changeInfo.added.has(ln)) { blockChangeType = 'added'; }
+        }
+        if (blockChangeType === 'modified') lineBlockEl.classList.add('line-block-modified');
+        else if (blockChangeType === 'added') lineBlockEl.classList.add('line-block-added');
+      }
+
+      applyBlockSelectionState(lineBlockEl, file.path, block.startLine, block.endLine, bi);
+
+      // Line number gutter
+      const gutter = document.createElement('div');
+      gutter.className = 'line-gutter';
+      const lineNum = document.createElement('span');
+      lineNum.className = 'line-num';
+      lineNum.textContent = block.startLine;
+      gutter.appendChild(lineNum);
+
+      // Comment gutter (separate column between line numbers and content)
+      const commentGutter = document.createElement('div');
+      commentGutter.className = 'line-comment-gutter';
+      commentGutter.dataset.startLine = block.startLine;
+      commentGutter.dataset.endLine = block.endLine;
+      commentGutter.dataset.filePath = file.path;
+
+      // Match Pierre: one gutter utility at the bottom of the selected range.
+      if (dragState && dragState.filePath === file.path && selectionStart !== null && selectionEnd !== null) {
+        if (block.startLine <= selectionEnd && block.endLine >= selectionEnd) commentGutter.classList.add('drag-endpoint');
+      }
+
+      const lineAdd = document.createElement('span');
+      lineAdd.className = 'line-add';
+      lineAdd.textContent = '+';
+      commentGutter.appendChild(lineAdd);
+      // Mousedown is delegated once per container (attachDocGutterMouseHandler).
+
+      gutter.appendChild(commentGutter);
+      if (isTableBlock) {
+        const gutterCell = document.createElement('td');
+        gutterCell.className = 'native-table-gutter';
+        gutterCell.appendChild(gutter);
+        lineBlockEl.appendChild(gutterCell);
+
+        if (block.cssClass && block.cssClass.indexOf('table-separator') !== -1) {
+          lineBlockEl.classList.add('native-table-separator');
+          const separatorCell = document.createElement('td');
+          separatorCell.colSpan = 100;
+          lineBlockEl.appendChild(separatorCell);
+        } else {
+          const html = rewriteImageSrcs(block.nativeRowHtml || block.html, file.path);
+          const scratch = document.createElement('table');
+          scratch.innerHTML = '<tbody>' + html + '</tbody>';
+          const renderedRow = scratch.querySelector('tr');
+          if (renderedRow) {
+            while (renderedRow.firstChild) {
+              const cell = renderedRow.firstChild;
+              cell.className = buildContentClasses(block) + (cell.className ? ' ' + cell.className : '');
+              lineBlockEl.appendChild(cell);
+            }
+          }
+        }
+      } else {
+        const content = document.createElement('div');
+        content.className = buildContentClasses(block);
+        const html = rewriteImageSrcs(block.html, file.path);
+        content.innerHTML = html;
+        lineBlockEl.appendChild(gutter);
+        lineBlockEl.appendChild(content);
+      }
+
+      // Insert deletion marker before this block if deletions occurred before it
+      if (changeInfo && bi === 0 && deletionMarkerMap[0]) {
+        const marker0 = document.createElement('div');
+        marker0.className = 'deletion-marker';
+        marker0.dataset.filePath = file.path;
+        marker0.textContent = '\u2212' + deletionMarkerMap[0].count + ' line' + (deletionMarkerMap[0].count !== 1 ? 's' : '');
+        if (isTableBlock) appendTableAnnotation(tableSection, marker0);
+        else container.appendChild(marker0);
+      }
+
+      if (isTableBlock) tableSection.appendChild(lineBlockEl);
+      else container.appendChild(lineBlockEl);
+
+      // Insert deletion marker after this block if deletions occurred after it
+      if (changeInfo && deletionMarkerMap[block.endLine]) {
+        const marker = document.createElement('div');
+        marker.className = 'deletion-marker';
+        marker.dataset.filePath = file.path;
+        marker.textContent = '\u2212' + deletionMarkerMap[block.endLine].count + ' line' + (deletionMarkerMap[block.endLine].count !== 1 ? 's' : '');
+        if (isTableBlock) appendTableAnnotation(tableSection, marker);
+        else container.appendChild(marker);
+      }
+
+      // Comments after block
+      for (const comment of blockComments) {
+        if (comment.resolved) {
+          const commentEl = createResolvedElement(comment, file.path);
+          if (isTableBlock) appendTableAnnotation(tableSection, commentEl);
+          else container.appendChild(commentEl);
+        } else {
+          const commentEl = createCommentElement(comment, file.path);
+          if (isTableBlock) appendTableAnnotation(tableSection, commentEl);
+          else container.appendChild(commentEl);
+        }
+      }
+
+      // Comment form
+      for (let fi = 0; fi < docFileForms.length; fi++) {
+        if (!docFileForms[fi].editingId && docFileForms[fi].afterBlockIndex === bi) {
+          const formEl = createCommentForm(docFileForms[fi]);
+          if (isTableBlock) appendTableAnnotation(tableSection, formEl);
+          else container.appendChild(formEl);
+        }
+      }
+    }
+
+    attachDocGutterMouseHandler(container);
+    return container;
+  }
+
+
+  // Word-level diff — extracted to hunkyard-diff-renderer.js (window.hunkyard.diffRenderer)
+  const bestWordDiffPairing = window.hunkyard.diffRenderer.bestWordDiffPairing;
+  const wordDiff = window.hunkyard.diffRenderer.wordDiff;
+  const applyWordDiffToHtml = window.hunkyard.diffRenderer.applyWordDiffToHtml;
+  const htmlToText = window.hunkyard.diffRenderer.htmlToText;
+  const applyWordDiffPair = window.hunkyard.diffRenderer.applyWordDiffPair;
+  const resolveTextSelectionLineRange = window.hunkyard.diffRenderer.resolveTextSelectionLineRange;
+  const selectedTextWithinElements = window.hunkyard.diffRenderer.selectedTextWithinElements;
+
+
+  // ===== Diff Gutter Drag (multi-line comment selection) =====
+
+  // Pre-expand spacer gaps that contain comments so comments render inline
+  // instead of falling through to the "outdated" section. Modifies file.diffHunks in place.
+  function expandHunksForComments(file) {
+    const hunks = file.diffHunks;
+    if (!hunks || hunks.length < 2 || !file.content) return;
+    const comments = file.comments || [];
+    const lineComments = comments.filter(function(c) { return c.scope !== 'file'; });
+    if (lineComments.length === 0) return;
+
+    // Work backwards so splicing doesn't shift indices we haven't visited yet
+    for (let i = hunks.length - 1; i > 0; i--) {
+      const prevHunk = hunks[i - 1];
+      const nextHunk = hunks[i];
+      const prevNewEnd = prevHunk.NewStart + prevHunk.NewCount;
+      const prevOldEnd = prevHunk.OldStart + prevHunk.OldCount;
+      const gap = nextHunk.NewStart - prevNewEnd;
+      if (gap <= 0) continue;
+
+      // Check if any comment targets a line in this gap
+      const hasComment = lineComments.some(function(c) {
+        if (c.side === 'old') {
+          // Old-side comment: check old line number range
+          const gapOldStart = prevOldEnd;
+          const gapOldEnd = nextHunk.OldStart - 1;
+          return c.end_line >= gapOldStart && c.end_line <= gapOldEnd;
+        }
+        // New-side comment: check new line number range
+        return c.end_line >= prevNewEnd && c.end_line < nextHunk.NewStart;
+      });
+      if (!hasComment) continue;
+
+      // Merge: same logic as the spacer click handler
+      const contextLines = buildContextLines(file, prevNewEnd, prevOldEnd, gap);
+      const merged = {
+        OldStart: prevHunk.OldStart,
+        NewStart: prevHunk.NewStart,
+        Header: prevHunk.Header,
+        Lines: prevHunk.Lines.concat(contextLines, nextHunk.Lines),
+        _StoryRawHunks: storyRawHunksWithTrailingContext(prevHunk, contextLines)
+          .concat(storyRawHunks(nextHunk))
+      };
+      merged.OldCount = (nextHunk.OldStart + nextHunk.OldCount) - merged.OldStart;
+      merged.NewCount = (nextHunk.NewStart + nextHunk.NewCount) - merged.NewStart;
+      hunks.splice(i - 1, 2, merged);
+    }
+  }
+
+  // Helper: build context lines from file content for a range of line numbers
+  function buildContextLines(file, newStart, oldStart, count) {
+    const contentLines = file.content ? file.content.split('\n') : [];
+    const lines = [];
+    for (let i = 0; i < count; i++) {
+      const newLineNum = newStart + i;
+      const oldLineNum = oldStart + i;
+      const text = newLineNum <= contentLines.length ? contentLines[newLineNum - 1] : '';
+      lines.push({ Type: 'context', Content: text, OldNum: oldLineNum, NewNum: newLineNum });
+    }
+    return lines;
+  }
+
+  // Build a hunk header string from numeric fields, preserving any suffix
+  // (e.g. function name) from the original header.
+  function buildHunkHeader(oldStart, oldCount, newStart, newCount, origHeader) {
+    let suffix = '';
+    if (origHeader) {
+      const m = origHeader.match(/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@(.*)$/);
+      if (m) suffix = m[1];
+    }
+    return '@@ -' + oldStart + ',' + oldCount + ' +' + newStart + ',' + newCount + ' @@' + suffix;
+  }
+
+  // ===== Unified diff (interleaved lines, single pane) =====
+  // Pre-process diffHunks: merge adjacent hunks where the gap between them
+  // is ≤ 8 unchanged lines. This removes visual noise from tiny spacers.
+  // Mutates file.diffHunks in place so it only runs once per file.
+  function storyRawHunks(hunk) {
+    if (hunk && Array.isArray(hunk._StoryRawHunks)) return hunk._StoryRawHunks;
+    return hunk ? [{ OldStart: hunk.OldStart, Lines: hunk.Lines || [] }] : [];
+  }
+
+  // Context synthesized between visual hunks historically belongs to the
+  // preceding Story hunk. Preserve that ownership while keeping the original
+  // raw hunk objects immutable for other render passes.
+  function storyRawHunksWithTrailingContext(hunk, contextLines) {
+    const rawHunks = storyRawHunks(hunk).map(function(rawHunk) {
+      return { OldStart: rawHunk.OldStart, Lines: (rawHunk.Lines || []).slice() };
+    });
+    if (rawHunks.length && contextLines.length) {
+      const last = rawHunks[rawHunks.length - 1];
+      last.Lines = last.Lines.concat(contextLines);
+    }
+    return rawHunks;
+  }
+
+  function autoExpandSmallGaps(file) {
+    if (!file.content || !file.diffHunks || file.diffHunks.length < 2) return;
+    if (file._autoExpandDone) return;
+    file._autoExpandDone = true;
+
+    const contentLines = file.content.split('\n');
+    const hunks = file.diffHunks;
+    let i = 0;
+    while (i < hunks.length - 1) {
+      const prevNewEnd = hunks[i].NewStart + hunks[i].NewCount;
+      const prevOldEnd = hunks[i].OldStart + hunks[i].OldCount;
+      const gap = hunks[i + 1].NewStart - prevNewEnd;
+      if (gap > 0 && gap <= 8) {
+        // Build context lines to bridge the gap
+        const contextLines = [];
+        for (let j = 0; j < gap; j++) {
+          const newLineNum = prevNewEnd + j;
+          const oldLineNum = prevOldEnd + j;
+          const text = newLineNum <= contentLines.length ? contentLines[newLineNum - 1] : '';
+          contextLines.push({ Type: 'context', Content: text, OldNum: oldLineNum, NewNum: newLineNum });
+        }
+        // Merge: prev hunk + context lines + next hunk → single hunk
+        const merged = {
+          OldStart: hunks[i].OldStart,
+          NewStart: hunks[i].NewStart,
+          Lines: hunks[i].Lines.concat(contextLines, hunks[i + 1].Lines),
+          // Story refs identify raw hunks by OldStart. Keep that identity when
+          // nearby hunks become one visual hunk so comment navigation can
+          // still select the chapter that owns the matched raw line.
+          _StoryRawHunks: storyRawHunksWithTrailingContext(hunks[i], contextLines)
+            .concat(storyRawHunks(hunks[i + 1]))
+        };
+        merged.OldCount = (hunks[i + 1].OldStart + hunks[i + 1].OldCount) - merged.OldStart;
+        merged.NewCount = (hunks[i + 1].NewStart + hunks[i + 1].NewCount) - merged.NewStart;
+        merged.Header = buildHunkHeader(merged.OldStart, merged.OldCount, merged.NewStart, merged.NewCount, hunks[i].Header);
+        // Replace both with merged — don't increment i to check merged against next
+        hunks.splice(i, 2, merged);
+      } else {
+        i++;
+      }
+    }
+  }
+
+  // ===== Comment Helpers =====
+
+  // Single-pass builder that produces all three comment index structures:
+  //   commentsMap: { end_line → [comment] }          (document view, new side)
+  //   oldCommentsMap: { end_line → [comment] }       (old-side comments)
+  //   diffCommentsMap: { "end_line:side" → [comment] } (diff view)
+  //   commentedRangeSet: Set<"line:side">              (highlight ranges)
+  // Old-side comments (left on deleted lines in the diff) use old line
+  // numbers, so they must not share a map with the current document's lines.
+  function buildCommentIndices(comments) {
+    const commentsMap = {};
+    const oldCommentsMap = {};
+    const diffCommentsMap = {};
+    const rangeSet = new Set();
+    const hideResolved = isHideResolved();
+    for (const c of comments) {
+      // commentsMap / oldCommentsMap — keyed by end_line only
+      const lineKey = c.end_line;
+      const byLine = c.side === 'old' && c.scope !== 'file' ? oldCommentsMap : commentsMap;
+      if (!byLine[lineKey]) byLine[lineKey] = [];
+      byLine[lineKey].push(c);
+      // diffCommentsMap — keyed by "end_line:side"
+      const sideKey = c.end_line + ':' + (c.side || '');
+      if (!diffCommentsMap[sideKey]) diffCommentsMap[sideKey] = [];
+      diffCommentsMap[sideKey].push(c);
+      // commentedRangeSet — non-file-scope comments; skip resolved when the
+      // hide-resolved toggle is on so the line highlight tracks card visibility.
+      if (c.scope !== 'file' && !(hideResolved && c.resolved)) {
+        const side = c.side || '';
+        for (let ln = c.start_line; ln <= c.end_line; ln++) rangeSet.add(ln + ':' + side);
+      }
+    }
+    return { commentsMap: commentsMap, oldCommentsMap: oldCommentsMap, diffCommentsMap: diffCommentsMap, rangeSet: rangeSet };
+  }
+
+  function getCommentsForBlock(block, commentsMap) {
+    const result = [];
+    for (let ln = block.startLine; ln <= block.endLine; ln++) {
+      if (commentsMap[ln]) result.push(...commentsMap[ln]);
+    }
+    return result;
+  }
+
+  function createBlockCommentElement(comment, filePath) {
+    return comment.resolved ? createResolvedElement(comment, filePath) : createCommentElement(comment, filePath);
+  }
+
+  // Old-side comment cards for one Before block of a rendered diff. Each
+  // placed comment is recorded in `placed` so the rest can be listed.
+  function oldSideBlockComments(block, oldCommentsMap, file, placed) {
+    const frag = document.createDocumentFragment();
+    const comments = getCommentsForBlock(block, oldCommentsMap);
+    for (let i = 0; i < comments.length; i++) {
+      placed.add(comments[i].id);
+      frag.appendChild(createBlockCommentElement(comments[i], file.path));
+    }
+    return frag;
+  }
+
+  // Old-side comments use old line numbers, so the current document has no
+  // line to show them on. List the ones no rendered block shows (all of
+  // them in Document view) above the document, so they stay visible and
+  // the comments panel can still jump to them.
+  function renderOldSideComments(file, oldCommentsMap, placed) {
+    const comments = [];
+    Object.keys(oldCommentsMap).forEach(function(line) {
+      oldCommentsMap[line].forEach(function(c) {
+        if (!placed || !placed.has(c.id)) comments.push(c);
+      });
+    });
+    if (comments.length === 0) return null;
+    comments.sort(function(a, b) { return a.end_line - b.end_line; });
+    const section = document.createElement('div');
+    section.className = 'outdated-diff-comments old-side-comments';
+    for (let i = 0; i < comments.length; i++) {
+      const el = createBlockCommentElement(comments[i], file.path);
+      const headerLeft = el.querySelector('.comment-header-left');
+      if (headerLeft) {
+        const badge = document.createElement('span');
+        badge.className = 'outdated-badge';
+        badge.textContent = session.mode === 'git' ? 'Before' : 'Previous round';
+        headerLeft.appendChild(badge);
+      }
+      section.appendChild(el);
+    }
+    return section;
+  }
+
+  // ===== Gutter Drag Selection =====
+  let dragState = null;
+
+  // Desktop mouse path for document/markdown gutters, delegated: a single
+  // mousedown on the file container instead of one listener per
+  // .line-comment-gutter. A 10k-line markdown file renders ~10k gutters and
+  // the per-gutter approach stalled the main thread on mount — the same bug
+  // class as #657 (fixed for diff buttons via attachDiffMouseHandler).
+  // One delegated handler is O(1) regardless of file size.
+  function attachDocGutterMouseHandler(container) {
+    container.addEventListener('mousedown', function(e) {
+      const gutter = e.target.closest('.line-comment-gutter');
+      if (!gutter || !container.contains(gutter)) return;
+      // Read-only gutters never had a listener; they carry no line dataset.
+      if (gutter.classList.contains('diff-no-comment')) return;
+      e.preventDefault();
+      beginDocGutterDrag(gutter, e.shiftKey);
+    });
+  }
+
+  function beginDocGutterDrag(gutter, shiftKey) {
+    const startLine = parseInt(gutter.dataset.startLine);
+    const endLine = parseInt(gutter.dataset.endLine);
+    const filePath = gutter.dataset.filePath;
+    const blockEl = gutter.closest('.line-block') || gutter.parentElement;
+    const blockIndex = parseInt(blockEl.dataset.blockIndex);
+
+    // Shift+click: extend selection
+    if (shiftKey && selectionStart !== null && activeFilePath === filePath) {
+      const rangeStart = Math.min(selectionStart, startLine);
+      const rangeEnd = Math.max(selectionEnd, endLine);
+      const file = getFileByPath(filePath);
+      if (!file) return;
+      let lastBlockIndex = 0;
+      for (let i = 0; i < file.lineBlocks.length; i++) {
+        if (file.lineBlocks[i].startLine >= rangeStart && file.lineBlocks[i].endLine <= rangeEnd) {
+          lastBlockIndex = i;
+        }
+      }
+      openForm({ filePath: filePath, afterBlockIndex: lastBlockIndex, startLine: rangeStart, endLine: rangeEnd, editingId: null });
+      return;
+    }
+
+    dragState = {
+      filePath,
+      anchorStartLine: startLine, anchorEndLine: endLine,
+      anchorBlockIndex: blockIndex,
+      currentStartLine: startLine, currentEndLine: endLine,
+      currentBlockIndex: blockIndex,
+    };
+
+    activeFilePath = filePath;
+    selectionStart = startLine;
+    selectionEnd = endLine;
+    renderFileByPath(filePath);
+
+    document.body.classList.add('dragging');
+    document.addEventListener('mousemove', handleDragMove);
+    document.addEventListener('mouseup', handleDragEnd);
+  }
+
+  // Update drag selection CSS classes on existing DOM without full re-render.
+  // Handles both markdown line blocks and diff gutter elements.
+  function updateDragSelectionVisuals(filePath) {
+    const section = currentRenderedFileSection(filePath);
+    if (!section) return;
+
+    // Markdown line blocks: toggle .selected on line-block, update comment gutter drag classes
+    const lineBlocks = section.querySelectorAll('.line-block[data-file-path="' + filePath + '"]');
+    for (let i = 0; i < lineBlocks.length; i++) {
+      const lb = lineBlocks[i];
+      const startLine = parseInt(lb.dataset.startLine);
+      const endLine = parseInt(lb.dataset.endLine);
+      applyBlockSelectionState(lb, filePath, startLine, endLine);
+
+      // Update the comment gutter within this line block
+      const gutter = lb.querySelector('.line-comment-gutter');
+      if (gutter && dragState && dragState.filePath === filePath && selectionStart !== null) {
+        gutter.classList.toggle('drag-endpoint', startLine <= selectionEnd && endLine >= selectionEnd);
+      }
+    }
+  }
+
+  function handleDragMove(e) {
+    if (!dragState) return;
+    const el = document.elementFromPoint(e.clientX, e.clientY);
+    if (!el) return;
+    const lineBlock = el.closest('.line-block');
+    if (!lineBlock || lineBlock.dataset.filePath !== dragState.filePath) return;
+
+    const hoverStartLine = parseInt(lineBlock.dataset.startLine);
+    const hoverEndLine = parseInt(lineBlock.dataset.endLine);
+    const hoverBlockIndex = parseInt(lineBlock.dataset.blockIndex);
+
+    dragState.currentStartLine = hoverStartLine;
+    dragState.currentEndLine = hoverEndLine;
+    dragState.currentBlockIndex = hoverBlockIndex;
+
+    selectionStart = Math.min(dragState.anchorStartLine, hoverStartLine);
+    selectionEnd = Math.max(dragState.anchorEndLine, hoverEndLine);
+    updateDragSelectionVisuals(dragState.filePath);
+  }
+
+  function handleDragEnd() {
+    document.removeEventListener('mousemove', handleDragMove);
+    document.removeEventListener('mouseup', handleDragEnd);
+    document.body.classList.remove('dragging');
+
+    if (!dragState) return;
+    const rangeStart = Math.min(dragState.anchorStartLine, dragState.currentStartLine);
+    const rangeEnd = Math.max(dragState.anchorEndLine, dragState.currentEndLine);
+
+    const file = getFileByPath(dragState.filePath);
+    let lastBlockIndex = dragState.currentBlockIndex;
+    if (file && file.lineBlocks) {
+      for (let i = 0; i < file.lineBlocks.length; i++) {
+        if (file.lineBlocks[i].startLine >= rangeStart && file.lineBlocks[i].endLine <= rangeEnd) {
+          lastBlockIndex = i;
+        }
+      }
+    }
+
+    const fp = dragState.filePath;
+    dragState = null;
+    openForm({
+      filePath: fp,
+      afterBlockIndex: lastBlockIndex,
+      startLine: rangeStart,
+      endLine: rangeEnd,
+      editingId: null,
+    });
+  }
+
+  // ===== Text Selection → Line Range Mapping =====
+
+  function getLineRangeFromSelection(selection) {
+    if (!selection || selection.isCollapsed || !selection.toString().trim()) return null;
+    if (selection.rangeCount === 0) return null;
+    const range = selection.getRangeAt(0);
+
+    // Walk every commentable element and keep those the range intersects.
+    // Direction-agnostic: avoids relying on anchorNode/focusNode, which can
+    // snap to non-commentable parent containers when a selection crosses a
+    // blank-line boundary (especially in backward drags).
+    const candidates = [];
+
+    document.querySelectorAll('.line-block[data-file-path]').forEach(function(el) {
+      if (el.closest('.comment-form-wrapper') || el.closest('.comment-card')) return;
+      if (!range.intersectsNode(el)) return;
+      candidates.push({
+        filePath: el.dataset.filePath,
+        startLine: parseInt(el.dataset.startLine),
+        endLine: parseInt(el.dataset.endLine),
+        blockIndex: el.dataset.blockIndex !== undefined ? parseInt(el.dataset.blockIndex) : null,
+      });
+    });
+
+    return resolveTextSelectionLineRange(candidates);
+  }
+
+  function closeEmptyReviewForm() {
+    if (!reviewCommentFormActive || reviewCommentEditingId) return;
+    const ta = document.querySelector('#reviewConversation .comment-form textarea');
+    if (ta && ta.value.trim()) return;
+    cancelReviewCommentForm();
+  }
+
+  // A form's textarea, typed text included, even when its file is scrolled
+  // out of Pierre's virtualized list: the view keeps the unmounted form
+  // element in its annotation cache.
+  function formTextarea(key) {
+    const live = document.querySelector('.comment-form[data-form-key="' + CSS.escape(key) + '"] textarea');
+    if (live) return live;
+    const cached = pierreView && pierreView.annotationElement('form:' + key);
+    return cached ? cached.querySelector('textarea') : null;
+  }
+
+  function closeEmptyForms(exceptKey) {
+    const toClose = [];
+    activeForms.forEach(function(f) {
+      if (f.formKey === exceptKey) return;
+      if (f.editingId) return; // never auto-close edit-in-progress forms
+      const ta = formTextarea(f.formKey);
+      const text = ta ? ta.value : (f.draftBody || '');
+      if (!text.trim()) toClose.push(f);
+    });
+    toClose.forEach(function(f) { cancelComment(f); });
+  }
+
+  function openForm(newForm) {
+    rememberKeyboardFocusFromForm(newForm);
+    const fk = formKey(newForm);
+    const existing = activeForms.find(function(f) { return f.formKey === fk; });
+    if (existing) {
+      activeFilePath = newForm.filePath;
+      selectionStart = newForm.startLine;
+      selectionEnd = newForm.endLine;
+      renderFileByPath(newForm.filePath);
+      focusCommentTextarea(existing.formKey);
+      pierreRevealForm(existing);
+      return;
+    }
+    closeEmptyForms(fk);
+    closeEmptyReviewForm();
+    addForm(newForm);
+    activeFilePath = newForm.filePath;
+    selectionStart = newForm.startLine;
+    selectionEnd = newForm.endLine;
+    renderFileByPath(newForm.filePath);
+    focusCommentTextarea(newForm.formKey);
+    pierreRevealForm(newForm);
+  }
+
+  function openFileCommentForm(filePath) {
+    const newForm = {
+      filePath: filePath,
+      scope: 'file',
+      startLine: 0,
+      endLine: 0,
+      afterBlockIndex: null
+    };
+    const fk = formKey(newForm);
+    const existing = activeForms.find(function(f) { return f.formKey === fk; });
+    if (existing) {
+      renderFileByPath(filePath);
+      focusCommentTextarea(existing.formKey);
+      pierreRevealForm(existing);
+      return;
+    }
+    closeEmptyForms(fk);
+    closeEmptyReviewForm();
+    addForm(newForm);
+    renderFileByPath(filePath);
+    focusCommentTextarea(newForm.formKey);
+    pierreRevealForm(newForm);
+  }
+
+  function createFileCommentForm(formObj) {
+    return createCommentFormUI({
+      formObj: formObj,
+      headerText: 'Comment',
+      submitText: 'Comment',
+      initialBody: formObj.draftBody || '',
+      autoFocus: false
+    });
+  }
+
+  function focusCommentTextarea(targetFormKey) {
+    requestAnimationFrame(() => {
+      if (targetFormKey) {
+        const ta = document.querySelector('.comment-form[data-form-key="' + targetFormKey + '"] textarea');
+        if (ta) { ta.focus(); return; }
+      }
+      const forms = document.querySelectorAll('.comment-form textarea');
+      if (forms.length > 0) forms[forms.length - 1].focus();
+    });
+  }
+
+  // ===== Comment Templates =====
+  // Template CRUD and bar DOM delegated to window.hunkyard.commentTemplates (hunkyard-comment-templates.js).
+
+  function attachTemplateUI(form, textarea, actions) {
+    const tmplModule = window.hunkyard.commentTemplates;
+
+    const templateBar = tmplModule.buildTemplateBar({
+      onInsert: function(text) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        textarea.value = textarea.value.substring(0, start) + text + textarea.value.substring(end);
+        textarea.selectionStart = textarea.selectionEnd = start + text.length;
+        textarea.focus();
+        textarea.dispatchEvent(new Event('input'));
+      }
+    });
+
+    const saveTemplateBtn = document.createElement('button');
+    saveTemplateBtn.className = 'btn btn-sm';
+    saveTemplateBtn.textContent = '+ Template';
+    saveTemplateBtn.addEventListener('click', function(e) {
+      e.preventDefault();
+      showSaveTemplateDialog(textarea, templateBar);
+    });
+
+    const suggestBtn = document.createElement('button');
+    suggestBtn.className = 'btn btn-sm';
+    suggestBtn.textContent = '± Suggest';
+    suggestBtn.title = 'Insert the selected lines as a suggestion';
+    suggestBtn.addEventListener('click', function() { insertSuggestion(textarea); });
+
+    const leftGroup = document.createElement('div');
+    leftGroup.className = 'comment-form-actions-left';
+    leftGroup.appendChild(suggestBtn);
+    leftGroup.appendChild(saveTemplateBtn);
+
+    actions.insertBefore(leftGroup, actions.firstChild);
+    form.insertBefore(templateBar, form.querySelector('textarea'));
+  }
+
+  function showSaveTemplateDialog(textarea, templateBar) {
+    const text = textarea.value.trim();
+    if (!text) {
+      textarea.focus();
+      return;
+    }
+    const overlay = document.createElement('div');
+    overlay.className = 'save-template-overlay active';
+
+    const dialog = document.createElement('div');
+    dialog.className = 'save-template-dialog';
+
+    const title = document.createElement('h3');
+    title.textContent = 'Save as template';
+    dialog.appendChild(title);
+
+    const desc = document.createElement('p');
+    desc.textContent = 'Edit the template text, then save.';
+    dialog.appendChild(desc);
+
+    const input = document.createElement('textarea');
+    input.className = 'save-template-input';
+    input.value = text;
+    input.rows = 3;
+    dialog.appendChild(input);
+
+    const btns = document.createElement('div');
+    btns.className = 'save-template-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-sm';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', function() { overlay.remove(); textarea.focus(); });
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-sm btn-primary';
+    saveBtn.textContent = 'Save';
+    saveBtn.addEventListener('click', function() {
+      const val = input.value.trim();
+      if (!val) return;
+      templateBar._saveNew(val);
+      overlay.remove();
+      textarea.focus();
+    });
+
+    btns.appendChild(cancelBtn);
+    btns.appendChild(saveBtn);
+    dialog.appendChild(btns);
+
+    bindSubmitCancelKeys(input, function() { saveBtn.click(); }, function() { cancelBtn.click(); }, { stopPropagation: false });
+
+    overlay.appendChild(dialog);
+    overlay.addEventListener('click', function(e) {
+      if (e.target === overlay) { overlay.remove(); textarea.focus(); }
+    });
+    document.body.appendChild(overlay);
+    requestAnimationFrame(function() { input.focus(); input.select(); });
+  }
+
+  // ===== File Picker Autocomplete =====
+
+  function attachFilePicker(textarea) {
+    let dropdown = null;
+    let activeIndex = -1;
+    let triggerStart = -1;
+    let navigated = false;
+    let suppressInput = false;
+    // Each keystroke starts a lookup; only the latest may show its matches.
+    // Closing the picker invalidates any in flight, so a slow reply cannot
+    // reopen a list for an @ that has since been deleted or completed.
+    let lookupSeq = 0;
+
+    textarea.addEventListener('input', function() {
+      if (suppressInput) { suppressInput = false; return; }
+      const val = textarea.value;
+      const cursor = textarea.selectionStart;
+
+      // Find the '@' trigger: scan backwards from cursor
+      let atPos = -1;
+      for (let i = cursor - 1; i >= 0; i--) {
+        const ch = val[i];
+        if (ch === '@') {
+          // '@' must be at start of line or preceded by whitespace
+          if (i === 0 || /\s/.test(val[i - 1])) {
+            atPos = i;
+          }
+          break;
+        }
+        if (/\s/.test(ch)) break;
+      }
+
+      if (atPos === -1 || !filePickerReady) {
+        hideDropdown();
+        return;
+      }
+
+      triggerStart = atPos;
+      const query = val.substring(atPos + 1, cursor);
+      const seq = ++lookupSeq;
+
+      fetch('/api/files/list?q=' + encodeURIComponent(query))
+        .then(function(r) { return r.ok ? r.json() : []; })
+        .then(function(matches) {
+          if (seq !== lookupSeq || document.activeElement !== textarea) return;
+          if (matches.length === 0) {
+            hideDropdown();
+            return;
+          }
+          showDropdown(matches);
+        })
+        .catch(function() { if (seq === lookupSeq) hideDropdown(); });
+    });
+
+    textarea.addEventListener('keydown', function(e) {
+      if (!dropdown) return;
+
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        activeIndex = Math.min(activeIndex + 1, dropdown.children.length - 1);
+        navigated = true;
+        highlightItem();
+      } else if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        activeIndex = Math.max(activeIndex - 1, 0);
+        navigated = true;
+        highlightItem();
+      } else if ((e.key === 'Tab' || e.key === 'Enter') && navigated) {
+        if (activeIndex >= 0 && activeIndex < dropdown.children.length) {
+          e.preventDefault();
+          e.stopImmediatePropagation();
+          selectItem(dropdown.children[activeIndex].dataset.path);
+        }
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        hideDropdown();
+      }
+    });
+
+    textarea.addEventListener('blur', function() {
+      setTimeout(hideDropdown, 200);
+    });
+
+    function showDropdown(matches) {
+      if (!dropdown) {
+        dropdown = document.createElement('div');
+        dropdown.className = 'file-picker-dropdown';
+        document.body.appendChild(dropdown);
+      }
+
+      // Position below the @ cursor line
+      const textareaRect = textarea.getBoundingClientRect();
+      const textBeforeCursor = textarea.value.substring(0, textarea.selectionStart);
+      const lineNumber = textBeforeCursor.split('\n').length;
+      const computedStyle = window.getComputedStyle(textarea);
+      const lineHeight = parseFloat(computedStyle.lineHeight) || 22.4;
+      const paddingTop = parseFloat(computedStyle.paddingTop) || 10;
+      const cursorY = textareaRect.top + paddingTop + (lineNumber * lineHeight) - textarea.scrollTop;
+      dropdown.style.left = textareaRect.left + 'px';
+      dropdown.style.width = textareaRect.width + 'px';
+      dropdown.style.top = cursorY + 'px';
+
+      dropdown.innerHTML = '';
+      activeIndex = 0;
+      navigated = false;
+
+      matches.forEach(function(filePath, idx) {
+        const item = document.createElement('div');
+        item.className = 'file-picker-item';
+        item.dataset.path = filePath;
+
+        const lastSlash = filePath.lastIndexOf('/');
+        if (lastSlash >= 0) {
+          const dirSpan = document.createElement('span');
+          dirSpan.className = 'file-picker-dir';
+          dirSpan.textContent = filePath.substring(0, lastSlash + 1);
+          item.appendChild(dirSpan);
+          item.appendChild(document.createTextNode(filePath.substring(lastSlash + 1)));
+        } else {
+          item.textContent = filePath;
+        }
+
+        item.addEventListener('mousedown', function(e) {
+          e.preventDefault();
+          selectItem(filePath);
+        });
+        item.addEventListener('mouseenter', function() {
+          activeIndex = idx;
+          highlightItem();
+        });
+        dropdown.appendChild(item);
+      });
+
+      highlightItem();
+    }
+
+    function highlightItem() {
+      if (!dropdown) return;
+      const items = dropdown.children;
+      for (let i = 0; i < items.length; i++) {
+        items[i].classList.toggle('active', i === activeIndex);
+      }
+      if (activeIndex >= 0 && items[activeIndex]) {
+        items[activeIndex].scrollIntoView({ block: 'nearest' });
+      }
+    }
+
+    function selectItem(filePath) {
+      const val = textarea.value;
+      const cursor = textarea.selectionStart;
+      const before = val.substring(0, triggerStart);
+      const after = val.substring(cursor);
+      const insertion = '@' + filePath + ' ';
+      textarea.value = before + insertion + after;
+      const newCursor = before.length + insertion.length;
+      textarea.selectionStart = textarea.selectionEnd = newCursor;
+      textarea.focus();
+      hideDropdown();
+      suppressInput = true;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+
+    function hideDropdown() {
+      lookupSeq++;
+      if (dropdown) {
+        dropdown.remove();
+        dropdown = null;
+        activeIndex = -1;
+        triggerStart = -1;
+      }
+    }
+  }
+
+  // ===== Image Paste =====
+  // Attach a paste handler to a comment textarea so screenshots and other
+  // images on the clipboard upload via POST /api/attachments and get
+  // inserted as markdown image references at the cursor.
+  //
+  // The inserted markdown carries the *relative* path returned by the
+  // server (`attachments/<uuid>.<ext>`) — that's the canonical form stored
+  // in review.json. The local UI's render-time hook (commentMd image rule
+  // above) rewrites it to /api/attachments/... at display time.
+  //
+  // While an upload is in flight a `![uploading…](hunkyard-pending-N)`
+  // placeholder sits at the cursor; on success it's swapped for the real
+  // markdown reference, on failure for an italic _[image upload failed]_
+  // note. The placeholder tag is suffixed with a per-textarea counter so
+  // simultaneous pastes don't collide.
+  let pendingImagePasteSeq = 0;
+  function attachImagePaste(textarea) {
+    textarea.addEventListener('paste', function(event) {
+      const clipboard = event.clipboardData;
+      if (!clipboard) return;
+      const items = clipboard.items;
+      if (!items || items.length === 0) return;
+
+      const images = [];
+      for (let i = 0; i < items.length; i++) {
+        const item = items[i];
+        if (item.kind === 'file' && item.type && item.type.indexOf('image/') === 0) {
+          const file = item.getAsFile();
+          if (file) images.push(file);
+        }
+      }
+      if (images.length === 0) return;
+
+      // We're handling images — block the default paste so the raw bytes
+      // don't get dumped as garbage text into the textarea.
+      event.preventDefault();
+      images.forEach(function(file) { uploadAndInsertImage(textarea, file); });
+    });
+  }
+
+  // attachImageDragDrop wires drag-and-drop image uploads onto a textarea.
+  // Mirrors attachImagePaste's contract: filter for image/* files, route to
+  // uploadAndInsertImage, leave non-image drags to the browser's native
+  // text-drop behavior. dragover MUST preventDefault when we want to accept
+  // the drop — without it, the drop event never fires.
+  function attachImageDragDrop(textarea) {
+    function hasFiles(event) {
+      const dt = event.dataTransfer;
+      // dataTransfer.types is a DOMStringList; "Files" indicates an OS file
+      // drag. Text-only drags (selection drags, link drags) won't include it.
+      return !!(dt && dt.types && Array.prototype.indexOf.call(dt.types, 'Files') !== -1);
+    }
+
+    textarea.addEventListener('dragenter', function(event) {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      textarea.classList.add('drag-active');
+    });
+
+    textarea.addEventListener('dragover', function(event) {
+      if (!hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = 'copy';
+      textarea.classList.add('drag-active');
+    });
+
+    textarea.addEventListener('dragleave', function(event) {
+      // Only clear when the drag truly leaves the textarea (not when crossing
+      // an internal selection boundary — textareas have no children, so we
+      // can rely on a simple class toggle without ref-counting).
+      if (event.target === textarea) {
+        textarea.classList.remove('drag-active');
+      }
+    });
+
+    textarea.addEventListener('drop', function(event) {
+      const dt = event.dataTransfer;
+      if (!dt || !dt.files || dt.files.length === 0) {
+        textarea.classList.remove('drag-active');
+        return;
+      }
+      const images = [];
+      for (let i = 0; i < dt.files.length; i++) {
+        const file = dt.files[i];
+        if (file && file.type && file.type.indexOf('image/') === 0) {
+          images.push(file);
+        }
+      }
+      if (images.length === 0) {
+        textarea.classList.remove('drag-active');
+        return;
+      }
+      // We're handling at least one image — claim the drop so the browser
+      // doesn't try to navigate to the dropped file URL.
+      event.preventDefault();
+      textarea.classList.remove('drag-active');
+      textarea.focus();
+      images.forEach(function(file) { uploadAndInsertImage(textarea, file); });
+    });
+  }
+
+  // Wires both paste and drag-drop image uploads onto a textarea. Single
+  // entry point so every comment textarea (top-level, edit, reply, reply edit)
+  // gets the same upload behavior.
+  function attachImageUploads(textarea) {
+    attachImagePaste(textarea);
+    attachImageDragDrop(textarea);
+  }
+
+  function uploadAndInsertImage(textarea, file) {
+    const seq = ++pendingImagePasteSeq;
+    const placeholder = '![uploading…](hunkyard-pending-' + seq + ')';
+    insertAtCursor(textarea, placeholder);
+
+    const formData = new FormData();
+    // Pass the original filename explicitly so it survives any clipboard
+    // that strips it from the File object. Server sanitizes server-side.
+    formData.append('file', file, file.name || '');
+
+    fetch('/api/attachments', { method: 'POST', body: formData })
+      .then(function(res) {
+        if (!res.ok) {
+          return res.text().then(function(msg) {
+            throw new Error(msg || ('Upload failed: ' + res.status));
+          });
+        }
+        return res.json();
+      })
+      .then(function(data) {
+        if (!data || !data.url) throw new Error('Malformed upload response');
+        const alt = (data.original_filename || '').trim();
+        replaceInTextarea(textarea, placeholder, '![' + alt + '](' + data.url + ')');
+      })
+      .catch(function(err) {
+        console.error('Image paste upload failed:', err);
+        replaceInTextarea(textarea, placeholder, '_[image upload failed]_');
+      });
+  }
+
+  function insertAtCursor(textarea, text) {
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    const before = textarea.value.substring(0, start);
+    const after = textarea.value.substring(end);
+    textarea.value = before + text + after;
+    const cursor = start + text.length;
+    textarea.selectionStart = textarea.selectionEnd = cursor;
+    textarea.focus();
+    // Trigger input listeners (draft autosave, etc.)
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  function replaceInTextarea(textarea, needle, replacement) {
+    const idx = textarea.value.indexOf(needle);
+    if (idx === -1) return;
+    // Preserve cursor when the placeholder is not where the user is typing.
+    const selStart = textarea.selectionStart;
+    const selEnd = textarea.selectionEnd;
+    textarea.value = textarea.value.substring(0, idx) + replacement + textarea.value.substring(idx + needle.length);
+    const delta = replacement.length - needle.length;
+    if (selStart > idx + needle.length) {
+      textarea.selectionStart = selStart + delta;
+      textarea.selectionEnd = selEnd + delta;
+    } else if (selStart >= idx) {
+      // Cursor was inside the placeholder — drop it just after the replacement.
+      textarea.selectionStart = textarea.selectionEnd = idx + replacement.length;
+    }
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+
+  // ===== Comment Form =====
+  function createCommentFormUI(opts) {
+    const formObj = opts.formObj;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'comment-form-wrapper';
+
+    const form = document.createElement('div');
+    form.className = 'comment-form';
+    form.dataset.formKey = formObj.formKey;
+
+    const header = document.createElement('div');
+    header.className = 'comment-form-header';
+    header.textContent = opts.headerText;
+
+    const textarea = document.createElement('textarea');
+    textarea.placeholder = 'Leave a review comment... (Ctrl+Enter to submit, Escape to cancel)';
+    textarea.dataset.formKey = formObj.formKey;
+    if (opts.initialBody) textarea.value = opts.initialBody;
+
+    attachFilePicker(textarea);
+    attachImageUploads(textarea);
+
+    const doSubmit = opts.onSubmit
+      ? function() { opts.onSubmit(textarea.value); }
+      : function() { submitComment(textarea.value, formObj); };
+    const doCancel = opts.onCancel
+      ? function() { opts.onCancel(); }
+      : function() { cancelComment(formObj); };
+    // Esc is ambiguous (could be a fat-finger), so gate it on a confirm if
+    // there's unsaved content. The Cancel button is an explicit, labeled
+    // discard action — no prompt there (matches GitHub).
+    const doCancelFromEsc = opts.onCancel
+      ? function() { if (confirmDiscardReviewCommentForm()) opts.onCancel(); }
+      : function() { if (confirmDiscardCommentForm(formObj)) cancelComment(formObj); };
+
+    bindSubmitCancelKeys(textarea, doSubmit, doCancelFromEsc);
+
+    if (!opts.onSubmit) {
+      textarea.addEventListener('input', function() { debouncedSaveDraft(textarea.value, formObj); });
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'comment-form-actions';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-sm';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.addEventListener('click', doCancel);
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'btn btn-sm btn-primary';
+    submitBtn.textContent = opts.submitText;
+    submitBtn.addEventListener('click', doSubmit);
+
+    actions.appendChild(cancelBtn);
+    actions.appendChild(submitBtn);
+
+    // Callers put editingId on formObj, not opts.
+    if (agentEnabled && !opts.editingId && !formObj.editingId) {
+      const sendBtn = document.createElement('button');
+      sendBtn.className = 'btn btn-sm btn-agent';
+      sendBtn.innerHTML = '<svg viewBox="0 0 24 24" width="12" height="12" fill="currentColor" style="vertical-align: -1px"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10"/></svg> Send now';
+      sendBtn.title = 'Submit comment and send to agent';
+      sendBtn.addEventListener('click', async function() {
+        sendBtn.disabled = true;
+        submitBtn.disabled = true;
+        const isReview = formObj.scope === 'review';
+        const fp = isReview ? '' : formObj.filePath;
+        const rerender = isReview
+          ? renderReviewConversation
+          : function() { renderFileByPath(fp); };
+        const comment = isReview
+          ? await addReviewComment(textarea.value)
+          : await submitComment(textarea.value, formObj);
+        if (!comment) {
+          sendBtn.disabled = false;
+          submitBtn.disabled = false;
+          return;
+        }
+        pendingAgentRequests.add(comment.id);
+        rerender();
+        try {
+          const res = await fetch('/api/agent/request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment_id: comment.id, file_path: fp }),
+          });
+          if (!res.ok) throw new Error('Server returned ' + res.status);
+          showMiniToast('Sent to agent');
+        } catch (err) {
+          console.error('Error sending to agent:', err);
+          showMiniToast('Failed to send to agent');
+          pendingAgentRequests.delete(comment.id);
+          rerender();
+        }
+      });
+      actions.appendChild(sendBtn);
+    }
+
+    form.appendChild(header);
+    form.appendChild(textarea);
+    form.appendChild(actions);
+    attachTemplateUI(form, textarea, actions);
+    wrapper.appendChild(form);
+
+    if (opts.autoFocus) {
+      requestAnimationFrame(function() { textarea.focus(); });
+    }
+
+    return wrapper;
+  }
+
+  function createCommentForm(formObj) {
+    const lineRef = formObj.startLine === formObj.endLine
+      ? 'Line ' + formObj.startLine
+      : 'Lines ' + formObj.startLine + '-' + formObj.endLine;
+    let initialBody = '';
+    if (formObj.editingId) {
+      const file = getFileByPath(formObj.filePath);
+      if (file) {
+        const existing = file.comments.find(function(c) { return c.id === formObj.editingId; });
+        if (existing) initialBody = existing.body;
+      }
+    } else if (formObj.draftBody) {
+      initialBody = formObj.draftBody;
+    }
+    return createCommentFormUI({
+      formObj: formObj,
+      headerText: (formObj.editingId ? 'Editing comment on ' : 'Comment on ') + lineRef,
+      submitText: formObj.editingId ? 'Update' : 'Comment',
+      initialBody: initialBody,
+      autoFocus: false
+    });
+  }
+
+  function getOldSideLinesFromHunks(file, startLine, endLine) {
+    const lines = [];
+    if (!file.diffHunks) return lines;
+    for (let h = 0; h < file.diffHunks.length; h++) {
+      const hunkLines = file.diffHunks[h].Lines || [];
+      for (let i = 0; i < hunkLines.length; i++) {
+        const dl = hunkLines[i];
+        if ((dl.Type === 'context' || dl.Type === 'del') && dl.OldNum >= startLine && dl.OldNum <= endLine) {
+          lines.push({ num: dl.OldNum, content: dl.Content });
+        }
+      }
+    }
+    lines.sort(function(a, b) { return a.num - b.num; });
+    return lines.map(function(l) { return l.content; });
+  }
+
+  function insertSuggestion(textarea) {
+    const key = textarea.dataset.formKey;
+    const formObj = activeForms.find(function(f) { return f.formKey === key; });
+    if (!formObj) return;
+    const file = getFileByPath(formObj.filePath);
+    if (!file) return;
+    let lines;
+    if (formObj.quote) {
+      lines = formObj.quote.split('\n');
+    } else if (formObj.side === 'old') {
+      lines = getOldSideLinesFromHunks(file, formObj.startLine, formObj.endLine);
+    } else {
+      lines = file.content.split('\n').slice(formObj.startLine - 1, formObj.endLine);
+    }
+    if (lines.length === 0) return;
+    const suggestion = '```suggestion\n' + lines.join('\n') + '\n```';
+    const start = textarea.selectionStart;
+    const end = textarea.selectionEnd;
+    textarea.value = textarea.value.substring(0, start) + suggestion + textarea.value.substring(end);
+    const cursorPos = start + '```suggestion\n'.length;
+    textarea.selectionStart = cursorPos;
+    textarea.selectionEnd = cursorPos + lines.join('\n').length;
+    textarea.focus();
+  }
+
+  async function submitComment(body, formObj) {
+    if (!body.trim() || !formObj) return null;
+    rememberKeyboardFocusFromForm(formObj);
+    clearDraft(formObj);
+    let created;
+    const filePath = formObj.filePath;
+    const file = getFileByPath(filePath);
+    if (!file) return;
+
+    try {
+      if (formObj.editingId) {
+        const res = await fetch('/api/comment/' + formObj.editingId + '?path=' + enc(filePath), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: body.trim() })
+        });
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+        const updated = await res.json();
+        const idx = file.comments.findIndex(c => c.id === formObj.editingId);
+        if (idx >= 0) file.comments[idx] = updated;
+        userActedThisRound = true;
+      } else {
+        const payload = {
+          body: body.trim(),
+      content_id: formObj.contentID || '',
+      view_id: formObj.viewID || ''
+        };
+        if (formObj.scope === 'file') {
+          payload.scope = 'file';
+        } else {
+          payload.start_line = formObj.startLine;
+          payload.end_line = formObj.endLine;
+        }
+        if (formObj.quote) payload.quote = formObj.quote;
+        if (formObj.quoteOffset !== null && formObj.quoteOffset !== undefined) payload.quote_offset = formObj.quoteOffset;
+        if (formObj.side) payload.side = formObj.side;
+        if (configAuthor) payload.author = configAuthor;
+        const res = await fetch('/api/file/comments?path=' + enc(filePath), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+    if (res.status === 409) {
+      window.hunkyard.shared.showToast('Review changed. Reload before commenting; your draft is kept.');
+      return null;
+    }
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+        const newComment = await res.json();
+        file.comments.push(newComment);
+        created = newComment;
+        userActedThisRound = true;
+      }
+    } catch (err) {
+      console.error('Error saving comment:', err);
+      return null;
+    }
+
+    removeForm(formObj.formKey);
+    if (getFormsForFile(filePath).length === 0) {
+      if (activeFilePath === filePath) {
+        activeFilePath = null;
+        selectionStart = null;
+        selectionEnd = null;
+      }
+    }
+    renderFileByPath(filePath);
+    updateTreeCommentBadges();
+    updateCommentCount();
+    return created || null;
+  }
+
+  // Returns true if it's safe to discard the form (form is empty or user
+  // confirmed). Reads the textarea live so unsaved typing is respected even
+  // before the autosave debounce fires.
+  function confirmDiscardCommentForm(formObj) {
+    if (!formObj) return true;
+    const ta = formTextarea(formObj.formKey);
+    const text = ta ? ta.value : (formObj.draftBody || '');
+    if (!text.trim()) return true;
+    return window.confirm('Discard comment?');
+  }
+
+  function confirmDiscardReviewCommentForm() {
+    const ta = document.querySelector('#reviewConversation .comment-form textarea');
+    const text = ta ? ta.value : '';
+    if (!text.trim()) return true;
+    return window.confirm('Discard comment?');
+  }
+
+  function cancelComment(formObj) {
+    if (!formObj) return;
+    rememberKeyboardFocusFromForm(formObj);
+    clearDraft(formObj);
+    removeForm(formObj.formKey);
+    if (getFormsForFile(formObj.filePath).length === 0) {
+      if (activeFilePath === formObj.filePath) {
+        activeFilePath = null;
+        selectionStart = null;
+        selectionEnd = null;
+      }
+    }
+    renderFileByPath(formObj.filePath);
+  }
+
+  // ===== Draft Autosave (delegates to window.hunkyard.draft) =====
+  const draftMod = window.hunkyard.draft;
+
+  function saveDraft(body, formObj) {
+    if (!formObj) return;
+    draftMod.saveDraftImmediate(formObj.formKey, {
+      filePath: formObj.filePath,
+      startLine: formObj.startLine,
+      endLine: formObj.endLine,
+      afterBlockIndex: formObj.afterBlockIndex,
+      editingId: formObj.editingId,
+      side: formObj.side || '',
+      scope: formObj.scope || '',
+      contentID: formObj.contentID,
+      viewID: formObj.viewID,
+      body: body,
+      savedAt: Date.now()
+    });
+  }
+
+  function debouncedSaveDraft(body, formObj) {
+    if (!formObj) return;
+    draftMod.saveDraft(formObj.formKey, {
+      filePath: formObj.filePath,
+      startLine: formObj.startLine,
+      endLine: formObj.endLine,
+      afterBlockIndex: formObj.afterBlockIndex,
+      editingId: formObj.editingId,
+      side: formObj.side || '',
+      scope: formObj.scope || '',
+      contentID: formObj.contentID,
+      viewID: formObj.viewID,
+      body: body,
+      savedAt: Date.now()
+    });
+  }
+
+  function clearDraft(formObj) {
+    if (!formObj) return;
+    draftMod.clearDraft(formObj.formKey);
+  }
+
+  window.addEventListener('beforeunload', function() {
+    activeForms.forEach(function(formObj) {
+      const el = formTextarea(formObj.formKey);
+      if (el) saveDraft(el.value, formObj);
+    });
+    draftMod.flushAll();
+  });
+
+  function restoreDrafts() {
+    let restored = false;
+    const keysToProcess = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k && k.startsWith('hunkyard-draft-')) keysToProcess.push(k);
+    }
+    for (let ki = 0; ki < keysToProcess.length; ki++) {
+      const key = keysToProcess[ki];
+      try {
+        const raw = localStorage.getItem(key);
+        if (!raw) continue;
+        const draft = JSON.parse(raw);
+
+        if (Date.now() - draft.savedAt > 24 * 60 * 60 * 1000) {
+          localStorage.removeItem(key);
+          continue;
+        }
+
+        const file = getFileByPath(draft.filePath);
+        if (!file) { localStorage.removeItem(key); continue; }
+
+        if (draft.scope !== 'file' && file.fileType === 'markdown' && file.content) {
+          const totalLines = file.content.split('\n').length;
+          if (draft.startLine < 1 || draft.endLine > totalLines) {
+            localStorage.removeItem(key);
+            continue;
+          }
+        }
+
+        if (draft.editingId) {
+          if (!file.comments.find(function(c) { return c.id === draft.editingId; })) {
+            localStorage.removeItem(key);
+            continue;
+          }
+        }
+
+        const formObj = {
+          filePath: file.path,
+          afterBlockIndex: draft.afterBlockIndex,
+          startLine: draft.startLine,
+          endLine: draft.endLine,
+          editingId: draft.editingId,
+          side: draft.side || '',
+          scope: draft.scope || '',
+          contentID: draft.contentID,
+          viewID: draft.viewID,
+          draftBody: draft.body || ''
+        };
+        formObj.formKey = formKey(formObj);
+        addForm(formObj);
+
+        restored = true;
+        localStorage.removeItem(key);
+      } catch {
+        localStorage.removeItem(key);
+      }
+    }
+    if (restored) {
+      // Render all files that have restored forms (deduplicated)
+      const renderedFiles = {};
+      activeForms.forEach(function(f) {
+        if (!renderedFiles[f.filePath]) {
+          renderedFiles[f.filePath] = true;
+          renderFileByPath(f.filePath);
+        }
+      });
+      showMiniToast('Draft restored');
+    }
+  }
+
+  // Thin wrapper kept for existing call sites; delegates to the unified
+  // hunkyard.shared.showToast helper (defined in hunkyard-shared.js, also used by
+  // live-mode.js).
+  function showMiniToast(message) {
+    if (window.hunkyard && window.hunkyard.shared && window.hunkyard.shared.showToast) {
+      window.hunkyard.shared.showToast(message);
+    }
+  }
+
+  // ===== Agent Button =====
+  function isLiveThread(comment) {
+    if (!agentEnabled) return false;
+    return !!comment.live;
+  }
+
+  function checkAgentReplies(comments) {
+    for (const c of comments) {
+      if (pendingAgentRequests.has(c.id) && c.replies && c.replies.length > 0) {
+        const lastReply = c.replies[c.replies.length - 1];
+        if (lastReply.author === agentName) {
+          pendingAgentRequests.delete(c.id);
+        }
+      }
+    }
+  }
+
+  // ===== Comment Display =====
+  function buildCommentEnv(comment, filePath) {
+    const env = {};
+    const file = getFileByPath(filePath);
+    if (file && file.content && comment.start_line && comment.end_line && !comment.side) {
+      env.originalLines = comment.quote
+        ? comment.quote.split('\n')
+        : file.content.split('\n').slice(comment.start_line - 1, comment.end_line);
+    }
+    return env;
+  }
+
+  // Shared helper for building comment card skeleton (header, body, replies).
+  // Code-review-internal callers pass a sparse opts object; this wrapper
+  // injects the module-scoped deps and the default override callbacks. The
+  // real implementation lives in frontend/hunkyard-comment-card.js so live-mode
+  // can mount the same renderer with its own deps.
+  function buildCommentCard(comment, filePath, opts) {
+    opts = opts || {};
+    const merged = Object.assign({}, opts);
+    if (typeof merged.isPendingAgentRequest !== 'function') {
+      merged.isPendingAgentRequest = function (id) { return pendingAgentRequests.has(id); };
+    }
+    if (typeof merged.getCollapseOverride !== 'function') {
+      merged.getCollapseOverride = function (id) { return commentCollapseOverrides[id]; };
+    }
+    if (typeof merged.setCollapseOverride !== 'function') {
+      merged.setCollapseOverride = function (id, val) { commentCollapseOverrides[id] = val; };
+    }
+    if (typeof merged.isLiveThread !== 'function') {
+      merged.isLiveThread = isLiveThread;
+    }
+    merged.deps = Object.assign({
+      commentMd: commentMd,
+      formatTime: formatTime,
+      authorColorIndex: authorColorIndex,
+      getReviewRound: function () { return session && session.review_round; },
+      getAgentName: function () { return agentName; },
+      buildCommentEnv: buildCommentEnv,
+      renderReplyList: renderReplyList,
+      createReplyInput: createReplyInput,
+      iconChevron: ICON_CHEVRON,
+      linkifyDom: linkifyCommentRefsInDom,
+    }, opts.deps || {});
+    return window.hunkyard.commentCard.buildCommentCard(comment, filePath, merged);
+  }
+
+  function createCommentElement(comment, filePath) {
+    if (findFormForEdit(comment.id)) {
+      return createInlineEditor(comment, filePath);
+    }
+
+    const parts = buildCommentCard(comment, filePath, {
+      wrapperClass: 'comment-block',
+      cardClassExtra: comment.carried_forward ? 'carried-forward' : '',
+      collapseDefault: false,
+      showLineRef: true,
+      showReplyInput: true,
+    });
+
+    const editBtn = document.createElement('button');
+    editBtn.title = 'Edit';
+    editBtn.innerHTML = ICON_EDIT;
+    editBtn.addEventListener('click', () => editComment(comment, filePath));
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.title = 'Delete';
+    deleteBtn.innerHTML = ICON_DELETE;
+    deleteBtn.addEventListener('click', () => deleteComment(comment.id, filePath));
+
+    const resolveBtn = document.createElement('button');
+    resolveBtn.className = 'resolve-btn';
+    resolveBtn.title = 'Resolve';
+    resolveBtn.setAttribute('aria-label', 'Resolve thread');
+    resolveBtn.innerHTML = ICON_RESOLVE + '<span>Resolve</span>';
+    resolveBtn.addEventListener('click', function() {
+      if (resolveBtn.disabled) return;
+      resolveBtn.disabled = true;
+      toggleResolveStatus(comment.id, 'file', 'resolve', filePath)
+        .finally(function() { resolveBtn.disabled = false; });
+    });
+
+    parts.actions.appendChild(resolveBtn);
+    parts.actions.appendChild(editBtn);
+    parts.actions.appendChild(deleteBtn);
+
+    return parts.wrapper;
+  }
+
+  // Build a reply list container for a comment's replies
+  function renderReplyList(comment, filePath, extraClass) {
+    const repliesContainer = document.createElement('div');
+    repliesContainer.className = 'comment-replies' + (extraClass ? ' ' + extraClass : '');
+    comment.replies.forEach(function(reply) {
+      const replyEl = document.createElement('div');
+      replyEl.className = 'comment-reply';
+      replyEl.dataset.replyId = reply.id;
+
+      const replyHeader = document.createElement('div');
+      replyHeader.className = 'reply-header';
+
+      const replyMeta = document.createElement('div');
+      replyMeta.className = 'reply-meta';
+      if (reply.author) {
+        const replyAuthorBadge = document.createElement('span');
+        replyAuthorBadge.className = 'comment-author-badge author-color-' + authorColorIndex(reply.author);
+        replyAuthorBadge.textContent = '@' + reply.author;
+        replyMeta.appendChild(replyAuthorBadge);
+      }
+      const replyTime = document.createElement('span');
+      replyTime.className = 'reply-time';
+      replyTime.textContent = formatTime(reply.created_at);
+      replyMeta.appendChild(replyTime);
+      if (reply.github_id) {
+        const forgeBadge = document.createElement('span');
+        forgeBadge.className = 'forge-badge github-badge';
+        forgeBadge.textContent = 'GitHub';
+        forgeBadge.title = 'Synced from GitHub';
+        forgeBadge.setAttribute('aria-label', 'Synced from GitHub');
+        replyMeta.appendChild(forgeBadge);
+      }
+      replyHeader.appendChild(replyMeta);
+
+      const replyActions = document.createElement('div');
+      replyActions.className = 'reply-actions';
+      const replyEditBtn = document.createElement('button');
+      replyEditBtn.title = 'Edit';
+      replyEditBtn.innerHTML = ICON_EDIT;
+      replyEditBtn.addEventListener('click', function(e) { e.stopPropagation(); editReply(comment.id, reply.id, filePath); });
+      const replyDeleteBtn = document.createElement('button');
+      replyDeleteBtn.className = 'delete-btn';
+      replyDeleteBtn.title = 'Delete';
+      replyDeleteBtn.innerHTML = ICON_DELETE;
+      replyDeleteBtn.addEventListener('click', function(e) { e.stopPropagation(); deleteReply(comment.id, reply.id, filePath); });
+      replyActions.appendChild(replyEditBtn);
+      replyActions.appendChild(replyDeleteBtn);
+      replyHeader.appendChild(replyActions);
+
+      replyEl.appendChild(replyHeader);
+
+      const replyBody = document.createElement('div');
+      replyBody.className = 'reply-body';
+      replyBody.dataset.rawBody = reply.body;
+      replyBody.innerHTML = commentMd.render(reply.body);
+      linkifyCommentRefsInDom(replyBody);
+      replyEl.appendChild(replyBody);
+
+      repliesContainer.appendChild(replyEl);
+    });
+    return repliesContainer;
+  }
+
+  // ===== Quote Highlighting in Document/Diff Body =====
+
+  function highlightQuotesInSection(sectionEl, file) {
+    const quotedComments = file.comments.filter(function(c) { return c.quote && !c.resolved; });
+
+    // Also highlight quotes from open (unsaved) comment forms
+    const formQuotes = getFormsForFile(file.path)
+      .filter(function(f) { return f.quote && !f.editingId; })
+      .map(function(f) {
+        return { start_line: f.startLine, end_line: f.endLine, quote: f.quote, quote_offset: f.quoteOffset, id: 'draft-' + f.formKey, side: f.side };
+      });
+    const allQuoted = quotedComments.concat(formQuotes);
+    if (allQuoted.length === 0) return;
+
+    // Index content elements once per mount. The old code ran two
+    // full-section querySelectorAll scans per quoted line (O(Q × L) DOM
+    // queries), which dominated mount time on large files with quoted
+    // comments. One pass here, O(1) map lookups per quoted line below.
+    const pathEsc = CSS.escape(file.path);
+    const docLineMap = new Map(); // source line -> .line-content elements
+    sectionEl.querySelectorAll('.line-block[data-file-path="' + pathEsc + '"]').forEach(function(el) {
+      const s = parseInt(el.dataset.startLine);
+      const e = parseInt(el.dataset.endLine);
+      // Native table rows have one content element per cell. Other
+      // blocks have one content div.
+      const contents = [];
+      el.querySelectorAll('.line-content').forEach(function(content) {
+        contents.push(content);
+      });
+      if (contents.length === 0) return;
+      for (let ln = s; ln <= e; ln++) {
+        let arr = docLineMap.get(ln);
+        if (!arr) {
+          arr = [];
+          docLineMap.set(ln, arr);
+        }
+        for (let ci = 0; ci < contents.length; ci++) {
+          if (arr.indexOf(contents[ci]) === -1) arr.push(contents[ci]);
+        }
+      }
+    });
+    allQuoted.forEach(function(comment) {
+      // Find the content elements in this comment's line range
+      const contentEls = [];
+      for (let ln = comment.start_line; ln <= comment.end_line; ln++) {
+        // Document view: line-blocks with data-file-path
+        const docEls = docLineMap.get(ln);
+        if (docEls) {
+          for (let di = 0; di < docEls.length; di++) {
+            if (contentEls.indexOf(docEls[di]) === -1) contentEls.push(docEls[di]);
+          }
+        }
+      }
+
+      if (contentEls.length === 0) return;
+
+      // Preserve a whitespace boundary between cells/line blocks while retaining
+      // each real text node's offsets for DOM highlighting.
+      const nodeRanges = [];
+      let fullText = '';
+      contentEls.forEach(function(el, contentIndex) {
+        if (contentIndex > 0) fullText += ' ';
+        const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null);
+        let node;
+        while ((node = walker.nextNode())) {
+          if (node.textContent.length === 0) continue;
+          const start = fullText.length;
+          fullText += node.textContent;
+          nodeRanges.push({ node: node, start: start, end: fullText.length });
+        }
+      });
+
+      if (nodeRanges.length === 0) return;
+
+      // Build concatenated text and find the quote within it.
+      // Normalize the quote: collapse whitespace/newlines so cross-line selections match.
+      const normalizedQuote = comment.quote.replace(/\s+/g, ' ');
+      const normalizedFull = fullText.replace(/\s+/g, ' ');
+      let quoteIdx = -1;
+      // Use quote_offset when available to disambiguate duplicate substrings
+      if (comment.quote_offset !== null && comment.quote_offset !== undefined) {
+        const candidateIdx = comment.quote_offset;
+        if (normalizedFull.slice(candidateIdx, candidateIdx + normalizedQuote.length) === normalizedQuote) {
+          quoteIdx = candidateIdx;
+        }
+      }
+      if (quoteIdx === -1) {
+        quoteIdx = normalizedFull.indexOf(normalizedQuote);
+      }
+      if (quoteIdx === -1) {
+        quoteIdx = normalizedFull.toLowerCase().indexOf(normalizedQuote.toLowerCase());
+      }
+      if (quoteIdx === -1) return;
+
+      // Map the normalized index back to the original fullText position.
+      // Walk the original text, skipping collapsed whitespace to find the real start.
+      let origIdx = 0, normIdx = 0;
+      while (normIdx < quoteIdx && origIdx < fullText.length) {
+        if (/\s/.test(fullText[origIdx])) {
+          // In normalized form, consecutive whitespace collapses to one space
+          while (origIdx < fullText.length && /\s/.test(fullText[origIdx])) origIdx++;
+          normIdx++;
+        } else {
+          origIdx++;
+          normIdx++;
+        }
+      }
+      quoteIdx = origIdx;
+      // Find the end position similarly
+      let matchLen = 0, ni = 0;
+      while (ni < normalizedQuote.length && (origIdx + matchLen) < fullText.length) {
+        if (/\s/.test(fullText[origIdx + matchLen])) {
+          while ((origIdx + matchLen) < fullText.length && /\s/.test(fullText[origIdx + matchLen])) matchLen++;
+          ni++;
+        } else {
+          matchLen++;
+          ni++;
+        }
+      }
+
+      // Walk text nodes to find which ones overlap with the quote range
+      const quoteEnd = quoteIdx + matchLen;
+      for (let i = 0; i < nodeRanges.length; i++) {
+        const nodeRange = nodeRanges[i];
+        const node = nodeRange.node;
+        if (nodeRange.end <= quoteIdx) continue;
+        if (nodeRange.start >= quoteEnd) break;
+
+        // This node overlaps with the quote range
+        const startInNode = Math.max(0, quoteIdx - nodeRange.start);
+        const endInNode = Math.min(node.textContent.length, quoteEnd - nodeRange.start);
+
+        // Skip wrapping whitespace-only matches (e.g. newlines between blocks)
+        const matchText = node.textContent.slice(startInNode, endInNode);
+        if (!matchText.trim()) continue;
+
+        if (startInNode === 0 && endInNode === node.textContent.length) {
+          // Wrap entire text node
+          const mark = document.createElement('mark');
+          mark.className = 'quote-highlight';
+          mark.dataset.commentId = comment.id;
+          node.parentNode.replaceChild(mark, node);
+          mark.appendChild(node);
+        } else {
+          // Split and wrap partial text
+          const before = node.textContent.slice(0, startInNode);
+          const middle = node.textContent.slice(startInNode, endInNode);
+          const after = node.textContent.slice(endInNode);
+          const frag = document.createDocumentFragment();
+          if (before) frag.appendChild(document.createTextNode(before));
+          const mark = document.createElement('mark');
+          mark.className = 'quote-highlight';
+          mark.dataset.commentId = comment.id;
+          mark.textContent = middle;
+          frag.appendChild(mark);
+          if (after) frag.appendChild(document.createTextNode(after));
+          node.parentNode.replaceChild(frag, node);
+        }
+      }
+    });
+  }
+
+  function createInlineEditor(comment, filePath) {
+    const formObj = findFormForEdit(comment.id);
+    if (!formObj) return null;
+
+    let headerText;
+    if (comment.scope === 'file') {
+      headerText = 'Editing file comment';
+    } else {
+      const lineRef = comment.start_line === comment.end_line
+        ? 'Line ' + comment.start_line
+        : 'Lines ' + comment.start_line + '-' + comment.end_line;
+      headerText = 'Editing comment on ' + lineRef;
+    }
+    const formEl = createCommentFormUI({
+      formObj: formObj,
+      headerText: headerText,
+      submitText: 'Update Comment',
+      initialBody: comment.body,
+      autoFocus: true
+    });
+
+    // Keep replies visible below the edit form, inside the form's card
+    if (comment.replies && comment.replies.length > 0) {
+      const formCard = formEl.querySelector('.comment-form');
+      if (formCard) {
+        formCard.appendChild(renderReplyList(comment, filePath));
+      }
+    }
+    return formEl;
+  }
+
+  function editComment(comment, filePath) {
+    const form = {
+      filePath: filePath,
+      afterBlockIndex: null,
+      startLine: comment.start_line,
+      endLine: comment.end_line,
+      editingId: comment.id,
+    };
+    if (comment.scope === 'file') form.scope = 'file';
+    openForm(form);
+  }
+
+  async function deleteComment(id, filePath) {
+    const file = getFileByPath(filePath);
+    if (!file) return;
+    try {
+      await fetch('/api/comment/' + id + '?path=' + enc(filePath), { method: 'DELETE' });
+      file.comments = file.comments.filter(c => c.id !== id);
+      pendingAgentRequests.delete(id);
+      userActedThisRound = true;
+    } catch (err) {
+      console.error('Error deleting comment:', err);
+    }
+    if (navCommentId === id) navCommentId = null;
+    renderFileByPath(filePath);
+    updateTreeCommentBadges();
+    updateCommentCount();
+  }
+
+  // Shared resolve/unresolve handler for both file-level and review-level comments.
+  // `type` is 'file' or 'review'; `action` is 'resolve' or 'unresolve'.
+  async function toggleResolveStatus(commentId, type, action, filePath) {
+    const resolved = action === 'resolve';
+    const url = type === 'file'
+      ? '/api/comment/' + commentId + '/resolve?path=' + enc(filePath)
+      : '/api/review-comment/' + commentId + '/resolve';
+    try {
+      const res = await fetch(url, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ resolved: resolved }),
+      });
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+    } catch (err) {
+      console.error('Error ' + action + ':', err);
+      showMiniToast('Failed to ' + action + ' comment');
+      return;
+    }
+    userActedThisRound = true;
+    if (type === 'file') {
+      refreshFileComments(filePath);
+    } else {
+      await refreshReviewComments();
+      renderReviewConversation();
+      renderCommentsPanel();
+      renderFileTree();
+    }
+  }
+
+  // Re-fetch comments for a file from the API and re-render
+  async function refreshFileComments(filePath) {
+    const file = getFileByPath(filePath);
+    if (!file) return;
+    try {
+      const res = await fetch('/api/file/comments?path=' + enc(filePath));
+      if (res.ok) {
+        file.comments = await res.json();
+      }
+    } catch (err) {
+      console.error('Error refreshing comments:', err);
+    }
+    checkAgentReplies(file.comments);
+    renderFileByPath(filePath);
+    updateCommentCount();
+    updateTreeCommentBadges();
+    renderCommentsPanel();
+  }
+
+  // ===== Review-Level (General) Comments =====
+  let reviewCommentSubmitting = false;
+  async function addReviewComment(body) {
+    if (!body.trim() || reviewCommentSubmitting) return null;
+    reviewCommentSubmitting = true;
+    let newComment;
+    try {
+      const res = await fetch('/api/comments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: body.trim(), author: configAuthor })
+      });
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      newComment = await res.json();
+      reviewComments.push(newComment);
+      userActedThisRound = true;
+    } catch (err) {
+      console.error('Error adding review comment:', err);
+      showMiniToast('Failed to add comment');
+      reviewCommentSubmitting = false;
+      return null;
+    }
+    reviewCommentSubmitting = false;
+    reviewCommentFormActive = false;
+    reviewCommentEditingId = null;
+    // Clear the just-submitted textarea so renderReviewConversation's draft
+    // snapshot (line ~5670) doesn't mistake it for in-progress typing and
+    // re-open the form pre-populated with the submitted text.
+    const submittedTa = document.querySelector('#reviewConversation .comment-form[data-form-key="review:new"] textarea');
+    if (submittedTa) submittedTa.value = '';
+    updateCommentCount();
+    renderReviewConversation();
+    renderCommentsPanel();
+    renderFileTree();
+    return newComment;
+  }
+
+  async function updateReviewComment(id, body) {
+    if (!body.trim()) return;
+    try {
+      const res = await fetch('/api/review-comment/' + id, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ body: body.trim() })
+      });
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      const updated = await res.json();
+      const idx = reviewComments.findIndex(function(c) { return c.id === id; });
+      if (idx >= 0) reviewComments[idx] = updated;
+      userActedThisRound = true;
+    } catch (err) {
+      console.error('Error updating review comment:', err);
+      showMiniToast('Failed to update comment');
+      return;
+    }
+    reviewCommentFormActive = false;
+    reviewCommentEditingId = null;
+    updateCommentCount();
+    renderReviewConversation();
+    renderCommentsPanel();
+  }
+
+  async function deleteReviewComment(id) {
+    try {
+      const res = await fetch('/api/review-comment/' + id, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      reviewComments = reviewComments.filter(function(c) { return c.id !== id; });
+      userActedThisRound = true;
+    } catch (err) {
+      console.error('Error deleting review comment:', err);
+      showMiniToast('Failed to delete comment');
+      return;
+    }
+    if (navCommentId === id) navCommentId = null;
+    updateCommentCount();
+    renderReviewConversation();
+    renderCommentsPanel();
+    renderFileTree();
+  }
+
+  function openReviewCommentForm() {
+    // No-op if form is already open
+    if (reviewCommentFormActive && !reviewCommentEditingId) return;
+    closeEmptyForms(null);
+    reviewCommentFormActive = true;
+    reviewCommentEditingId = null;
+    renderReviewConversation();
+    renderCommentsPanel();
+    scrollToReviewConversation();
+    requestAnimationFrame(function() {
+      const ta = document.querySelector('#reviewConversation textarea');
+      if (ta) ta.focus();
+    });
+  }
+
+  function openReviewCommentEditForm(comment) {
+    reviewCommentFormActive = true;
+    reviewCommentEditingId = comment.id;
+    renderReviewConversation();
+    renderCommentsPanel();
+    scrollToReviewConversation();
+    requestAnimationFrame(function() {
+      const ta = document.querySelector('#reviewConversation textarea');
+      if (ta) ta.focus();
+    });
+  }
+
+  function cancelReviewCommentForm() {
+    reviewCommentFormActive = false;
+    reviewCommentEditingId = null;
+    renderReviewConversation();
+    renderCommentsPanel();
+  }
+
+  function createReviewCommentFormUI() {
+    const formObj = { scope: 'review', filePath: '', startLine: 0, endLine: 0, formKey: 'review:new' };
+    return createCommentFormUI({
+      formObj: formObj,
+      headerText: 'Comment',
+      submitText: 'Comment',
+      initialBody: '',
+      autoFocus: false,
+      onSubmit: function(body) { addReviewComment(body); },
+      onCancel: function() { cancelReviewCommentForm(); },
+    });
+  }
+
+  function createReviewCommentEditor(comment) {
+    const formObj = { scope: 'review', filePath: '', startLine: 0, endLine: 0, editingId: comment.id, formKey: 'review:' + comment.id };
+    const el = createCommentFormUI({
+      formObj: formObj,
+      headerText: 'Editing comment',
+      submitText: 'Save',
+      initialBody: comment.body,
+      autoFocus: true,
+      onSubmit: function(body) { updateReviewComment(comment.id, body); },
+      onCancel: function() { cancelReviewCommentForm(); },
+    });
+    el.classList.add('panel-comment-block');
+    return el;
+  }
+
+  async function refreshReviewComments() {
+    try {
+      const res = await fetch('/api/comments');
+      if (res.ok) {
+        reviewComments = await res.json();
+      }
+    } catch (err) {
+      console.error('Error refreshing review comments:', err);
+    }
+    updateCommentCount();
+  }
+
+  // ===== Inline Review Conversation Section (top of document) =====
+
+  const REVIEW_CONVERSATION_PATH = '__review_conversation__';
+  const ICON_REVIEW_CONVERSATION =
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
+    '<path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H8.5l-3 2.75V11H3.5A1.5 1.5 0 0 1 2 9.5Z"/>' +
+    '</svg>';
+
+  function createReviewConversationCard(comment) {
+    const isResolved = comment.resolved;
+    const cardClassExtra = [
+      isResolved ? 'resolved-card' : '',
+      comment.carried_forward ? 'carried-forward' : '',
+    ].filter(Boolean).join(' ');
+
+    const parts = buildCommentCard(comment, '', {
+      wrapperClass: 'comment-block',
+      cardClassExtra: cardClassExtra,
+      collapseDefault: isResolved,
+      showLineRef: false,
+      showReplyInput: true,
+    });
+
+    if (isResolved) {
+      const unresolveBtn = document.createElement('button');
+      unresolveBtn.className = 'resolve-btn resolve-btn--active';
+      unresolveBtn.title = 'Unresolve';
+      unresolveBtn.setAttribute('aria-label', 'Unresolve thread');
+      unresolveBtn.innerHTML = ICON_UNRESOLVE + '<span>Unresolve</span>';
+      unresolveBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (unresolveBtn.disabled) return;
+        unresolveBtn.disabled = true;
+        toggleResolveStatus(comment.id, 'review', 'unresolve', null)
+          .finally(function() { unresolveBtn.disabled = false; });
+      });
+      parts.actions.appendChild(unresolveBtn);
+    } else {
+      const resolveBtn = document.createElement('button');
+      resolveBtn.className = 'resolve-btn';
+      resolveBtn.title = 'Resolve';
+      resolveBtn.setAttribute('aria-label', 'Resolve thread');
+      resolveBtn.innerHTML = ICON_RESOLVE + '<span>Resolve</span>';
+      resolveBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        if (resolveBtn.disabled) return;
+        resolveBtn.disabled = true;
+        toggleResolveStatus(comment.id, 'review', 'resolve', null)
+          .finally(function() { resolveBtn.disabled = false; });
+      });
+      parts.actions.appendChild(resolveBtn);
+    }
+
+    const editBtn = document.createElement('button');
+    editBtn.title = 'Edit';
+    editBtn.innerHTML = ICON_EDIT;
+    editBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      openReviewCommentEditForm(comment);
+    });
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.title = 'Delete';
+    deleteBtn.innerHTML = ICON_DELETE;
+    deleteBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      deleteReviewComment(comment.id);
+    });
+    parts.actions.appendChild(editBtn);
+    parts.actions.appendChild(deleteBtn);
+
+    return parts.wrapper;
+  }
+
+  // Collapse state — host preference, persisted via cookie like other view prefs.
+  function isReviewConversationCollapsed() {
+    return getSetting('reviewConvCollapsed', false);
+  }
+  function setReviewConversationCollapsed(collapsed) {
+    setSetting('reviewConvCollapsed', !!collapsed);
+  }
+
+  const ICON_CHEVRON_DOWN =
+    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
+    '<path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
+  function renderReviewConversation() {
+    const section = document.getElementById('reviewConversation');
+    if (!section) return;
+
+    // Hide entirely until session is loaded
+    if (!session || !Array.isArray(files)) {
+      section.hidden = true;
+      return;
+    }
+
+    // Snapshot any in-progress NEW review-comment draft text before we wipe
+    // the DOM. Empty drafts intentionally fall through to the discard
+    // behavior — only protect non-empty text so refreshAfterReplyChange and
+    // sibling state changes don't blow away the user's typing.
+    let pendingNewDraft = '';
+    const existingNewTa = section.querySelector('.comment-form[data-form-key="review:new"] textarea');
+    if (existingNewTa && existingNewTa.value && existingNewTa.value.trim()) {
+      pendingNewDraft = existingNewTa.value;
+    }
+
+    section.hidden = session.mode === 'git' && reviewComments.length === 0 && !reviewCommentFormActive && !pendingNewDraft;
+    section.innerHTML = '';
+    if (section.hidden) return;
+
+    // File and plan reviews (and live/preview, which use files mode) render a
+    // centered document, so center the section with it. Git mode renders
+    // file-sections full-width, so left-anchor.
+    if (session.mode !== 'git') {
+      section.dataset.docLayout = 'centered';
+    } else {
+      delete section.dataset.docLayout;
+    }
+
+    const collapsed = isReviewConversationCollapsed() && !reviewCommentFormActive;
+    section.classList.toggle('collapsed', collapsed);
+
+    // Header — chevron on the left, matching `.tree-folder` and `.comment-card`
+    // collapse conventions elsewhere in the UI.
+    const header = document.createElement('div');
+    header.className = 'review-conversation-header';
+    const toggle = document.createElement('button');
+    toggle.type = 'button';
+    toggle.className = 'review-conversation-toggle';
+    toggle.title = collapsed ? 'Expand review conversation' : 'Collapse review conversation';
+    toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
+    toggle.setAttribute('aria-label', toggle.title);
+    toggle.innerHTML = ICON_CHEVRON_DOWN;
+    toggle.addEventListener('click', function() {
+      setReviewConversationCollapsed(!isReviewConversationCollapsed());
+      renderReviewConversation();
+    });
+    header.appendChild(toggle);
+
+    const headerLabel = document.createElement('span');
+    headerLabel.className = 'icon';
+    headerLabel.innerHTML = ICON_REVIEW_CONVERSATION;
+    header.appendChild(headerLabel);
+
+    const labelText = document.createElement('span');
+    labelText.className = 'label';
+    labelText.textContent = 'Review conversation';
+    header.appendChild(labelText);
+
+    // Match the file-tree badge convention: count unresolved (the "needs attention" signal),
+    // not total. Resolved threads are visible but de-emphasised.
+    const unresolvedCount = reviewComments.filter(function(c) { return !c.resolved; }).length;
+    if (unresolvedCount > 0) {
+      const count = document.createElement('span');
+      count.className = 'count';
+      count.textContent = String(unresolvedCount);
+      header.appendChild(count);
+    }
+    section.appendChild(header);
+
+    if (collapsed) return;
+
+    const body = document.createElement('div');
+    body.className = 'review-conversation-body';
+    section.appendChild(body);
+
+    // Threads (existing comments first; the editor renders inline at the matching position)
+    for (const comment of reviewComments) {
+      if (reviewCommentEditingId === comment.id) {
+        body.appendChild(createReviewCommentEditor(comment));
+      } else {
+        body.appendChild(createReviewConversationCard(comment));
+      }
+    }
+
+    // Footer: new-comment form (when active) | "Add comment" ghost button.
+    // The same button is used for both empty and populated states.
+    // If a non-empty draft existed before the re-render, keep the form open
+    // even if the active flag was somehow cleared — the user is typing.
+    const showNewForm = (reviewCommentFormActive || !!pendingNewDraft) && !reviewCommentEditingId;
+    if (showNewForm) {
+      const formEl = createReviewCommentFormUI();
+      body.appendChild(formEl);
+      if (pendingNewDraft) {
+        const ta = formEl.querySelector('textarea');
+        if (ta) {
+          ta.value = pendingNewDraft;
+          // Match the "expanded" state the user was in (createCommentFormUI
+          // builds the textarea directly, so just place caret at the end).
+          // Restore focus too — the user was actively typing when the
+          // re-render fired (refreshAfterReplyChange, SSE), so dropping
+          // focus would force them to click back into the textarea.
+          try {
+            ta.setSelectionRange(ta.value.length, ta.value.length);
+            ta.focus();
+          } catch {}
+        }
+      }
+    } else {
+      const addMore = document.createElement('button');
+      // .review-conversation-empty doubles as an E2E selector for the
+      // empty-state composer and is intentionally only added when the
+      // conversation has no comments.
+      const isEmpty = reviewComments.length === 0;
+      addMore.className = 'review-conversation-add-more' + (isEmpty ? ' review-conversation-empty' : '');
+      addMore.type = 'button';
+      addMore.textContent = 'Add comment';
+      addMore.addEventListener('click', function() { openReviewCommentForm(); });
+      body.appendChild(addMore);
+    }
+  }
+
+  function scrollToReviewConversation() {
+    if (session.mode === 'git' && !reviewComments.length && !reviewCommentFormActive) {
+      openReviewCommentForm();
+      return;
+    }
+    // If the user collapsed it, expand on navigate so the target is visible.
+    if (isReviewConversationCollapsed()) {
+      setReviewConversationCollapsed(false);
+      renderReviewConversation();
+    }
+    const section = document.getElementById('reviewConversation');
+    if (!section) return;
+    ignoreTreeObserverUntil = Date.now() + 200;
+    // Only scroll if the section isn't already comfortably in view —
+    // otherwise clicking the in-view "Add comment" button feels jarring.
+    const rect = section.getBoundingClientRect();
+    const headerOffset = (document.querySelector('.app-header') || {}).offsetHeight || 0;
+    if (rect.top < headerOffset || rect.top > window.innerHeight) {
+      section.scrollIntoView({ block: 'start', behavior: 'instant' });
+    }
+    updateTreeActive(REVIEW_CONVERSATION_PATH);
+  }
+
+  // Scroll to and flash a specific review-level comment card. Mirrors scrollToComment.
+  function scrollToReviewComment(commentId) {
+    if (isReviewConversationCollapsed()) {
+      setReviewConversationCollapsed(false);
+      renderReviewConversation();
+    }
+    const section = document.getElementById('reviewConversation');
+    if (!section) return;
+    const card = section.querySelector('.comment-card[data-comment-id="' + CSS.escape(commentId) + '"]');
+    if (!card) {
+      scrollToReviewConversation();
+      return;
+    }
+    ignoreTreeObserverUntil = Date.now() + 200;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.remove('comment-card-highlight');
+    void card.offsetWidth;
+    card.classList.add('comment-card-highlight');
+    card.addEventListener('animationend', function() {
+      card.classList.remove('comment-card-highlight');
+    }, { once: true });
+    updateTreeActive(REVIEW_CONVERSATION_PATH);
+  }
+
+  // Build the URL for a reply mutation (edit or delete). filePath empty → review-level.
+  function replyMutationUrl(commentId, replyId, filePath) {
+    return filePath
+      ? '/api/comment/' + commentId + '/replies/' + replyId + '?path=' + enc(filePath)
+      : '/api/review-comment/' + commentId + '/replies/' + replyId;
+  }
+
+  async function refreshAfterReplyChange(filePath) {
+    if (filePath) {
+      refreshFileComments(filePath);
+    } else {
+      await refreshReviewComments();
+      renderReviewConversation();
+      renderCommentsPanel();
+      renderFileTree();
+    }
+  }
+
+  async function editReply(commentId, replyId, filePath) {
+    const replyEl = document.querySelector('[data-reply-id="' + replyId + '"]');
+    if (!replyEl) return;
+    const bodyEl = replyEl.querySelector('.reply-body');
+    if (!bodyEl) return;
+    // Use raw markdown if available, fall back to textContent
+    const currentText = bodyEl.dataset.rawBody || bodyEl.textContent;
+
+    const textarea = document.createElement('textarea');
+    textarea.className = 'comment-textarea';
+    textarea.value = currentText;
+    textarea.rows = 3;
+    bodyEl.replaceWith(textarea);
+    attachImageUploads(textarea);
+    textarea.focus();
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'btn btn-sm btn-primary';
+    saveBtn.textContent = 'Save';
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-sm';
+    cancelBtn.textContent = 'Cancel';
+
+    const btnRow = document.createElement('div');
+    btnRow.className = 'reply-edit-actions';
+    btnRow.appendChild(saveBtn);
+    btnRow.appendChild(cancelBtn);
+    replyEl.appendChild(btnRow);
+
+    cancelBtn.addEventListener('click', () => refreshAfterReplyChange(filePath));
+    saveBtn.addEventListener('click', async () => {
+      const newBody = textarea.value.trim();
+      if (!newBody) return;
+      try {
+        const res = await fetch(replyMutationUrl(commentId, replyId, filePath), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ body: newBody })
+        });
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+      } catch (err) {
+        console.error('Error editing reply:', err);
+        showMiniToast('Failed to edit reply');
+        return;
+      }
+      userActedThisRound = true;
+      refreshAfterReplyChange(filePath);
+    });
+
+    bindSubmitCancelKeys(textarea, function() { saveBtn.click(); }, function() { cancelBtn.click(); });
+  }
+
+  async function deleteReply(commentId, replyId, filePath) {
+    try {
+      const res = await fetch(replyMutationUrl(commentId, replyId, filePath), {
+        method: 'DELETE'
+      });
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      userActedThisRound = true;
+    } catch (err) {
+      console.error('Error deleting reply:', err);
+    }
+    refreshAfterReplyChange(filePath);
+  }
+
+  // The selector skips the panel copy of the comment, which has no reply form.
+  function focusRebuiltReplyForm(commentId) {
+    requestAnimationFrame(function() {
+      const sel = '.comment-card[data-comment-id="' + commentId + '"] ';
+      const ta = document.querySelector(sel + '.reply-textarea');
+      if (ta) ta.focus();
+      const btns = document.querySelector(sel + '.reply-form-buttons');
+      if (btns) btns.scrollIntoView({ block: 'nearest' });
+    });
+  }
+
+  function createReplyInput(commentId, filePath) {
+    const form = document.createElement('div');
+    form.className = 'reply-form';
+
+    // Check if this comment is pending agent response
+    const isPending = pendingAgentRequests.has(commentId);
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.className = 'reply-input';
+    input.placeholder = isPending ? 'Waiting for @' + agentName + '\u2026' : 'Write a reply\u2026';
+    if (isPending) input.disabled = true;
+    form.appendChild(input);
+
+    // Expanded state elements (hidden initially)
+    const textarea = document.createElement('textarea');
+    textarea.className = 'reply-textarea';
+    textarea.placeholder = isPending ? 'Waiting for @' + agentName + '\u2026' : 'Write a reply\u2026';
+    textarea.rows = 3;
+    if (isPending) textarea.disabled = true;
+
+    const buttons = document.createElement('div');
+    buttons.className = 'reply-form-buttons';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'btn btn-sm';
+    cancelBtn.textContent = 'Cancel';
+    cancelBtn.disabled = !!isPending;
+
+    const submitBtn = document.createElement('button');
+    submitBtn.className = 'btn btn-sm btn-primary';
+    submitBtn.textContent = 'Reply';
+    submitBtn.disabled = !!isPending;
+
+    buttons.appendChild(cancelBtn);
+    buttons.appendChild(submitBtn);
+    // Always mounted; CSS hides the whole form when the card is collapsed.
+    form.appendChild(buttons);
+
+    attachFilePicker(textarea);
+    attachImageUploads(textarea);
+
+    function activeField() {
+      return form.classList.contains('expanded') ? textarea : input;
+    }
+
+    function expand() {
+      if (form.classList.contains('expanded')) return;
+      // Set before closing: closeEmptyForms re-renders the file and detaches
+      // the nodes below, and the rebuilt form restores from this.
+      activeReplyForms.set(commentId, { text: input.value, expanded: true });
+      closeEmptyReviewForm();
+      closeEmptyForms(null);
+      if (!form.isConnected) {
+        // We were replaced by the re-render; hand off to the fresh form.
+        focusRebuiltReplyForm(commentId);
+        return;
+      }
+      form.classList.add('expanded');
+      textarea.value = input.value;
+      input.replaceWith(textarea);
+      form.appendChild(buttons);
+      textarea.focus();
+      activeReplyForms.set(commentId, { text: textarea.value, expanded: true });
+      // The taller textarea can push the actions off screen, and focusing it
+      // does not bring them along.
+      buttons.scrollIntoView({ block: 'nearest' });
+    }
+
+    function collapse() {
+      textarea.value = '';
+      input.value = '';
+      activeReplyForms.delete(commentId);
+      if (!form.classList.contains('expanded')) return;
+      form.classList.remove('expanded');
+      textarea.replaceWith(input);
+    }
+
+    input.addEventListener('focus', expand);
+
+    // Keep reply form state in sync for surviving re-renders
+    textarea.addEventListener('input', function() {
+      activeReplyForms.set(commentId, { text: textarea.value, expanded: true });
+    });
+    input.addEventListener('input', function() {
+      activeReplyForms.set(commentId, { text: input.value, expanded: false });
+    });
+
+    cancelBtn.addEventListener('click', collapse);
+
+    // Collapse on blur if empty (with delay to allow button clicks)
+    textarea.addEventListener('blur', function() {
+      setTimeout(function() {
+        if (form.classList.contains('expanded') && !textarea.value.trim() && !form.contains(document.activeElement)) {
+          collapse();
+        }
+      }, 150);
+    });
+
+    submitBtn.addEventListener('click', async function() {
+      const body = activeField().value.trim();
+      if (!body) { activeField().focus(); return; }
+      submitBtn.disabled = true;
+      try {
+        const payload = { body: body };
+        if (configAuthor) payload.author = configAuthor;
+        const url = filePath
+          ? '/api/comment/' + commentId + '/replies?path=' + enc(filePath)
+          : '/api/review-comment/' + commentId + '/replies';
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+        userActedThisRound = true;
+
+        // Keep a live thread talking to the agent.
+        let comment = null;
+        if (filePath) {
+          const file = getFileByPath(filePath);
+          if (file && file.comments) {
+            comment = file.comments.find(function(c) { return c.id === commentId; });
+          }
+        } else {
+          comment = reviewComments.find(function(c) { return c.id === commentId; });
+        }
+        if (comment && (isLiveThread(comment) || pendingAgentRequests.has(commentId))) {
+          pendingAgentRequests.add(commentId);
+          fetch('/api/agent/request', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ comment_id: commentId, file_path: filePath }),
+          }).catch(function(err) {
+            console.error('Error sending reply to agent:', err);
+            pendingAgentRequests.delete(commentId);
+            showMiniToast('Failed to send to agent');
+          });
+        }
+
+        activeReplyForms.delete(commentId);
+        collapse();
+        refreshAfterReplyChange(filePath);
+      } catch (err) {
+        console.error('Failed to add reply:', err);
+        showMiniToast('Failed to save reply');
+        submitBtn.disabled = false;
+      }
+    });
+
+    textarea.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        e.stopPropagation();
+        submitBtn.click();
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!textarea.value.trim()) {
+          collapse();
+        }
+      }
+    });
+
+    // Restore saved reply form state after DOM re-render
+    const saved = activeReplyForms.get(commentId);
+    if (saved && (saved.text || saved.expanded)) {
+      if (saved.expanded) {
+        form.classList.add('expanded');
+        textarea.value = saved.text || '';
+        input.replaceWith(textarea);
+        form.appendChild(buttons);
+      } else {
+        input.value = saved.text || '';
+      }
+    }
+
+    return form;
+  }
+
+  function createResolvedElement(comment, filePath) {
+    const parts = buildCommentCard(comment, filePath, {
+      wrapperClass: 'comment-block',
+      cardClassExtra: 'resolved-card',
+      collapseDefault: true,
+      showLineRef: true,
+      showReplyInput: true,
+    });
+
+    const unresolveBtn = document.createElement('button');
+    unresolveBtn.className = 'resolve-btn resolve-btn--active';
+    unresolveBtn.title = 'Unresolve';
+    unresolveBtn.setAttribute('aria-label', 'Unresolve thread');
+    unresolveBtn.innerHTML = ICON_UNRESOLVE + '<span>Unresolve</span>';
+    unresolveBtn.addEventListener('click', function() {
+      if (unresolveBtn.disabled) return;
+      unresolveBtn.disabled = true;
+      toggleResolveStatus(comment.id, 'file', 'unresolve', filePath)
+        .finally(function() { unresolveBtn.disabled = false; });
+    });
+
+    const deleteBtn = document.createElement('button');
+    deleteBtn.className = 'delete-btn';
+    deleteBtn.title = 'Delete';
+    deleteBtn.innerHTML = ICON_DELETE;
+    deleteBtn.addEventListener('click', function() { deleteComment(comment.id, filePath); });
+
+    parts.actions.appendChild(unresolveBtn);
+    parts.actions.appendChild(deleteBtn);
+
+    return parts.wrapper;
+  }
+
+  // ===== Comment Count =====
+  function updateCommentCount() {
+    let unresolved = 0, resolved = 0;
+    for (const f of files) {
+      for (const c of f.comments) {
+        if (c.resolved) resolved++; else unresolved++;
+      }
+    }
+    for (const c of reviewComments) {
+      if (c.resolved) resolved++; else unresolved++;
+    }
+    const total = unresolved + resolved;
+    window.hunkyard.shared.updateCommentCountIndicator({ totalCount: total, openCount: unresolved });
+    renderCommentsPanel();
+    if (uiState === 'reviewing') {
+      const openTotal = unresolved + hiddenUnresolved;
+      const finishBtn = document.getElementById('finishBtn');
+      finishBtn.textContent = window.hunkyardReview ? 'Review changes' : openTotal === 0 ? 'Approve' : 'Finish Review';
+      window.hunkyard.shared.lockFinishBtnIfStopped(finishBtn);
+    }
+  }
+
+  function updateTocPosition() {
+    const toc = document.getElementById('toc');
+    const commentsPanel = document.getElementById('commentsPanel');
+    const prPanel = document.getElementById('prPanel');
+    if (!toc) return;
+    const commentsOpen = commentsPanel && !commentsPanel.classList.contains('comments-panel-hidden');
+    const prOpen = prPanel && !prPanel.classList.contains('pr-panel-hidden');
+    const tocBaseRight = 16;
+    let panelWidth = 0;
+    if (commentsOpen && commentsPanel) panelWidth = commentsPanel.offsetWidth;
+    if (prOpen && prPanel) panelWidth = prPanel.offsetWidth;
+    toc.style.right = panelWidth > 0 ? (panelWidth + tocBaseRight) + 'px' : '';
+  }
+
+  function toggleCommentsPanel() {
+    const panel = document.getElementById('commentsPanel');
+    const isHidden = panel.classList.contains('comments-panel-hidden');
+    setCommentsPanelCollapsed(!isHidden, true);
+    if (isHidden) {
+      // Close PR panel when opening comments
+      document.getElementById('prPanel').classList.add('pr-panel-hidden');
+      renderCommentsPanel();
+    }
+  }
+
+  function createPanelCommentCard(comment, filePath) {
+    // Build a real comment card for the panel, but without reply input/buttons
+    const isGeneral = !filePath;
+    const isResolved = comment.resolved;
+
+    const cardClassExtra = [
+      isResolved ? 'resolved-card' : '',
+      comment.carried_forward ? 'carried-forward' : '',
+    ].filter(Boolean).join(' ');
+
+    const parts = buildCommentCard(comment, filePath || '', {
+      wrapperClass: 'comment-block panel-comment-block',
+      cardClassExtra: cardClassExtra,
+      collapseDefault: isResolved,
+      showLineRef: !isGeneral,
+      repliesExtraClass: 'panel-replies',
+      showReplyInput: false,
+    });
+
+    // Resolve/unresolve button — works for both file and review comments
+    const scope = isGeneral ? 'review' : 'file';
+    const resolveAction = isResolved ? 'unresolve' : 'resolve';
+    const resolveBtn = document.createElement('button');
+    resolveBtn.className = 'resolve-btn' + (isResolved ? ' resolve-btn--active' : '');
+    resolveBtn.title = isResolved ? 'Unresolve' : 'Resolve';
+    resolveBtn.setAttribute('aria-label', isResolved ? 'Unresolve thread' : 'Resolve thread');
+    resolveBtn.innerHTML = (isResolved ? ICON_UNRESOLVE : ICON_RESOLVE) + '<span>' + (isResolved ? 'Unresolve' : 'Resolve') + '</span>';
+    resolveBtn.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (resolveBtn.disabled) return;
+      resolveBtn.disabled = true;
+      toggleResolveStatus(comment.id, scope, resolveAction, filePath || null)
+        .finally(function() { resolveBtn.disabled = false; });
+    });
+    parts.actions.appendChild(resolveBtn);
+
+    if (isGeneral) {
+      parts.wrapper.style.cursor = 'pointer';
+      parts.wrapper.addEventListener('click', function(e) {
+        if (e.target.closest('.comment-actions')) return;
+        scrollToReviewComment(comment.id);
+      });
+    } else {
+      // File comments are clickable to scroll to inline location
+      parts.wrapper.style.cursor = 'pointer';
+      parts.wrapper.addEventListener('click', function(e) {
+        // Don't scroll if clicking action buttons
+        if (e.target.closest('.comment-actions')) return;
+        scrollToComment(comment.id, filePath);
+      });
+    }
+
+    return parts.wrapper;
+  }
+
+  // Track active filter: 'all', 'open', 'resolved'. In-memory only —
+  // sticky filter would hide new open comments on a new review session.
+  let commentsActiveFilter = 'all';
+
+  function renderCommentsPanel() {
+    const panel = document.getElementById('commentsPanel');
+    if (panel.classList.contains('comments-panel-hidden')) return;
+
+    const body = document.getElementById('commentsPanelBody');
+    const savedScroll = body.scrollTop;
+    body.innerHTML = '';
+
+    // Compute counts
+    const allFileComments = files.reduce(function(acc, f) { return acc.concat(f.comments); }, []);
+    const allComments = reviewComments.concat(allFileComments);
+    const totalCount = allComments.length;
+    const openCount = allComments.filter(function(c) { return !c.resolved; }).length;
+    const resolvedCount = allComments.filter(function(c) { return c.resolved; }).length;
+
+    // Update count badge
+    const badge = document.getElementById('commentsPanelCountBadge');
+    if (badge) badge.textContent = totalCount;
+
+    // Update pill counts and sync active-state to persisted filter
+    const pillBtns = document.querySelectorAll('#commentsFilterPill .toggle-btn');
+    pillBtns.forEach(function(btn) {
+      const f = btn.dataset.filter;
+      const isActive = f === commentsActiveFilter;
+      btn.classList.toggle('active', isActive);
+      btn.setAttribute('aria-checked', isActive ? 'true' : 'false');
+      btn.setAttribute('tabindex', isActive ? '0' : '-1');
+      const countEl = btn.querySelector('.filter-count');
+      if (!countEl) return;
+      if (f === 'all') countEl.textContent = totalCount;
+      else if (f === 'open') countEl.textContent = openCount;
+      else if (f === 'resolved') countEl.textContent = resolvedCount;
+    });
+
+    // Filter function based on active pill
+    const visibleFilter = function(c) {
+      if (commentsActiveFilter === 'open') return !c.resolved;
+      if (commentsActiveFilter === 'resolved') return c.resolved;
+      return true;
+    };
+
+    let hasComments = false;
+
+    // Render review-level (general) comments first.
+    // Note: the compose/edit form is rendered in the inline Review Conversation
+    // section at the top of the document (see renderReviewConversation), not here.
+    // Cards in the panel are read-only mirrors that link back to the inline section.
+    const visibleReviewComments = reviewComments.filter(visibleFilter);
+    if (visibleReviewComments.length > 0) {
+      hasComments = true;
+      const group = document.createElement('div');
+      group.className = 'comments-panel-file-group';
+
+      group.appendChild(createFileGroupHeader('Review conversation', visibleReviewComments.length, group));
+
+      const cards = document.createElement('div');
+      cards.className = 'comments-panel-file-cards';
+      for (let j = 0; j < visibleReviewComments.length; j++) {
+        const comment = visibleReviewComments[j];
+        cards.appendChild(createPanelCommentCard(comment, null));
+      }
+      group.appendChild(cards);
+      body.appendChild(group);
+    }
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      const visibleComments = file.comments.filter(visibleFilter);
+      if (visibleComments.length === 0) continue;
+      hasComments = true;
+
+      visibleComments.sort(function(a, b) { return a.start_line - b.start_line; });
+
+      const group = document.createElement('div');
+      group.className = 'comments-panel-file-group';
+
+      // File name header (only in multi-file mode)
+      if (files.length > 1) {
+        group.appendChild(createFileGroupHeader(file.path, visibleComments.length, group));
+      }
+
+      const cards = document.createElement('div');
+      cards.className = 'comments-panel-file-cards';
+      for (let j = 0; j < visibleComments.length; j++) {
+        const comment = visibleComments[j];
+        cards.appendChild(createPanelCommentCard(comment, file.path));
+      }
+      group.appendChild(cards);
+      body.appendChild(group);
+    }
+
+    if (!hasComments && !reviewCommentFormActive) {
+      const empty = document.createElement('div');
+      empty.className = 'comments-panel-empty';
+      const emptyMsg = commentsActiveFilter === 'open' ? 'No open comments' : commentsActiveFilter === 'resolved' ? 'No resolved comments' : 'No comments yet';
+      empty.textContent = emptyMsg;
+      body.appendChild(empty);
+    }
+    body.scrollTop = savedScroll;
+    updateExpandAllLabel();
+  }
+
+  function createFileGroupHeader(label, count, groupEl) {
+    const groupName = document.createElement('div');
+    groupName.className = 'comments-panel-file-name';
+    groupName.setAttribute('role', 'button');
+    groupName.setAttribute('tabindex', '0');
+    groupName.setAttribute('aria-expanded', 'true');
+
+    const chevron = document.createElement('span');
+    chevron.className = 'comments-panel-file-chevron';
+    chevron.textContent = '\u25BC';
+    chevron.setAttribute('aria-hidden', 'true');
+    groupName.appendChild(chevron);
+
+    const nameText = document.createElement('span');
+    nameText.className = 'comments-panel-file-name-text';
+    nameText.textContent = label;
+    nameText.title = label;
+    groupName.appendChild(nameText);
+
+    const countEl = document.createElement('span');
+    countEl.className = 'comments-panel-file-count';
+    countEl.textContent = count;
+    groupName.appendChild(countEl);
+
+    groupName.addEventListener('click', function() {
+      groupEl.classList.toggle('collapsed');
+      const expanded = !groupEl.classList.contains('collapsed');
+      groupName.setAttribute('aria-expanded', String(expanded));
+    });
+
+    groupName.addEventListener('keydown', function(e) {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        groupName.click();
+      }
+    });
+
+    return groupName;
+  }
+
+  // All comment cards across the inline document/diff views and the side panel.
+  function getAllCommentCards() {
+    const panelCards = document.querySelectorAll('#commentsPanelBody .comment-card');
+    const inlineCards = document.querySelectorAll('.comment-block:not(.panel-comment-block) .comment-card');
+    return Array.from(panelCards).concat(Array.from(inlineCards));
+  }
+
+  function updateExpandAllLabel() {
+    const btn = document.getElementById('commentsPanelExpandAll');
+    if (!btn) return;
+    const allCards = getAllCommentCards();
+    const anyExpanded = allCards.some(function(c) { return !c.classList.contains('collapsed'); });
+    btn.textContent = anyExpanded ? 'Collapse all' : 'Expand all';
+    btn.setAttribute('aria-pressed', String(anyExpanded));
+  }
+
+  function toggleExpandAllComments() {
+    const allCards = getAllCommentCards();
+    const anyExpanded = allCards.some(function(c) { return !c.classList.contains('collapsed'); });
+
+    allCards.forEach(function(card) {
+      if (anyExpanded) {
+        card.classList.add('collapsed');
+      } else {
+        card.classList.remove('collapsed');
+      }
+      const id = card.dataset.commentId;
+      if (id) commentCollapseOverrides[id] = anyExpanded;
+    });
+
+    updateExpandAllLabel();
+  }
+
+
+  function flashCommentCard(commentCard) {
+    if (pierreView && pierreViewActive()) scrollPierreElementIntoView(commentCard);
+    else commentCard.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    commentCard.classList.remove('comment-card-highlight');
+    void commentCard.offsetWidth;
+    commentCard.classList.add('comment-card-highlight');
+    commentCard.addEventListener('animationend', function() {
+      commentCard.classList.remove('comment-card-highlight');
+    }, { once: true });
+  }
+
+  function scrollToComment(commentId, filePath) {
+    // Story view: the comment renders inside its owning chapter, not a
+    // file-section. Activate that chapter first (chapter-aware navigation),
+    // then locate + flash the card within the story pane on the next frame.
+    if (storyActive()) {
+      const file = getFileByPath(filePath);
+      let line = null;
+      let side;
+      let fileScope = false;
+      if (file && file.comments) {
+        const c = file.comments.find(function (x) { return x.id === commentId; });
+        if (c) {
+          fileScope = c.scope === 'file';
+          if (!fileScope) {
+            line = c.end_line;
+            side = c.side === 'old'
+              ? 'old'
+              : (c.side === undefined || c.side === null ? undefined : 'new');
+          }
+        }
+      }
+      const navigated = fileScope
+        ? storyActivatePageForFile(filePath)
+        : (line !== null ? storyActivatePageForLine(filePath, line, side) : false);
+      const locate = function () {
+        const pane = document.getElementById('storyPane');
+        if (!pane) return;
+        const card = pane.querySelector('.comment-card[data-comment-id="' + CSS.escape(commentId) + '"]');
+        if (card) flashCommentCard(card);
+      };
+      if (navigated) requestAnimationFrame(locate); else locate();
+      return;
+    }
+
+    if (pierreView && pierreViewActive()) pierreJumpToComment(commentId, filePath, flashCommentCard);
+  }
+
+  // ===== PR Overview Panel =====
+  function togglePRPanel() {
+    const panel = document.getElementById('prPanel');
+    const isHidden = panel.classList.contains('pr-panel-hidden');
+    panel.classList.toggle('pr-panel-hidden');
+    // Close comments panel if opening PR panel
+    if (isHidden) {
+      setCommentsPanelCollapsed(true, true);
+      renderPRPanel();
+    }
+    updateTocPosition();
+  }
+
+  function renderPRPanel() {
+    const panel = document.getElementById('prPanel');
+    if (panel.classList.contains('pr-panel-hidden')) return;
+    const pr = prData;
+    if (!pr) return;
+
+    const body = document.getElementById('prPanelBody');
+    body.innerHTML = '';
+
+    // PR title row with close button
+    const linkSection = document.createElement('div');
+    linkSection.className = 'pr-panel-link-section';
+
+    const prLink = document.createElement('a');
+    prLink.className = 'pr-panel-pr-link';
+    prLink.href = pr.pr_url;
+    prLink.target = '_blank';
+    prLink.rel = 'noopener noreferrer';
+    prLink.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M1.5 3.25a2.25 2.25 0 1 1 3 2.122v5.256a2.251 2.251 0 1 1-1.5 0V5.372A2.25 2.25 0 0 1 1.5 3.25Zm5.677-.177L9.573.677A.25.25 0 0 1 10 .854V2.5h1A2.5 2.5 0 0 1 13.5 5v5.628a2.251 2.251 0 1 1-1.5 0V5a1 1 0 0 0-1-1h-1v1.646a.25.25 0 0 1-.427.177L7.177 3.427a.25.25 0 0 1 0-.354ZM3.75 2.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm0 9.5a.75.75 0 1 0 0 1.5.75.75 0 0 0 0-1.5Zm8.25.75a.75.75 0 1 0 1.5 0 .75.75 0 0 0-1.5 0Z"/></svg>' +
+      '<span class="pr-panel-pr-title-text">' + escapeHtml(pr.pr_title || 'Pull Request') + ' <span class="pr-panel-pr-number">#' + pr.pr_number + '</span></span>';
+    linkSection.appendChild(prLink);
+
+    const closeBtn = document.createElement('button');
+    closeBtn.className = 'pr-panel-close';
+    closeBtn.title = 'Close';
+    closeBtn.setAttribute('aria-label', 'Close PR panel');
+    closeBtn.innerHTML = '&#x2715;';
+    closeBtn.addEventListener('click', function() {
+      document.getElementById('prPanel').classList.add('pr-panel-hidden');
+      updateTocPosition();
+    });
+    linkSection.appendChild(closeBtn);
+
+    body.appendChild(linkSection);
+
+    // State badge + meta
+    const metaSection = document.createElement('div');
+    metaSection.className = 'pr-panel-meta';
+
+    const stateLabel = (pr.pr_state || 'OPEN').toUpperCase();
+    let stateClass = 'pr-panel-state';
+    if (stateLabel === 'MERGED') stateClass += ' pr-panel-state-merged';
+    else if (stateLabel === 'CLOSED') stateClass += ' pr-panel-state-closed';
+    else stateClass += ' pr-panel-state-open';
+    if (pr.pr_is_draft) stateClass += ' pr-panel-state-draft';
+
+    const stateBadge = document.createElement('span');
+    stateBadge.className = stateClass;
+    stateBadge.textContent = pr.pr_is_draft ? 'Draft' : stateLabel.charAt(0) + stateLabel.slice(1).toLowerCase();
+    metaSection.appendChild(stateBadge);
+
+    if (pr.pr_author) {
+      const authorEl = document.createElement('span');
+      authorEl.className = 'pr-panel-author';
+      authorEl.textContent = pr.pr_author;
+      metaSection.appendChild(authorEl);
+    }
+
+    body.appendChild(metaSection);
+
+    // Branch info
+    if (pr.pr_head_ref && pr.pr_base_ref) {
+      const branchInfo = document.createElement('div');
+      branchInfo.className = 'pr-panel-branches';
+      branchInfo.innerHTML =
+        '<span class="pr-panel-branch">' + escapeHtml(pr.pr_head_ref) + '</span>' +
+        '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" class="pr-panel-arrow"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"/></svg>' +
+        '<span class="pr-panel-branch">' + escapeHtml(pr.pr_base_ref) + '</span>';
+      body.appendChild(branchInfo);
+    }
+
+    // Stats
+    const statsSection = document.createElement('div');
+    statsSection.className = 'pr-panel-stats';
+
+    if (pr.pr_changed_files !== undefined) {
+      const filesStat = document.createElement('span');
+      filesStat.className = 'pr-panel-stat';
+      filesStat.innerHTML = '<svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor"><path fill-rule="evenodd" d="M3.75 1.5a.25.25 0 0 0-.25.25v11.5c0 .138.112.25.25.25h8.5a.25.25 0 0 0 .25-.25V6H9.75A1.75 1.75 0 0 1 8 4.25V1.5H3.75zm5.75.56v2.19c0 .138.112.25.25.25h2.19L9.5 2.06zM2 1.75C2 .784 2.784 0 3.75 0h5.086c.464 0 .909.184 1.237.513l3.414 3.414c.329.328.513.773.513 1.237v8.086A1.75 1.75 0 0 1 12.25 15h-8.5A1.75 1.75 0 0 1 2 13.25V1.75z"/></svg>' +
+        pr.pr_changed_files + ' file' + (pr.pr_changed_files !== 1 ? 's' : '');
+      statsSection.appendChild(filesStat);
+    }
+
+    if (pr.pr_additions !== undefined || pr.pr_deletions !== undefined) {
+      const diffStat = document.createElement('span');
+      diffStat.className = 'pr-panel-stat';
+      diffStat.innerHTML =
+        '<span class="pr-panel-additions">+' + (pr.pr_additions || 0) + '</span>' +
+        '<span class="pr-panel-deletions">-' + (pr.pr_deletions || 0) + '</span>';
+      statsSection.appendChild(diffStat);
+    }
+
+    body.appendChild(statsSection);
+
+    // Description (PR body)
+    if (pr.pr_body && pr.pr_body.trim()) {
+      const descSection = document.createElement('div');
+      descSection.className = 'pr-panel-description';
+
+      const descTitle = document.createElement('div');
+      descTitle.className = 'pr-panel-section-title';
+      descTitle.textContent = 'Description';
+      descSection.appendChild(descTitle);
+
+      const descBody = document.createElement('div');
+      descBody.className = 'pr-panel-description-body';
+      descBody.innerHTML = commentMd.render(pr.pr_body);
+      linkifyCommentRefsInDom(descBody);
+      descSection.appendChild(descBody);
+
+      body.appendChild(descSection);
+    }
+  }
+
+  function updateViewedCount() {
+    let viewed = 0;
+    for (let i = 0; i < files.length; i++) {
+      if (files[i].viewed) viewed++;
+    }
+    document.getElementById('filesChangedTitle').textContent = session.mode === 'git' ? 'Files changed' : 'Files';
+    document.getElementById('filesChangedCount').textContent = files.length;
+    document.getElementById('reviewToolbar').hidden = session.mode !== 'git' && files.length === 1 && document.getElementById('diffModeToggle').style.display === 'none';
+    const el = document.getElementById('viewedCount');
+    if (files.length <= 1) { el.textContent = ''; return; }
+    el.textContent = viewed + ' / ' + files.length + ' files viewed';
+    el.classList.toggle('all-viewed', viewed === files.length);
+  }
+
+  // ===== UI State =====
+  function updateHeaderRound() {
+    const el = document.getElementById('headerNotify');
+    if (session.review_round > 1) {
+      el.textContent = 'Round #' + session.review_round;
+    }
+  }
+
+  function setUIState(state) {
+    uiState = state;
+    if (state === 'reviewing') {
+      waitingNotApproved = false;
+      // Leaving the waiting dialog ("Back to editing", backdrop click, a new
+      // round arriving) must kill any auto-close countdown — otherwise it
+      // keeps ticking behind the dismissed overlay and closes the tab.
+      window.hunkyard.shared.clearAutoCloseTimers();
+    }
+    const finishBtn = document.getElementById('finishBtn');
+    const waitingOverlay = document.getElementById('waitingOverlay');
+
+    switch (state) {
+      case 'reviewing':
+        let unresolvedComments = 0;
+        for (let fi = 0; fi < files.length; fi++) {
+          if (files[fi].comments) unresolvedComments += files[fi].comments.filter(function(c) { return !c.resolved; }).length;
+        }
+        unresolvedComments += reviewComments.filter(function(c) { return !c.resolved; }).length;
+        unresolvedComments += hiddenUnresolved;
+        finishBtn.textContent = window.hunkyardReview ? 'Review changes' : unresolvedComments === 0 ? 'Approve' : 'Finish Review';
+        if (!promptTrustConfig.project_prompts_untrusted) {
+          finishBtn.disabled = false;
+        }
+        finishBtn.classList.add('btn-primary');
+        document.getElementById('waitingEdits').textContent = '';
+        waitingOverlay.classList.remove('active');
+        window.hunkyard.shared.lockFinishBtnIfStopped(finishBtn);
+        break;
+      case 'waiting':
+        finishBtn.textContent = 'Waiting...';
+        finishBtn.disabled = true;
+        finishBtn.classList.remove('btn-primary');
+        window.hunkyard.shared.lockFinishBtnIfStopped(finishBtn);
+        document.getElementById('waitingEdits').textContent = '';
+        document.getElementById('promptCopyRow').style.display = '';
+        waitingOverlay.classList.add('active');
+        break;
+    }
+  }
+
+  // ===== General Comment Button (in panel header) =====
+
+  // ===== Finish Review =====
+  // The DOM/clipboard/animation logic lives in hunkyard.shared.runFinishReview;
+  // this thin wrapper preserves the app.js-specific waitingNotApproved flag
+  // and uiState transition (live-mode wires its own state machine).
+  function canSubmitReview() {
+    const draft = activeForms.find(function (form) { const textarea = formTextarea(form.formKey); return (textarea ? textarea.value : form.draftBody || '').trim(); });
+    const reviewDraft = document.querySelector('#reviewConversation .comment-form textarea');
+    const replyDraft = Array.from(activeReplyForms.values()).some(function (form) { return (form.text || '').trim(); });
+    if (!draft && !replyDraft && !(reviewDraft && reviewDraft.value.trim())) return true;
+    showMiniToast('Save or cancel your draft comment before submitting the review.');
+    const textarea = draft ? formTextarea(draft.formKey) : reviewDraft || document.querySelector('.comment-form textarea');
+    if (textarea) textarea.focus();
+    return false;
+  }
+
+  async function doFinishReview() {
+    if (!canSubmitReview()) return null;
+    return await window.hunkyard.shared.runFinishReview({
+      publicationKey: function () {
+        return {
+          displayed_files: files.filter(function (file) { return !file.lazy && !file.orphaned; }).map(function (file) { return { path: file.path, content_id: file.fileHash, view_id: file.viewID }; }),
+          comments: files.map(function (file) { return [file.path, file.comments]; }).concat([reviewComments]),
+        };
+      },
+      checkConsent: function () {
+        return window.hunkyard.shared.ensureProjectPromptTrust(promptTrustConfig).then(function (ok) {
+          if (ok) {
+            window.hunkyard.shared.applyProjectPromptTrustUI(promptTrustConfig, document.getElementById('finishBtn'));
+            if (uiState === 'reviewing') setUIState('reviewing');
+          }
+          return ok;
+        });
+      },
+      onApproved: function () { waitingNotApproved = false; setUIState('waiting'); },
+      onWaiting: function () { waitingNotApproved = true; setUIState('waiting'); },
+      onError: function (err) {
+        console.error('Error finishing review:', err);
+        showMiniToast(err.message || 'Failed to finish review');
+      },
+    });
+  }
+
+  async function resolveAllAndFinish() {
+    // Resolve all unresolved file comments
+    for (let fi = 0; fi < files.length; fi++) {
+      const fileComments = files[fi].comments || [];
+      for (let ci = 0; ci < fileComments.length; ci++) {
+        if (!fileComments[ci].resolved) {
+          try {
+            await fetch('/api/comment/' + fileComments[ci].id + '/resolve?path=' + enc(files[fi].path), {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ resolved: true }),
+            });
+          } catch {}
+        }
+      }
+    }
+    // Resolve all unresolved review comments
+    for (let ri = 0; ri < reviewComments.length; ri++) {
+      if (!reviewComments[ri].resolved) {
+        try {
+          await fetch('/api/review-comment/' + reviewComments[ri].id + '/resolve', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ resolved: true }),
+          });
+        } catch {}
+      }
+    }
+    await doFinishReview();
+  }
+
+  function showNoChangesConfirm() {
+    document.getElementById('noChangesOverlay').classList.add('active');
+  }
+
+  function hideNoChangesConfirm() {
+    document.getElementById('noChangesOverlay').classList.remove('active');
+  }
+
+  document.getElementById('noChangesResolveAll').addEventListener('click', async function() {
+    hideNoChangesConfirm();
+    await resolveAllAndFinish();
+  });
+
+  document.getElementById('noChangesSendAnyway').addEventListener('click', async function() {
+    hideNoChangesConfirm();
+    await doFinishReview();
+  });
+
+  document.getElementById('noChangesGoBack').addEventListener('click', function() {
+    hideNoChangesConfirm();
+  });
+
+  document.getElementById('finishBtn').addEventListener('click', async function() {
+    if (uiState !== 'reviewing') return;
+    if (!canSubmitReview()) return;
+
+    // Check if user took no action but there are unresolved comments.
+    // Only warn when ALL unresolved comments are carried-forward (from a previous round)
+    // and the user hasn't added, edited, resolved, or replied to anything this round.
+    let unresolvedCount = 0;
+    let hasNewComments = false;
+    for (let fi = 0; fi < files.length; fi++) {
+      if (!files[fi].comments) continue;
+      for (let ci = 0; ci < files[fi].comments.length; ci++) {
+        const c = files[fi].comments[ci];
+        if (!c.resolved) unresolvedCount++;
+        if (!c.carried_forward) hasNewComments = true;
+      }
+    }
+    for (let ri = 0; ri < reviewComments.length; ri++) {
+      if (!reviewComments[ri].resolved) unresolvedCount++;
+      if (!reviewComments[ri].carried_forward) hasNewComments = true;
+    }
+
+    if (!userActedThisRound && !hasNewComments && unresolvedCount > 0) {
+      showNoChangesConfirm();
+      return;
+    }
+
+    await doFinishReview();
+  });
+
+  document.getElementById('backToEditing').addEventListener('click', function() {
+    setUIState('reviewing');
+  });
+
+  document.getElementById('waitingOverlay').addEventListener('click', function(e) {
+    if (e.target === this) setUIState('reviewing');
+  });
+
+  document.getElementById('waitingClipboard').addEventListener('click', async function() {
+    const prompt = document.getElementById('waitingPrompt').textContent;
+    try {
+      await navigator.clipboard.writeText(prompt);
+      const el = document.getElementById('waitingClipboard');
+      const label = el.querySelector('.copy-label');
+      label.textContent = 'Copied';
+      el.classList.add('copied');
+      el.setAttribute('aria-label', 'Copied');
+      announceCopy();
+      setTimeout(function() {
+        label.textContent = 'Copy';
+        el.classList.remove('copied');
+        el.setAttribute('aria-label', 'Copy prompt to clipboard');
+      }, 2000);
+    } catch {}
+  });
+
+  // ===== SSE Client =====
+
+  function connectSSE() {
+    let sseErrorCount = 0;
+
+    const conn = window.hunkyard.sse.createSSE('/api/events', {
+      'preferences-updated': function (event) {
+        const status = document.getElementById('preferenceStatus');
+        if (status) status.textContent = event.content || '';
+      },
+      'file-changed': async function() {
+      try {
+        // Reset action tracking for new round
+        userActedThisRound = false;
+
+        // Capture per-file user state before rebuilding
+        const prevState = {};
+        for (let pi = 0; pi < files.length; pi++) {
+          prevState[files[pi].path] = {
+            viewMode: files[pi].viewMode,
+            collapsed: files[pi].collapsed,
+            viewed: files[pi].viewed,
+            fileHash: files[pi].fileHash,
+          };
+        }
+
+        // Clear commit filter on round-complete
+        clearCommitPins();
+
+        // Re-fetch everything on file-changed (round complete)
+        let sessionRes = await hydrateStoryIfMissing(await fetchWhenReady('/api/session?scope=' + enc(currentSessionFetchScope())));
+        sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
+        session = sessionRes;
+        reviewComments = sessionRes.review_comments || [];
+
+        // Reload all files
+        files = await loadAllFileData(session.files || [], currentFileDataScope());
+        hiddenUnresolved = session.hidden_unresolved || 0;
+
+        // Restore per-file user state from previous round
+        for (let fi = 0; fi < files.length; fi++) {
+          const prev = prevState[files[fi].path];
+          if (prev) {
+            const contentChanged = prev.fileHash && files[fi].fileHash && prev.fileHash !== files[fi].fileHash;
+            // Rendered needs base content; a loaded file without it falls
+            // back to Document. Lazy files are checked once they load. A
+            // renderer's view needs a renderer that still applies (the file
+            // may have been deleted); without one the mode default applies.
+            if (prev.viewMode === 'rendered-diff' && !files[fi].lazy && !hasRenderedDiff(files[fi])) {
+              files[fi].viewMode = 'document';
+            } else if (prev.viewMode === 'rendered' && !fileRendererFor(files[fi])) {
+              files[fi].viewMode = session.mode === 'git' ? 'diff' : 'document';
+            } else {
+              files[fi].viewMode = prev.viewMode;
+            }
+            // Lazy files must stay collapsed — they have no content to render
+            if (!files[fi].lazy && !contentChanged) files[fi].collapsed = prev.collapsed;
+            if (prev.viewed && !contentChanged) files[fi].viewed = true;
+          }
+        }
+
+        await Promise.all(files.map(function(f) {
+          return f.viewMode === 'rendered-diff' && !f.lazy ? ensurePreviousLineBlocks(f) : null;
+        }));
+
+        files.sort(fileSortComparator);
+
+        activeForms = [];
+        activeReplyForms.clear();
+        activeFilePath = null;
+        selectionStart = null;
+        selectionEnd = null;
+        focusedBlockIndex = null;
+        focusedFilePath = null;
+        focusedElement = null;
+        clearPierreFocus();
+        diffActive = false;
+        reviewCommentFormActive = false;
+        reviewCommentEditingId = null;
+        navCommentId = null;
+
+        saveViewedState();
+        updateHeaderRound();
+        updateDiffModeToggle();
+        renderFileTree();
+        renderAllFiles();
+        buildToc();
+        updateCommentCount();
+        updateViewedCount();
+        updateTreeViewedState();
+        // Re-render the story layer against the fresh file data (or tear it
+        // down if the round dropped the story). Preserves position when the
+        // current chapter still exists (storyFromHash re-reads the hash).
+        applyStoryPresence();
+        setUIState('reviewing');
+        // Signal "ready" in the tab bar if the user has tabbed away.
+        // Cleared on visibilitychange → visible.
+        if (document.visibilityState !== 'visible') notifyRoundReady();
+      } catch (err) {
+        console.error('Error handling file-changed:', err);
+      }
+      },
+      'edit-detected': function(data) {
+      try {
+        const count = parseInt(data.content, 10);
+        const el = document.getElementById('waitingEdits');
+        if (el && uiState === 'waiting') {
+          el.innerHTML = '<span class="waiting-edits-badge"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="11" width="18" height="10" rx="2"/><circle cx="12" cy="5" r="2"/><line x1="12" y1="7" x2="12" y2="11"/><line x1="8" y1="16" x2="8" y2="16"/><line x1="16" y1="16" x2="16" y2="16"/></svg>' + count + ' edit' + (count === 1 ? '' : 's') + '</span>';
+          // Hide prompt copy row and divider once agent starts making edits
+          const copyRow = document.getElementById('promptCopyRow');
+          if (copyRow) copyRow.style.display = 'none';
+          if (waitingNotApproved) {
+            document.getElementById('waitingMessage').textContent = 'Waiting for your agent to finish...';
+          }
+        }
+      } catch {}
+      },
+      'comments-changed': async function() {
+      try {
+        // Only re-fetch comments data, not file content or diffs (those only
+        // change on file-changed events), in one request for all files.
+        const previousCommentSignatures = new Map();
+        for (let i = 0; i < files.length; i++) {
+          previousCommentSignatures.set(files[i].path, JSON.stringify(files[i].comments || []));
+        }
+        const previousReviewSignature = JSON.stringify(reviewComments || []);
+        applyAllFileComments(await fetchAllFileComments());
+        // Also refresh review-level comments
+        try {
+          const rcRes = await fetch('/api/comments');
+          if (rcRes.ok) reviewComments = await rcRes.json();
+        } catch {}
+        // Save form drafts and focused element before re-render
+        let focusedFormKey = null;
+        let focusedReplyCommentId = null;
+        let focusedSelStart = 0;
+        let focusedSelEnd = 0;
+        const activeEl = document.activeElement;
+        if (activeEl && activeEl.tagName === 'TEXTAREA') {
+          const formEl = activeEl.closest('.comment-form');
+          // A reply draft lives in .reply-form, outside any .comment-form, so it is keyed by its comment card.
+          const replyCard = activeEl.classList.contains('reply-textarea') ? activeEl.closest('.comment-card') : null;
+          if (formEl) {
+            focusedFormKey = formEl.dataset.formKey;
+          } else if (replyCard && replyCard.dataset.commentId) {
+            focusedReplyCommentId = replyCard.dataset.commentId;
+          }
+          focusedSelStart = activeEl.selectionStart;
+          focusedSelEnd = activeEl.selectionEnd;
+        }
+        for (let i = 0; i < files.length; i++) {
+          checkAgentReplies(files[i].comments);
+          saveOpenFormContent(files[i].path);
+        }
+        checkAgentReplies(reviewComments);
+        // Re-render only the files whose comments actually changed.
+        const inStory = storyActive();
+        for (let i = 0; i < files.length; i++) {
+          const before = previousCommentSignatures.get(files[i].path) || '[]';
+          const after = JSON.stringify(files[i].comments || []);
+          if (before === after) continue;
+          if (inStory) renderStoryFileByPath(files[i].path);
+          else renderFileByPath(files[i].path);
+        }
+        if (!inStory && JSON.stringify(reviewComments || []) !== previousReviewSignature) {
+          renderReviewConversation();
+        }
+        updateCommentCount();
+        updateTreeCommentBadges();
+        renderCommentsPanel();
+        // Restore focus. Without it, keys typed after the re-render land on the page and fire
+        // single-key shortcuts (d deletes a comment, Shift+F finishes the review).
+        let focusTarget = null;
+        if (focusedFormKey) {
+          focusTarget = document.querySelector('.comment-form[data-form-key="' + focusedFormKey + '"] textarea');
+        } else if (focusedReplyCommentId) {
+          focusTarget = document.querySelector('.comment-card[data-comment-id="' + focusedReplyCommentId + '"] .reply-textarea');
+        }
+        if (focusTarget) {
+          focusTarget.focus();
+          focusTarget.selectionStart = focusedSelStart;
+          focusTarget.selectionEnd = focusedSelEnd;
+        }
+      } catch (err) {
+        console.error('Error handling comments-changed:', err);
+      }
+      },
+      'base-changed': function() {
+      reloadForScope();
+      fetchCommits();
+      },
+      'focus-changed': function(data) {
+      try {
+        // Server SSE wraps every event in {type, filename, content} where
+        // `content` is a JSON string carrying the actual payload. Parse the
+        // SSE envelope first, then the inner content for the focus object.
+        const envelope = data || {};
+        const inner = envelope.content ? JSON.parse(envelope.content) : envelope;
+        const focus = inner && inner.focus;
+        if (focus) {
+          if (session) {
+            session.focus = focus;
+            // last_range_focus may flip on every focus transition (server
+            // stashes the old range when leaving range mode). Mirror the
+            // server snapshot so renderResumePill sees the latest value.
+            session.last_range_focus = inner.last_range_focus || null;
+          }
+          if (focus.kind === 'range') {
+            diffScope = 'all';
+          } else {
+            restoreWorkingTreeDiffScope();
+          }
+          applyFocusToHeader(focus);
+          // Re-fetch the stack on any range focus transition — the new
+          // focus may live in a different stack, and the breadcrumb's
+          // visibility uses stack.length (not is_stacked) so we need the
+          // server's view either way. Cheap (cached server-side for 60s).
+          if (session && session.mode === 'git' && focus.kind === 'range') {
+            loadStackFromPicker();
+          }
+        }
+      } catch (err) {
+        console.error('focus-changed parse:', err);
+      }
+      // Reuse the same refresh path as base-changed.
+      reloadForScope();
+      fetchCommits();
+      },
+      'story-updated': function(data) {
+      try {
+        // Envelope: {type, filename, content} where content is JSON {story:...}.
+        const envelope = data || {};
+        const inner = envelope.content ? JSON.parse(envelope.content) : envelope;
+        const nextStory = (inner && 'story' in inner) ? inner.story : null;
+        if (session) session.story = nextStory;
+        // A fresh ingest must always surface the story view — clear any prior
+        // "Hide story view" state. (A null story clears storyHidden inside
+        // applyStoryPresence via the no-story branch.)
+        if (nextStory) {
+          storyCleared = false;
+          storyHidden = false;
+          storyExpandedFileCache.clear();
+          reloadForScope();
+        } else {
+          storyCleared = true;
+          storyHidden = false;
+          storyExpandedFileCache.clear();
+          reloadForScope();
+        }
+      } catch (err) {
+        console.error('story-updated parse:', err);
+      }
+      },
+      'server-shutdown': function() {
+      conn.close();
+      showDisconnected();
+      },
+    }, {
+      onError: function() {
+        sseErrorCount++;
+        if (sseErrorCount >= 3) {
+          showMiniToast('Connection lost \u2014 retrying\u2026');
+        }
+      },
+    });
+
+    // Reset error count on successful events by wrapping source listeners
+    conn.source.addEventListener('message', function() { sseErrorCount = 0; });
+    conn.source.addEventListener('file-changed', function() { sseErrorCount = 0; });
+    conn.source.addEventListener('comments-changed', function() { sseErrorCount = 0; });
+    conn.source.addEventListener('base-changed', function() { sseErrorCount = 0; });
+  }
+
+  function showDisconnected() {
+    window.hunkyard.shared.showDisconnected();
+  }
+
+  // Announce copy action to screen readers via live region. Used by the
+  // finish-review copy flow and the settings overlay.
+  function announceCopy() {
+    const el = document.getElementById('copyStatus');
+    if (el) { el.textContent = ''; el.textContent = 'Copied to clipboard'; }
+  }
+
+  // ===== Table of Contents =====
+  function buildToc() {
+    const tocEl = document.getElementById('toc');
+    const listEl = tocEl.querySelector('.toc-list');
+    const toggleBtn = document.getElementById('tocToggle');
+    listEl.innerHTML = '';
+
+    function hideToc() {
+      toggleBtn.style.display = 'none';
+      tocEl.classList.add('toc-hidden');
+    }
+
+    // TOC only for single-file markdown reviews
+    if (session.mode === 'git' || files.length > 1) {
+      hideToc();
+      return;
+    }
+
+    // Gather TOC from all markdown files
+    const allItems = [];
+    for (const f of files) {
+      if (f.tocItems && f.tocItems.length > 0) {
+        for (const item of f.tocItems) {
+          allItems.push({ ...item, filePath: f.path });
+        }
+      }
+    }
+
+    // A single-heading TOC has nothing to navigate to — hide it.
+    if (allItems.length < 2) {
+      hideToc();
+      return;
+    }
+    toggleBtn.style.display = '';
+
+    // Restore TOC open/closed state from cookie
+    if (getSetting('toc', 'closed') === 'open') {
+      tocEl.classList.remove('toc-hidden');
+    }
+
+    const minLevel = Math.min(...allItems.map(i => i.level));
+    for (const item of allItems) {
+      const li = document.createElement('li');
+      const a = document.createElement('a');
+      a.href = '#';
+      a.textContent = item.text;
+      a.dataset.startLine = item.startLine;
+      a.dataset.filePath = item.filePath;
+      a.style.paddingLeft = (12 + (item.level - minLevel) * 10) + 'px';
+      a.addEventListener('click', function(e) {
+        e.preventDefault();
+        // Uncollapse the file section first
+        const sectionEl = document.getElementById('file-section-' + item.filePath);
+        if (sectionEl) {
+          const file = getFileByPath(item.filePath);
+          if (file) file.collapsed = false;
+          sectionEl.open = true;
+        }
+        // Find the line block matching this heading's start line
+        const target = sectionEl && sectionEl.querySelector('.line-block[data-start-line="' + item.startLine + '"]');
+        if (target) {
+          scrollReviewToElement(target, 8, 'smooth');
+        } else {
+          scrollToFile(item.filePath);
+        }
+      });
+      li.appendChild(a);
+      listEl.appendChild(li);
+    }
+
+    // Scrollspy: highlight current heading in TOC
+    setupTocScrollspy(allItems);
+  }
+
+  // The review list scrolls inside Pierre's container (#filesContainer) when
+  // the Pierre view is active, otherwise with the window (story pane).
+  function reviewScroller() {
+    return pierreView && pierreViewActive() ? document.getElementById('filesContainer') : window;
+  }
+
+  // Top edge (viewport px) that scrolled content disappears under.
+  function reviewScrollerTop() {
+    const scroller = reviewScroller();
+    if (scroller !== window) return scroller.getBoundingClientRect().top;
+    return document.querySelector('.header')?.offsetHeight || 49;
+  }
+
+  // Scroll the review list so `el` sits `offset` px below its top edge.
+  function scrollReviewToElement(el, offset, behavior) {
+    const scroller = reviewScroller();
+    const delta = el.getBoundingClientRect().top - reviewScrollerTop() - offset;
+    if (scroller === window) window.scrollTo({ top: window.scrollY + delta, behavior: behavior });
+    else scroller.scrollTo({ top: scroller.scrollTop + delta, behavior: behavior });
+  }
+
+  let tocScrollHandler = null;
+  let tocScrollTarget = null;
+  function setupTocScrollspy(items) {
+    if (tocScrollHandler) {
+      tocScrollTarget.removeEventListener('scroll', tocScrollHandler);
+      tocScrollHandler = null;
+    }
+    if (!items || items.length === 0) return;
+
+    tocScrollHandler = function() {
+      const headerHeight = reviewScrollerTop() + 16;
+      let activeItem = null;
+
+      for (const item of items) {
+        const sectionEl = document.getElementById('file-section-' + item.filePath);
+        const block = sectionEl && sectionEl.querySelector('.line-block[data-start-line="' + item.startLine + '"]');
+        if (!block) continue;
+        const rect = block.getBoundingClientRect();
+        if (rect.top <= headerHeight) {
+          activeItem = item;
+        }
+      }
+
+      const tocLinks = document.querySelectorAll('.toc-list a');
+      for (const link of tocLinks) {
+        const isActive = activeItem &&
+          link.dataset.startLine === String(activeItem.startLine) &&
+          link.dataset.filePath === activeItem.filePath;
+        link.classList.toggle('toc-active', !!isActive);
+      }
+    };
+
+    tocScrollTarget = reviewScroller();
+    tocScrollTarget.addEventListener('scroll', tocScrollHandler, { passive: true });
+    tocScrollHandler();
+  }
+
+  // ===== Hash Navigation (heading anchors) =====
+  function scrollToHashHeading() {
+    const hash = window.location.hash;
+    if (!hash || hash === '#') return;
+    const target = document.getElementById(decodeURIComponent(hash.slice(1)));
+    if (!target) return;
+    scrollReviewToElement(target, 8, 'instant');
+  }
+  window.addEventListener('hashchange', scrollToHashHeading);
+
+  document.addEventListener('click', function(e) {
+    const anchor = e.target.closest('.heading-anchor');
+    if (!anchor) return;
+    e.preventDefault();
+    const hash = anchor.getAttribute('href');
+    const url = anchor.href;
+    history.replaceState(null, '', hash);
+    scrollToHashHeading();
+    navigator.clipboard.writeText(url).then(function() {
+      anchor.classList.add('heading-anchor-copied');
+      setTimeout(function() { anchor.classList.remove('heading-anchor-copied'); }, 1500);
+    }).catch(function() { return; });
+  });
+
+  // Fenced code outside rendered documents (comment cards, replies, the
+  // comments panel, PR description, story text) renders plain and is
+  // highlighted once its grammar has loaded. One observer covers every place
+  // such markdown is inserted; each block is upgraded once.
+  // Also renders math placeholders (comments, and documents whose KaTeX load
+  // failed at build time) as they mount.
+  function watchCodeBlocks() {
+    const upgrade = window.hunkyard.codeHighlight.upgrade;
+    const upgradeMath = window.hunkyard.math.upgrade;
+    window.hunkyard.codeHighlight.configure({ pool: pierreWorkerPoolReady });
+    upgrade(document.body);
+    upgradeMath(document.body);
+    new MutationObserver(function(records) {
+      for (let i = 0; i < records.length; i++) {
+        const added = records[i].addedNodes;
+        for (let j = 0; j < added.length; j++) {
+          if (added[j].nodeType !== 1) continue;
+          upgrade(added[j].matches('pre') ? added[j].parentNode : added[j]);
+          upgradeMath(added[j]);
+        }
+      }
+    }).observe(document.body, { childList: true, subtree: true });
+  }
+
+  // ===== Pluggable renderers =====
+  // A click on a rendered diagram part that its renderer maps to source lines
+  // opens a comment on those lines. Before-side blocks of a rendered diff are
+  // the old content, so only the current document reacts.
+  function installRenderAnchorComments() {
+    document.addEventListener('hunkyard:render-anchor', function(e) {
+      const d = e.detail || {};
+      const lineBlock = e.target.closest('.document-wrapper .line-block');
+      if (!lineBlock || !d.path || !getFileByPath(d.path)) return;
+      openForm({
+        filePath: d.path,
+        afterBlockIndex: parseInt(lineBlock.dataset.blockIndex, 10),
+        startLine: d.startLine,
+        endLine: d.endLine,
+        editingId: null,
+        quote: d.quote || null,
+        quoteOffset: null,
+      });
+    });
+  }
+
+  // Render every fence/file target a renderer claims (hunkyard-renderers.js).
+  // Any document rebuild invalidates the detached fullscreen clone — close it
+  // rather than show a stale diagram.
+  function renderPluggableBlocks() {
+    window.hunkyard.diagramOverlay.close();
+    window.hunkyard.renderers.renderAll(document);
+  }
+
+  // ===== Theme =====
+  function initTheme() {
+    const saved = getSetting('theme', 'system');
+    applyTheme(saved);
+    window.matchMedia('(prefers-color-scheme: light)').addEventListener('change', function() {
+      if (getSetting('theme', 'system') === 'system') window.applyTheme('system');
+    });
+  }
+
+  function applyHunkyardPalette() {
+    window.hunkyard.themePalette.applySaved();
+  }
+
+  window.applyTheme = function(choice) {
+    setSetting('theme', choice);
+    if (choice === 'light') document.documentElement.setAttribute('data-theme', 'light');
+    else if (choice === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    else document.documentElement.removeAttribute('data-theme');
+    applyHunkyardPalette();
+    if (pierreView) pierreView.setThemeType(window.hunkyard.pierreAdapter.themeTypeFor(choice));
+    if (storyActive() && window.PierreDiffs) renderStory();
+
+    // The fullscreen clone keeps the old theme's colors — close it, then
+    // re-render diagrams in the new theme.
+    window.hunkyard.diagramOverlay.close();
+    window.hunkyard.renderers.rerenderAll(document);
+  };
+
+  // ===== Width =====
+  function initWidth() {
+    const saved = getSetting('width', 'default');
+    applyWidth(saved);
+  }
+
+  function applyWidth(choice) {
+    setSetting('width', choice);
+    if (choice === 'compact') document.documentElement.setAttribute('data-width', 'compact');
+    else if (choice === 'wide') document.documentElement.setAttribute('data-width', 'wide');
+    else document.documentElement.setAttribute('data-width', 'default');
+  }
+
+  // ===== Sidebar Resize =====
+  // File-tree and comments-panel widths are user-resizable via drag handles.
+  // Persisted as numeric pixels in the consolidated `hunkyard-settings` cookie;
+  // absent = use the CSS default.
+  // Only a minimum is enforced (keeps the handle reachable and the panel usable).
+  // No upper bound — ultrawide users may legitimately want very wide sidebars,
+  // and overflow just adds a horizontal scrollbar.
+  const SIDEBAR_RESIZE = [
+    { handleId: 'fileTreeResizer',     targetId: 'fileTreePanel',  settingKey: 'fileTreeWidth',     min: 180, edge: 'right' },
+    { handleId: 'storyRailResizer',    targetId: 'storyRail',      settingKey: 'storyRailWidth',    min: 180, edge: 'right' },
+    { handleId: 'commentsPanelResizer', targetId: 'commentsPanel', settingKey: 'commentsPanelWidth', min: 300, edge: 'left'  },
+  ];
+
+  function initSidebarWidths() {
+    SIDEBAR_RESIZE.forEach(function(cfg) {
+      const target = document.getElementById(cfg.targetId);
+      if (!target) return;
+      const handle = document.getElementById(cfg.handleId);
+      if (!handle) return;
+      // Pointer capture, body.sidebar-resizing class, persistence, min clamp,
+      // and keyboard a11y all live in the shared helper. Both code-review
+      // handles (file-tree, comments-panel) and live-mode's comments-panel
+      // share the implementation so cursor-locking and keyboard nudge stay
+      // in lockstep across modes.
+      window.hunkyard.shared.installSidebarResize(handle, target, {
+        settingKey: cfg.settingKey,
+        min: cfg.min,
+        edge: cfg.edge,
+      });
+    });
+  }
+
+  // ===== Update Button =====
+  document.getElementById('updateBtn').addEventListener('click', function() {
+    openSettingsPanel('updates');
+  });
+
+  // ===== Diff Mode Toggle (Split / Unified) =====
+  document.querySelectorAll('#diffModeToggle .toggle-btn').forEach(function(btn) {
+    btn.addEventListener('click', function() {
+      const mode = btn.dataset.mode;
+      if (mode === diffMode) return;
+      diffMode = mode;
+      setSetting('diffMode', mode);
+      document.querySelectorAll('#diffModeToggle .toggle-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.mode === mode);
+      });
+      if (storyActive()) renderStory(); else renderAllFiles();
+    });
+  });
+
+  // ===== Toggle Diff (rendered diff view for file mode) =====
+  document.getElementById('diffToggle').addEventListener('click', function() {
+    diffActive = !diffActive;
+    updateDiffModeToggle();
+    renderAllFiles();
+  });
+
+  // ===== Compare chrome (target + commit range) =====
+  const commitDropdownEl = document.getElementById('commitDropdown');
+  const baseBranchPickerEl = document.getElementById('baseBranchPicker');
+  const baseBranchBtnEl = document.getElementById('baseBranchBtn');
+  const compareTargetTabsEl = document.getElementById('compareTargetTabs');
+  const compareTargetUseCustomEl = document.getElementById('compareTargetUseCustom');
+  const commitClearThroughEl = document.getElementById('commitClearThrough');
+
+  let compareTargets = { vcs: 'git', detected: '', local: [], remote: [] };
+  let compareTargetTab = 'refs';
+  let currentCompareTarget = '';
+  const compareTargetPicker = { highlightedIdx: -1 };
+  let compareTargetsFetchGen = 0;
+  let commitsFetchGen = 0;
+  let compareCommitList = [];
+  let compareCommitsFetchGen = 0;
+
+  function sessionInRangeFocus() {
+    return !!(session && session.focus && session.focus.kind === 'range');
+  }
+
+  // Scope passed to /api/file and /api/file/diff. Working-tree scopes are
+  // meaningless in range (PR) focus — the file list and hunks are pinned to
+  // BaseSHA..HeadSHA server-side.
+  function effectiveDiffScope() {
+    return sessionInRangeFocus() ? 'all' : diffScope;
+  }
+
+  function sessionFocusIsRange(s) {
+    return !!(s && s.focus && s.focus.kind === 'range');
+  }
+
+  function currentFileDataScope() {
+    return storyNeedsRawDiff() ? 'all' : effectiveDiffScope();
+  }
+
+  function currentSessionFetchScope() {
+    return storyNeedsRawDiff() ? 'all' : effectiveDiffScope();
+  }
+
+  function restoreWorkingTreeDiffScope() {
+    if (!session || session.mode !== 'git' || sessionInRangeFocus()) return;
+    const scopes = session.available_scopes || ['all', 'staged', 'unstaged'];
+    const saved = getSetting('diffScope');
+    if (saved && scopes.indexOf(saved) !== -1) {
+      diffScope = saved;
+    } else if (scopes.indexOf(diffScope) === -1) {
+      diffScope = 'all';
+    }
+    const scopeToggle = document.getElementById('scopeToggle');
+    if (scopeToggle) {
+      scopeToggle.querySelectorAll('.toggle-btn').forEach(function(b) {
+        b.classList.toggle('active', b.dataset.scope === diffScope);
+      });
+    }
+  }
+
+  function compareTargetChromeVisible() {
+    if (!session || session.mode !== 'git') return false;
+    if (sessionInRangeFocus()) return false;
+    return diffScope === 'all' || diffScope === 'branch';
+  }
+
+  function commitRangeChromeVisible() {
+    if (!session || session.mode !== 'git') return false;
+    if (sessionInRangeFocus()) return false;
+    if (diffScope === 'staged' || diffScope === 'unstaged') return false;
+    return true;
+  }
+
+  function looksLikeShaRef(ref) {
+    return /^[0-9a-f]{4,}$/i.test(ref);
+  }
+
+  function compareTargetChipLabel(ref) {
+    if (!ref) return 'base';
+    return looksLikeShaRef(ref) ? ref.slice(0, 7) : ref;
+  }
+
+  function isRevishQuery(q) {
+    const t = q.trim();
+    if (!t) return false;
+    if (/^[0-9a-f]{7,40}$/i.test(t)) return true;
+    if (/^HEAD(?:[~^]\d+)?$/i.test(t)) return true;
+    if (t === '@' || /^@[-a-z0-9]+$/i.test(t)) return true;
+    return false;
+  }
+
+  function commitIndexForSha(sha) {
+    for (let i = 0; i < commitList.length; i++) {
+      if (commitList[i].sha === sha) return i;
+    }
+    return -1;
+  }
+
+  function normalizeCommitPins() {
+    if (!commitList) commitList = [];
+    if (commitFrom && commitThrough && commitFrom === commitThrough) {
+      commitThrough = '';
+    }
+    if (commitFrom && commitThrough) {
+      const fromIdx = commitIndexForSha(commitFrom);
+      const throughIdx = commitIndexForSha(commitThrough);
+      if (fromIdx >= 0 && throughIdx >= 0 && fromIdx < throughIdx) {
+        const tmp = commitFrom;
+        commitFrom = commitThrough;
+        commitThrough = tmp;
+      }
+    }
+    const present = new Set(commitList.map(function(c) { return c.sha; }));
+    if (commitFrom && !present.has(commitFrom)) commitFrom = '';
+    if (commitThrough && !present.has(commitThrough)) commitThrough = '';
+    if (!commitFrom) commitThrough = '';
+    if (virtualCommitSelected) {
+      const hasVirtual = commitList.some(function(c) { return !!c.virtual; });
+      if (!hasVirtual) virtualCommitSelected = false;
+    }
+  }
+
+  function recomputeDiffCommit() {
+    normalizeCommitPins();
+    if (virtualCommitSelected && !commitFrom && !commitThrough) {
+      diffCommit = VIRTUAL_WORKING_COMMIT;
+      return;
+    }
+    if (!commitFrom && !commitThrough) {
+      diffCommit = '';
+      return;
+    }
+    if (commitFrom && !commitThrough) {
+      diffCommit = commitFrom;
+      return;
+    }
+    if (commitFrom && commitThrough) {
+      diffCommit = commitFrom + '..' + commitThrough;
+      return;
+    }
+    diffCommit = '';
+  }
+
+  function clearCommitPins() {
+    commitFrom = '';
+    commitThrough = '';
+    virtualCommitSelected = false;
+    recomputeDiffCommit();
+  }
+
+  function updateCompareAndCommitChrome() {
+    if (compareTargetChromeVisible()) {
+      fetchCompareTargets();
+    } else if (baseBranchPickerEl) {
+      baseBranchPickerEl.classList.remove('open');
+      baseBranchPickerEl.style.display = 'none';
+      if (baseBranchArrowEl) baseBranchArrowEl.style.display = 'none';
+    }
+    if (commitRangeChromeVisible()) {
+      fetchCommits();
+    } else if (commitDropdownEl) {
+      commitDropdownEl.style.display = 'none';
+      clearCommitPins();
+    }
+  }
+
+  async function fetchCommits() {
+    if (!commitRangeChromeVisible()) {
+      if (commitDropdownEl) commitDropdownEl.style.display = 'none';
+      return;
+    }
+    const gen = ++commitsFetchGen;
+    try {
+      const res = await fetch('/api/commits');
+      if (gen !== commitsFetchGen || !commitRangeChromeVisible()) return;
+      if (!res.ok) {
+        commitDropdownEl.style.display = 'none';
+        return;
+      }
+      commitList = (await res.json()) || [];
+      if (gen !== commitsFetchGen || !commitRangeChromeVisible()) return;
+      if (!commitList || commitList.length < 2) {
+        commitDropdownEl.style.display = 'none';
+        const prevDiffCommit = diffCommit;
+        clearCommitPins();
+        if (diffCommit !== prevDiffCommit) reloadForScope();
+        return;
+      }
+      const prevDiffCommit = diffCommit;
+      normalizeCommitPins();
+      recomputeDiffCommit();
+      if (gen !== commitsFetchGen || !commitRangeChromeVisible()) return;
+      commitDropdownEl.style.display = '';
+      renderCommitPicker();
+      if (diffCommit !== prevDiffCommit) reloadForScope();
+    } catch {
+      if (gen !== commitsFetchGen) return;
+      commitDropdownEl.style.display = 'none';
+    }
+  }
+
+  function commitTimeHTML(dateStr) {
+    const date = new Date(dateStr);
+    if (!dateStr || Number.isNaN(date.getTime())) return '';
+    const fullTime = date.toLocaleString([], { dateStyle: 'medium', timeStyle: 'long' });
+    const age = Date.now() - date.getTime();
+    const label = age >= 0 && age < 86400000 ? relativeTime(dateStr) : fullTime;
+    return '<time class="commit-picker-item-time" datetime="' + escapeHtml(dateStr) + '" title="' + escapeHtml(fullTime) + '">' + escapeHtml(label) + '</time>';
+  }
+
+  function renderCommitPicker() {
+    const list = document.getElementById('commitDropdownList');
+    const allItem = document.querySelector('.commit-picker-item[data-commit=""]');
+    const label = document.getElementById('commitDropdownLabel');
+    const clearThroughBtn = commitClearThroughEl;
+
+    if (!commitFrom && !commitThrough) {
+      if (allItem) allItem.classList.toggle('active', !virtualCommitSelected);
+      if (label) label.textContent = virtualCommitSelected ? 'Working changes' : 'All commits';
+    } else {
+      if (allItem) allItem.classList.remove('active');
+      if (label) {
+        if (commitFrom && !commitThrough) {
+          const sel = commitList.find(function(c) { return c.sha === commitFrom; });
+          label.textContent = sel
+            ? (sel.virtual ? sel.message : (sel.short_sha + ' only'))
+            : compareTargetChipLabel(commitFrom) + ' only';
+        } else if (commitFrom && commitThrough) {
+          const a = commitList.find(function(c) { return c.sha === commitFrom; });
+          const b = commitList.find(function(c) { return c.sha === commitThrough; });
+          const aLabel = a ? (a.virtual ? a.message : a.short_sha) : compareTargetChipLabel(commitFrom);
+          const bLabel = b ? (b.virtual ? b.message : b.short_sha) : compareTargetChipLabel(commitThrough);
+          label.textContent = aLabel + ' \u2192 ' + bLabel;
+        }
+      }
+    }
+
+    if (clearThroughBtn) {
+      clearThroughBtn.style.display = commitThrough ? '' : 'none';
+    }
+
+    list.innerHTML = commitList.map(function(c) {
+      const isFrom = c.sha === commitFrom;
+      const isThrough = c.sha === commitThrough;
+      const isVirtualActive = c.virtual && virtualCommitSelected && !commitFrom && !commitThrough;
+      let cls = 'commit-picker-item commit-picker-commit';
+      if (isFrom) cls += ' is-from';
+      if (isThrough) cls += ' is-through';
+      if (c.virtual) cls += ' is-virtual';
+      if (isVirtualActive) cls += ' active';
+      const time = commitTimeHTML(c.date);
+      const fromPin = isFrom ? '<span class="commit-pin-from">from</span>' : '';
+      const throughPin = isThrough ? '<span class="commit-pin-through">through</span>' : '';
+      const virtualPill = c.virtual ? '<span class="commit-picker-item-time">virtual</span>' : '';
+      return '<div class="' + cls + '" data-commit="' + c.sha + '" role="button" tabindex="0" aria-pressed="' + !!(isFrom || isThrough || isVirtualActive) + '">'
+        + '<span class="commit-picker-item-meta">' + fromPin + throughPin
+        + '<span class="commit-picker-item-sha">' + escapeHtml(c.short_sha) + '</span>'
+        + virtualPill + time + '</span>'
+        + '<span class="commit-picker-item-msg">' + escapeHtml(c.message) + '</span>'
+        + '</div>';
+    }).join('');
+  }
+
+  document.getElementById('commitDropdownBtn').addEventListener('click', function() {
+    commitDropdownEl.classList.toggle('open');
+  });
+
+  document.addEventListener('click', function(e) {
+    if (commitDropdownEl && !commitDropdownEl.contains(e.target)) {
+      commitDropdownEl.classList.remove('open');
+    }
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && commitDropdownEl && commitDropdownEl.classList.contains('open')) {
+      commitDropdownEl.classList.remove('open');
+      e.stopImmediatePropagation();
+    }
+  });
+
+  document.getElementById('commitDropdownMenu').addEventListener('click', function(e) {
+    if (e.target.closest('#commitClearThrough')) {
+      e.stopPropagation();
+      const prev = diffCommit;
+      commitThrough = '';
+      recomputeDiffCommit();
+      renderCommitPicker();
+      if (diffCommit !== prev) reloadForScope();
+      return;
+    }
+    const item = e.target.closest('.commit-picker-item');
+    if (!item) return;
+    e.stopPropagation();
+    const sha = item.dataset.commit;
+    const prevDiffCommit = diffCommit;
+    if (item.classList.contains('is-virtual')) {
+      commitFrom = '';
+      commitThrough = '';
+      virtualCommitSelected = true;
+      recomputeDiffCommit();
+      renderCommitPicker();
+      if (diffCommit !== prevDiffCommit) reloadForScope();
+      return;
+    }
+    if (sha === '') {
+      clearCommitPins();
+    } else if (e.altKey) {
+      virtualCommitSelected = false;
+      if (commitThrough === sha) {
+        commitThrough = '';
+      } else {
+        commitThrough = sha;
+        if (!commitFrom) commitFrom = sha;
+      }
+    } else if (commitFrom === sha && !commitThrough) {
+      virtualCommitSelected = false;
+      commitFrom = '';
+    } else if (commitFrom === sha) {
+      virtualCommitSelected = false;
+      commitFrom = commitThrough || '';
+      commitThrough = '';
+    } else {
+      virtualCommitSelected = false;
+      commitFrom = sha;
+    }
+    recomputeDiffCommit();
+    renderCommitPicker();
+    if (diffCommit !== prevDiffCommit) reloadForScope();
+  });
+
+  document.getElementById('commitDropdownMenu').addEventListener('keydown', function(e) {
+    if (e.key !== 'Enter' && e.key !== ' ' && e.key !== 'Spacebar') return;
+    const item = e.target.closest('.commit-picker-item');
+    if (!item) return;
+    e.preventDefault();
+    if (e.altKey) {
+      item.dispatchEvent(new MouseEvent('click', { bubbles: true, altKey: true }));
+    } else {
+      item.click();
+    }
+  });
+
+  if (commitClearThroughEl) {
+    commitClearThroughEl.addEventListener('click', function(e) {
+      e.stopPropagation();
+    });
+  }
+
+  async function fetchCompareTargets() {
+    if (!compareTargetChromeVisible()) return;
+    const gen = ++compareTargetsFetchGen;
+    try {
+      const res = await fetch('/api/branches');
+      if (gen !== compareTargetsFetchGen || !compareTargetChromeVisible()) return;
+      if (!res.ok) return;
+      let parsed = await res.json();
+      if (parsed === null || parsed === undefined) {
+        parsed = { vcs: 'git', detected: '', local: [], remote: [] };
+      }
+      if (gen !== compareTargetsFetchGen || !compareTargetChromeVisible()) return;
+      if (Array.isArray(parsed)) {
+        compareTargets = { vcs: 'git', detected: currentCompareTarget, local: [], remote: parsed };
+      } else {
+        compareTargets = {
+          vcs: parsed.vcs || 'git',
+          detected: parsed.detected || '',
+          local: Array.isArray(parsed.local) ? parsed.local : [],
+          remote: Array.isArray(parsed.remote) ? parsed.remote : [],
+        };
+      }
+      if (gen !== compareTargetsFetchGen || !compareTargetChromeVisible()) return;
+      const hasTargets = compareTargets.local.length + compareTargets.remote.length > 0;
+      baseBranchPickerEl.style.display = '';
+      if (baseBranchArrowEl && !sessionInRangeFocus()) baseBranchArrowEl.style.display = '';
+      if (!hasTargets && compareTargetTabsEl) {
+        compareTargetTab = 'refs';
+      }
+      renderCompareTargetList(document.getElementById('baseBranchSearch').value);
+    } catch {
+      if (gen !== compareTargetsFetchGen) return;
+      baseBranchPickerEl.classList.remove('open');
+      baseBranchPickerEl.style.display = 'none';
+      if (baseBranchArrowEl) baseBranchArrowEl.style.display = 'none';
+    }
+  }
+
+  async function fetchCompareCommits() {
+    if (!compareTargetChromeVisible()) return;
+    const gen = ++compareCommitsFetchGen;
+    try {
+      const res = await fetch('/api/commits?scope=compare');
+      if (!res.ok || gen !== compareCommitsFetchGen || !compareTargetChromeVisible()) return;
+      const commits = (await res.json()) || [];
+      if (gen !== compareCommitsFetchGen || !compareTargetChromeVisible()) return;
+      compareCommitList = commits;
+      if (compareTargetTab === 'commits') {
+        renderCompareTargetList(document.getElementById('baseBranchSearch').value);
+      }
+    } catch (err) {
+      console.error('Failed to load comparison commits:', err);
+    }
+  }
+
+  function compareTargetGroupLabel(kind) {
+    if (compareTargets.vcs === 'jj') {
+      return kind === 'local' ? 'Bookmarks' : 'Remote bookmarks';
+    }
+    return kind === 'local' ? 'Local' : 'Remote';
+  }
+
+  function getCompareTargetVisibleItems() {
+    return Array.from(document.getElementById('baseBranchList').querySelectorAll('.base-branch-item'));
+  }
+
+  function updateCompareTargetHighlight() {
+    const items = getCompareTargetVisibleItems();
+    items.forEach(function(el, i) {
+      el.classList.toggle('highlighted', i === compareTargetPicker.highlightedIdx);
+    });
+    if (compareTargetPicker.highlightedIdx >= 0 && compareTargetPicker.highlightedIdx < items.length) {
+      items[compareTargetPicker.highlightedIdx].scrollIntoView({ block: 'nearest' });
+    }
+  }
+
+  function renderCompareTargetList(filter) {
+    const list = document.getElementById('baseBranchList');
+    const q = (filter || '').trim();
+    const lower = q.toLowerCase();
+
+    if (compareTargetTab === 'commits') {
+      let commits = compareCommitList;
+      if (lower) {
+        commits = commits.filter(function(c) {
+          return c.short_sha.toLowerCase().indexOf(lower) !== -1
+            || c.sha.toLowerCase().indexOf(lower) === 0
+            || c.message.toLowerCase().indexOf(lower) !== -1;
+        });
+      }
+      if (commits.length === 0) {
+        list.innerHTML = '<div style="padding: 8px 10px; font-size: 12px; color: var(--hunkyard-editor-fg-muted);">No matching commits</div>';
+      } else {
+        list.innerHTML = commits.map(function(c) {
+          const active = c.sha === currentCompareTarget || (looksLikeShaRef(currentCompareTarget) && c.sha === session.base_ref) ? ' active' : '';
+          return '<div class="base-branch-item compare-commit-item' + active + '" data-branch="' + escapeHtml(c.sha) + '" aria-current="' + !!active + '">'
+            + '<span class="commit-picker-item-meta"><span class="commit-picker-item-sha">' + escapeHtml(c.short_sha) + '</span>'
+            + commitTimeHTML(c.date) + '</span>'
+            + '<span class="commit-picker-item-msg">' + escapeHtml(c.message) + '</span>'
+            + '</div>';
+        }).join('');
+      }
+      compareTargetPicker.highlightedIdx = -1;
+      updateCompareTargetUseCustom(q);
+      return;
+    }
+
+    function filterRefs(refs) {
+      if (!lower) return refs;
+      return refs.filter(function(r) { return r.toLowerCase().indexOf(lower) !== -1; });
+    }
+
+    const parts = [];
+    [['local', filterRefs(compareTargets.local)], ['remote', filterRefs(compareTargets.remote)]].forEach(function(pair) {
+      const kind = pair[0];
+      const refs = pair[1];
+      if (refs.length === 0) return;
+      parts.push('<div class="compare-target-group-label">' + escapeHtml(compareTargetGroupLabel(kind)) + '</div>');
+      refs.forEach(function(ref) {
+        const active = ref === currentCompareTarget ? ' active' : '';
+        const detected = ref === compareTargets.detected ? '<span class="compare-target-detected">detected</span>' : '';
+        parts.push('<div class="base-branch-item' + active + '" data-branch="' + escapeHtml(ref) + '">'
+          + escapeHtml(ref) + detected + '</div>');
+      });
+    });
+
+    if (parts.length === 0 && !isRevishQuery(q)) {
+      list.innerHTML = '<div style="padding: 8px 10px; font-size: 12px; color: var(--hunkyard-editor-fg-muted);">No matching refs</div>';
+    } else {
+      list.innerHTML = parts.join('');
+    }
+    compareTargetPicker.highlightedIdx = -1;
+    updateCompareTargetUseCustom(q);
+  }
+
+  function updateCompareTargetUseCustom(q) {
+    if (!compareTargetUseCustomEl) return;
+    const trimmed = (q || '').trim();
+    if (!trimmed || !isRevishQuery(trimmed)) {
+      compareTargetUseCustomEl.style.display = 'none';
+      compareTargetUseCustomEl.innerHTML = '';
+      return;
+    }
+    const inList = compareTargets.local.indexOf(trimmed) !== -1
+      || compareTargets.remote.indexOf(trimmed) !== -1
+      || compareCommitList.some(function(c) { return c.sha === trimmed || c.short_sha === trimmed; });
+    if (inList) {
+      compareTargetUseCustomEl.style.display = 'none';
+      compareTargetUseCustomEl.innerHTML = '';
+      return;
+    }
+    compareTargetUseCustomEl.style.display = '';
+    compareTargetUseCustomEl.innerHTML =
+      '<button type="button" data-rev="' + escapeHtml(trimmed) + '">Use <span style="font-family:var(--hunkyard-mono,monospace)">' + escapeHtml(trimmed) + '</span> as base</button>';
+  }
+
+  async function selectCompareTarget(ref) {
+    if (ref === currentCompareTarget) {
+      baseBranchPickerEl.classList.remove('open');
+      baseBranchBtnEl.setAttribute('aria-expanded', 'false');
+      return;
+    }
+    baseBranchPickerEl.classList.remove('open');
+    baseBranchBtnEl.setAttribute('aria-expanded', 'false');
+    const previous = currentCompareTarget;
+    const previousLabel = document.getElementById('baseBranchLabel').textContent;
+    currentCompareTarget = ref;
+    document.getElementById('baseBranchLabel').textContent = compareTargetChipLabel(ref);
+    try {
+      const res = await fetch('/api/base-branch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ref: ref }),
+      });
+      if (!res.ok) {
+        const errText = await res.text();
+        console.error('Failed to change compare target:', errText);
+        currentCompareTarget = previous;
+        document.getElementById('baseBranchLabel').textContent = previousLabel;
+        return;
+      }
+      clearCommitPins();
+      await reloadForScope();
+      fetchCommits();
+    } catch (err) {
+      console.error('Error changing compare target:', err);
+      currentCompareTarget = previous;
+      document.getElementById('baseBranchLabel').textContent = previousLabel;
+    }
+  }
+
+  if (compareTargetTabsEl) {
+    compareTargetTabsEl.addEventListener('click', function(e) {
+      const tab = e.target.closest('.compare-target-tab');
+      if (!tab) return;
+      compareTargetTab = tab.dataset.tab || 'refs';
+      compareTargetTabsEl.querySelectorAll('.compare-target-tab').forEach(function(btn) {
+        btn.classList.toggle('active', btn === tab);
+      });
+      if (compareTargetTab === 'commits') fetchCompareCommits();
+      renderCompareTargetList(document.getElementById('baseBranchSearch').value);
+    });
+  }
+
+  if (compareTargetUseCustomEl) {
+    compareTargetUseCustomEl.addEventListener('click', function(e) {
+      const btn = e.target.closest('button[data-rev]');
+      if (!btn) return;
+      selectCompareTarget(btn.getAttribute('data-rev'));
+    });
+  }
+
+  document.getElementById('baseBranchBtn').addEventListener('click', function() {
+    baseBranchPickerEl.classList.toggle('open');
+    const isOpen = baseBranchPickerEl.classList.contains('open');
+    baseBranchBtnEl.setAttribute('aria-expanded', String(isOpen));
+    if (isOpen) {
+      const search = document.getElementById('baseBranchSearch');
+      search.value = '';
+      compareTargetTab = 'refs';
+      if (compareTargetTabsEl) {
+        compareTargetTabsEl.querySelectorAll('.compare-target-tab').forEach(function(btn) {
+          btn.classList.toggle('active', btn.dataset.tab === 'refs');
+        });
+      }
+      compareTargetPicker.highlightedIdx = -1;
+      fetchCompareCommits();
+      renderCompareTargetList();
+      search.focus();
+    }
+  });
+
+  document.getElementById('baseBranchSearch').addEventListener('input', function(e) {
+    if (isRevishQuery(e.target.value) && compareTargetTab !== 'commits') {
+      compareTargetTab = 'commits';
+      if (compareTargetTabsEl) {
+        compareTargetTabsEl.querySelectorAll('.compare-target-tab').forEach(function(btn) {
+          btn.classList.toggle('active', btn.dataset.tab === 'commits');
+        });
+      }
+    }
+    renderCompareTargetList(e.target.value);
+  });
+
+  document.getElementById('baseBranchSearch').addEventListener('keydown', function(e) {
+    e.stopPropagation();
+    const items = getCompareTargetVisibleItems();
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      compareTargetPicker.highlightedIdx = Math.min(compareTargetPicker.highlightedIdx + 1, items.length - 1);
+      updateCompareTargetHighlight();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (compareTargetPicker.highlightedIdx > 0) {
+        compareTargetPicker.highlightedIdx--;
+        updateCompareTargetHighlight();
+      }
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      const customBtn = compareTargetUseCustomEl && compareTargetUseCustomEl.querySelector('button[data-rev]');
+      if (customBtn) {
+        selectCompareTarget(customBtn.getAttribute('data-rev'));
+        return;
+      }
+      if (compareTargetPicker.highlightedIdx >= 0 && compareTargetPicker.highlightedIdx < items.length) {
+        const ref = items[compareTargetPicker.highlightedIdx].dataset.branch;
+        if (ref) selectCompareTarget(ref);
+      }
+    } else if (e.key === 'Escape') {
+      baseBranchPickerEl.classList.remove('open');
+      baseBranchBtnEl.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  document.addEventListener('click', function(e) {
+    if (baseBranchPickerEl && !baseBranchPickerEl.contains(e.target)) {
+      baseBranchPickerEl.classList.remove('open');
+      baseBranchBtnEl.setAttribute('aria-expanded', 'false');
+    }
+  });
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && baseBranchPickerEl && baseBranchPickerEl.classList.contains('open')) {
+      baseBranchPickerEl.classList.remove('open');
+      baseBranchBtnEl.setAttribute('aria-expanded', 'false');
+      e.stopImmediatePropagation();
+    }
+  });
+
+  document.getElementById('baseBranchList').addEventListener('click', function(e) {
+    const item = e.target.closest('.base-branch-item');
+    if (!item) return;
+    const ref = item.dataset.branch;
+    if (ref) selectCompareTarget(ref);
+  });
+
+  // ===== Scope Toggle (All / Branch / Staged / Unstaged) =====
+  document.getElementById('scopeToggle').addEventListener('click', async function(e) {
+    const btn = e.target.closest('.toggle-btn');
+    if (!btn || btn.disabled || btn.classList.contains('active')) return;
+    const scope = btn.dataset.scope;
+    diffScope = scope;
+    navCommentId = null;
+    setSetting('diffScope', scope);
+    if (scope !== 'all' && scope !== 'branch') {
+      clearCommitPins();
+    }
+    document.querySelectorAll('#scopeToggle .toggle-btn').forEach(function(b) {
+      b.classList.toggle('active', b.dataset.scope === scope);
+    });
+    updateCompareAndCommitChrome();
+    await reloadForScope();
+  });
+
+  let reloadInFlight = null;
+  // Tracks the (scope, commit) the in-flight reload was started for. If a new
+  // reloadForScope() call happens with different inputs while the previous one
+  // is still running, we chain a follow-up rather than collapsing onto the
+  // stale promise — otherwise the caller awaits a fetch for the OLD scope and
+  // the new scope is never requested. Surfaced as a Windows-only e2e flake:
+  // slower file I/O made loadAllFileData() outlast the next click handler, so
+  // clicks that swapped scope returned the previous scope's in-flight promise.
+  // Story/Diff also changes the effective fetch/file-data scopes without
+  // changing diffScope itself, so include those derived scopes in the key.
+  let reloadInFlightKey = null;
+  async function reloadForScope() {
+    const diffFetchMode = ignoreWhitespace && !storyNeedsRawDiff() ? 'filtered' : 'raw';
+    const key = currentSessionFetchScope() + '\0' + currentFileDataScope() + '\0' + diffCommit + '\0' + diffFetchMode;
+    if (reloadInFlight && reloadInFlightKey === key) return reloadInFlight;
+    if (reloadInFlight) {
+      // Different inputs — chain after the in-flight reload finishes so we
+      // don't tear down filesContainer mid-render. The previous reload's
+      // finally clears reloadInFlight; we then re-enter reloadForScope().
+      const prev = reloadInFlight;
+      const chained = prev.then(function() { return reloadForScope(); }, function() { return reloadForScope(); });
+      return chained;
+    }
+    reloadInFlightKey = key;
+    reloadInFlight = (async function() {
+      try {
+        activeReplyForms.clear();
+        // Scope/base/commit changes can replace diff hunks without changing
+        // the final file content hash. Cached Story clones are keyed by that
+        // hash, so invalidate them before loading the new scoped file data.
+        storyExpandedFileCache.clear();
+        showFilesMessage('Loading...');
+
+        let sessionUrl = '/api/session?scope=' + enc(currentSessionFetchScope());
+        if (diffCommit) sessionUrl += '&commit=' + enc(diffCommit);
+        let sessionRes = await fetchWhenReady(sessionUrl);
+        if (!storyHasContent(sessionRes.story) && storyHasContent(session && session.story)) {
+          sessionRes.story = session.story;
+        } else {
+          sessionRes = await hydrateStoryIfMissing(sessionRes);
+        }
+        sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
+        session = sessionRes;
+        reviewComments = sessionRes.review_comments || [];
+
+        // Update base branch label if it changed
+        if (session.base_branch_name) {
+          currentCompareTarget = session.base_branch_name;
+          document.getElementById('baseBranchLabel').textContent = compareTargetChipLabel(currentCompareTarget);
+        }
+
+        if (!session.files || session.files.length === 0) {
+          showFilesMessage('No ' + diffScope + ' changes');
+          files = [];
+          renderFileTree();
+          updateCommentCount();
+          updateViewedCount();
+          if (storyCleared && session) delete session.story;
+          applyStoryPresence();
+          return;
+        }
+
+        files = await loadAllFileData(session.files, currentFileDataScope());
+        hiddenUnresolved = session.hidden_unresolved || 0;
+        files.sort(fileSortComparator);
+        restoreViewedState();
+        renderFileTree();
+        renderAllFiles();
+        buildToc();
+        updateCommentCount();
+        updateViewedCount();
+        if (storyCleared && session) delete session.story;
+        applyStoryPresence();
+      } finally {
+        reloadInFlight = null;
+        reloadInFlightKey = null;
+      }
+    })();
+    return reloadInFlight;
+  }
+
+  // ===== Sidebar Toggle (file tree in diff mode, chapter rail in story) =====
+  // One header-left control; same icon. Diff: collapses the file tree.
+  // Story: collapses the chapter rail (desktop slide / mobile off-canvas drawer).
+  function isStoryMobileRail() {
+    return window.matchMedia('(max-width: 768px)').matches;
+  }
+
+  function isStoryRailCollapsed() {
+    if (isStoryMobileRail()) return !document.body.classList.contains('hunkyard-story-rail-open');
+    return document.body.classList.contains('hunkyard-story-rail-collapsed');
+  }
+
+  function syncSidebarToggleAria() {
+    const btn = document.getElementById('fileTreeToggle');
+    if (!btn) return;
+    const expanded = (typeof storyActive === 'function' && storyActive())
+      ? !isStoryRailCollapsed()
+      : !document.body.classList.contains('file-tree-collapsed');
+    btn.setAttribute('aria-expanded', expanded ? 'true' : 'false');
+  }
+
+  // Keep the left toggle visible whenever story is active (chapter rail), even
+  // if renderFileTree ran before applyStoryPresence and hid it for single-file.
+  function syncSidebarToggleVisibility() {
+    const treeToggle = document.getElementById('fileTreeToggle');
+    if (!treeToggle) return;
+    if (typeof storyActive === 'function' && storyActive()) {
+      treeToggle.style.display = '';
+      return;
+    }
+    if (files.length <= 1 && session && session.mode !== 'git') {
+      treeToggle.style.display = 'none';
+    } else {
+      treeToggle.style.display = '';
+    }
+  }
+
+  function setFileTreeCollapsed(collapsed, animate) {
+    const panel = document.getElementById('fileTreePanel');
+    // Slide distance = the panel's own width, which the user can resize.
+    // The negative margin shifts the panel without changing its width, so
+    // this measures correctly in both directions.
+    const w = panel.getBoundingClientRect().width;
+    if (w > 0) document.body.style.setProperty('--file-tree-width', w + 'px');
+    if (animate) startFileTreeAnimation();
+    document.body.classList.toggle('file-tree-collapsed', collapsed);
+    setSetting('fileTree', collapsed ? 'collapsed' : 'open');
+    syncSidebarToggleAria();
+  }
+
+  // Arms the slide transition for the state change that follows. The forced
+  // style flush is the point: a transition declared in the same task as the
+  // change it should animate never runs, because the browser has no
+  // pre-change style with the transition live.
+  function startFileTreeAnimation() {
+    document.body.classList.add('file-tree-anim');
+    document.body.getBoundingClientRect();
+  }
+
+  function setStoryRailCollapsed(collapsed, animate) {
+    const rail = document.getElementById('storyRail');
+    if (!rail) return;
+    if (isStoryMobileRail()) {
+      document.body.classList.toggle('hunkyard-story-rail-open', !collapsed);
+    } else {
+      const w = rail.getBoundingClientRect().width;
+      if (w > 0) document.body.style.setProperty('--story-rail-width', w + 'px');
+      if (animate) {
+        document.body.classList.add('story-rail-anim');
+        document.body.getBoundingClientRect();
+      }
+      document.body.classList.toggle('hunkyard-story-rail-collapsed', collapsed);
+    }
+    syncSidebarToggleAria();
+  }
+
+  function toggleSidebar(animate) {
+    if (typeof storyActive === 'function' && storyActive()) {
+      setStoryRailCollapsed(!isStoryRailCollapsed(), animate);
+      return;
+    }
+    setFileTreeCollapsed(!document.body.classList.contains('file-tree-collapsed'), animate);
+  }
+
+  document.getElementById('fileTreeToggle').addEventListener('click', function() {
+    // Animate user toggles only — a sidebar restored collapsed at load
+    // shouldn't slide in.
+    toggleSidebar(true);
+  });
+
+  // Drop the rail class that doesn't apply on this breakpoint so a leftover
+  // hunkyard-story-rail-collapsed can't keep the mobile drawer invisible under
+  // an open scrim (and vice versa).
+  (function wireStoryRailBreakpoint() {
+    const mq = window.matchMedia('(max-width: 768px)');
+    function onBreakpointChange() {
+      if (typeof storyActive !== 'function' || !storyActive()) return;
+      if (mq.matches) {
+        document.body.classList.remove('hunkyard-story-rail-collapsed');
+      } else {
+        document.body.classList.remove('hunkyard-story-rail-open');
+      }
+      syncSidebarToggleAria();
+    }
+    if (mq.addEventListener) mq.addEventListener('change', onBreakpointChange);
+    else if (mq.addListener) mq.addListener(onBreakpointChange);
+  })();
+
+  // ===== Comments Panel Toggle (mirrors file-tree slide on right) =====
+  function setCommentsPanelCollapsed(collapsed, animate) {
+    const panel = document.getElementById('commentsPanel');
+    if (!panel) return;
+    const w = panel.getBoundingClientRect().width;
+    if (w > 0) document.body.style.setProperty('--comments-panel-width', w + 'px');
+    if (animate) startCommentsPanelAnimation();
+    panel.classList.toggle('comments-panel-hidden', collapsed);
+    // Not persisted yet — keeps the existing "hidden after reload" test green.
+    // To mirror file-tree persistence, replace with:
+    // setSetting('commentsPanel', collapsed ? 'collapsed' : 'open');
+    updateTocPosition();
+  }
+
+  function startCommentsPanelAnimation() {
+    document.body.classList.add('comments-panel-anim');
+    document.body.getBoundingClientRect();
+  }
+
+  // ===== TOC Toggle =====
+  document.getElementById('tocToggle').addEventListener('click', function() {
+    const tocEl = document.getElementById('toc');
+    tocEl.classList.toggle('toc-hidden');
+    setSetting('toc', tocEl.classList.contains('toc-hidden') ? 'closed' : 'open');
+    buildToc();
+  });
+
+  document.querySelector('.toc-close').addEventListener('click', function() {
+    document.getElementById('toc').classList.add('toc-hidden');
+    setSetting('toc', 'closed');
+  });
+
+  // ===== Comment Navigation =====
+  let navCommentId = null;
+  let navHighlightTimer;
+
+  function collectNavigableComments() {
+    // Document order matching render: file-scope cards above the body, then
+    // line comments by end_line / start_line. Used so [/] can reach comments
+    // whose .file-body is still deferred.
+    const list = [];
+    for (let fi = 0; fi < files.length; fi++) {
+      const file = files[fi];
+      const comments = file.comments || [];
+      if (comments.length === 0) continue;
+      if (file.orphaned) {
+        for (let ci = 0; ci < comments.length; ci++) {
+          list.push({ id: comments[ci].id, filePath: file.path, resolved: !!comments[ci].resolved });
+        }
+        continue;
+      }
+      const fileScope = [];
+      const lineScope = [];
+      for (let ci = 0; ci < comments.length; ci++) {
+        if (comments[ci].scope === 'file') fileScope.push(comments[ci]);
+        else lineScope.push(comments[ci]);
+      }
+      for (let ci = 0; ci < fileScope.length; ci++) {
+        list.push({ id: fileScope[ci].id, filePath: file.path, resolved: !!fileScope[ci].resolved });
+      }
+      lineScope.sort(function(a, b) {
+        const ae = a.end_line || 0, be = b.end_line || 0;
+        if (ae !== be) return ae - be;
+        const as = a.start_line || 0, bs = b.start_line || 0;
+        return as - bs;
+      });
+      for (let ci = 0; ci < lineScope.length; ci++) {
+        list.push({ id: lineScope[ci].id, filePath: file.path, resolved: !!lineScope[ci].resolved });
+      }
+    }
+    return list;
+  }
+
+  function highlightNavComment(commentId, filePath) {
+    if (!pierreView || !pierreViewActive()) return;
+    pierreJumpToComment(commentId, filePath, function(card) {
+      if (navHighlightTimer) {
+        clearTimeout(navHighlightTimer);
+        document.querySelectorAll('.comment-nav-highlight').forEach(function(el) { el.classList.remove('comment-nav-highlight'); });
+      }
+      card.classList.add('comment-nav-highlight');
+      navHighlightTimer = setTimeout(function() {
+        card.classList.remove('comment-nav-highlight');
+        navHighlightTimer = null;
+      }, 1000);
+    });
+  }
+
+  function navigateToComment(direction) {
+    const all = collectNavigableComments();
+    const isEligible = function(entry) {
+      return !isHideResolved() || !entry.resolved;
+    };
+    const eligible = all.filter(isEligible);
+    if (eligible.length === 0) return;
+
+    const header = document.querySelector('.header');
+    const headerHeight = header ? header.offsetHeight : 52;
+
+    // Keep the current position in the full order even when that comment becomes
+    // hidden, then scan in the requested direction for the next eligible entry.
+    let idx = -1;
+    if (navCommentId) {
+      for (let i = 0; i < all.length; i++) {
+        if (all[i].id === navCommentId) { idx = i; break; }
+      }
+    }
+
+    let target;
+    if (idx >= 0) {
+      for (let step = 1; step <= all.length; step++) {
+        const candidateIdx = (idx + direction * step + all.length) % all.length;
+        if (isEligible(all[candidateIdx])) {
+          target = all[candidateIdx];
+          break;
+        }
+      }
+    } else if (direction === 1) {
+      // First use: pick first mounted card below the header when available,
+      // otherwise the first eligible model entry (may need a mount).
+      let targetIdx = -1;
+      for (let j = 0; j < eligible.length; j++) {
+        const card = document.querySelector(
+          '.main-content .comment-card[data-comment-id="' + CSS.escape(eligible[j].id) + '"]'
+        );
+        if (!card) continue;
+        if (card.getBoundingClientRect().top > headerHeight + 8) { targetIdx = j; break; }
+      }
+      if (targetIdx < 0) targetIdx = 0;
+      target = eligible[targetIdx];
+    } else {
+      target = eligible[eligible.length - 1];
+    }
+
+    if (!target) return;
+    navCommentId = target.id;
+    highlightNavComment(target.id, target.filePath);
+  }
+
+  document.getElementById('commentNavPrev').addEventListener('click', function() { navigateToComment(-1); });
+  document.getElementById('commentNavNext').addEventListener('click', function() { navigateToComment(1); });
+
+  // ===== Comments Panel Toggle =====
+  document.getElementById('commentCount').addEventListener('click', function() {
+    toggleCommentsPanel();
+  });
+  document.getElementById('commentCount').addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggleCommentsPanel(); }
+  });
+
+  document.querySelector('.comments-panel-close').addEventListener('click', function() {
+    setCommentsPanelCollapsed(true, true);
+  });
+
+  document.getElementById('prToggle').addEventListener('click', function() {
+    togglePRPanel();
+  });
+
+  // Segmented pill filter (radiogroup with roving tabindex)
+  const filterPillEl = document.getElementById('commentsFilterPill');
+  function activateFilterBtn(btn, focus) {
+    if (!btn) return;
+    commentsActiveFilter = btn.dataset.filter;
+    filterPillEl.querySelectorAll('.toggle-btn').forEach(function(b) {
+      const active = b === btn;
+      b.classList.toggle('active', active);
+      b.setAttribute('aria-checked', active ? 'true' : 'false');
+      b.setAttribute('tabindex', active ? '0' : '-1');
+    });
+    if (focus) btn.focus();
+    renderCommentsPanel();
+  }
+  filterPillEl.addEventListener('click', function(e) {
+    const btn = e.target.closest('.toggle-btn');
+    if (!btn) return;
+    activateFilterBtn(btn, false);
+  });
+  filterPillEl.addEventListener('keydown', function(e) {
+    const btns = Array.from(filterPillEl.querySelectorAll('.toggle-btn'));
+    const currentIdx = btns.findIndex(function(b) { return b === document.activeElement; });
+    if (currentIdx === -1) return;
+    let nextIdx;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+      nextIdx = (currentIdx + 1) % btns.length;
+    } else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+      nextIdx = (currentIdx - 1 + btns.length) % btns.length;
+    } else if (e.key === 'Home') {
+      nextIdx = 0;
+    } else if (e.key === 'End') {
+      nextIdx = btns.length - 1;
+    } else {
+      return;
+    }
+    e.preventDefault();
+    activateFilterBtn(btns[nextIdx], true);
+  });
+
+  // Expand all / Collapse all
+  document.getElementById('commentsPanelExpandAll').addEventListener('click', function() {
+    toggleExpandAllComments();
+  });
+
+  // ===== Settings Panel =====
+  // Open/close, focus trap, sliding underline, Esc/?, tab keyboard nav and
+  // click delegation are all owned by the shared settings-overlay shell
+  // (hunkyard-settings-overlay.js). This file only supplies pane-render hooks
+  // (cfg fetch + renderSettingsPane/AboutPane/ShortcutsPane).
+  let settingsCtl = null;
+  function getSettingsCtl() {
+    if (settingsCtl) return settingsCtl;
+    const overlay = document.getElementById('settingsOverlay');
+    const toggle = document.getElementById('settingsToggle');
+    const closeBtn = document.getElementById('settingsClose');
+    if (!overlay || !window.hunkyard || !window.hunkyard.settingsOverlay) return null;
+    settingsCtl = window.hunkyard.settingsOverlay.install({
+      overlay: overlay,
+      toggle: toggle,
+      closeBtn: closeBtn,
+      initialTab: 'settings',
+      onOpen: function (tab) {
+        settingsPanelOpen = true;
+        settingsPanelTab = tab || 'settings';
+        if (!cachedConfig) {
+          fetch('/api/config').then(function (r) {
+            if (!r.ok) throw new Error('Could not load configuration');
+            return r.json();
+          }).then(function (cfg) {
+            cachedConfig = cfg;
+            renderSettingsPane(cfg);
+            renderUpdatesPane(cfg);
+            renderAboutPane(cfg);
+            loadCodeFonts(cfg);
+          }).catch(function () {
+            cachedConfig = {};
+            renderSettingsPane(cachedConfig);
+            renderUpdatesPane(cachedConfig);
+            renderAboutPane(cachedConfig);
+            loadCodeFonts(cachedConfig);
+          });
+        } else {
+          loadCodeFonts(cachedConfig);
+        }
+        renderShortcutsPane();
+      },
+      onTabSwitch: function (tab) { settingsPanelTab = tab; },
+      onClose: function () { settingsPanelOpen = false; },
+    });
+    return settingsCtl;
+  }
+
+  function loadCodeFonts(cfg) {
+    if (Array.isArray(cfg.code_fonts)) return;
+    if (!codeFontsRequest) {
+      codeFontsRequest = fetch('/api/code-fonts').then(function (r) {
+        if (!r.ok) throw new Error('Could not load code fonts');
+        return r.json();
+      }).then(function (data) {
+        return Array.isArray(data.code_fonts) ? data.code_fonts : [];
+      });
+    }
+    const request = codeFontsRequest;
+    request.then(function (families) {
+      cfg.code_fonts = families;
+      if (settingsPanelOpen) renderSettingsPane(cfg);
+    }).catch(function () {
+      // Keep the built-ins visible and retry after a transient failure when
+      // the user next opens Settings.
+      if (codeFontsRequest === request) codeFontsRequest = null;
+    });
+  }
+  function openSettingsPanel(tab) {
+    settingsPanelTab = tab || 'settings';
+    settingsPanelOpen = true;
+    const ctl = getSettingsCtl();
+    if (ctl) ctl.open(settingsPanelTab);
+  }
+
+  function applyHideResolved() {
+    // State -> CSS via body class. Visibility rules live in style.css under
+    // `body.hide-resolved .comment-block:has(.resolved-card)`. No DOM walk.
+    document.body.classList.toggle('hide-resolved', isHideResolved());
+    syncPierreCommentRanges();
+  }
+
+  function renderSettingsPane(cfg) {
+    const pane = document.getElementById('settingsPane');
+    const shared = window.hunkyard && window.hunkyard.settingsPanes;
+    if (!shared || typeof shared.renderSettingsTab !== 'function') {
+      console.error('Hunkyard settings panes failed to load.');
+      return;
+    }
+    const isGit = session.mode === 'git';
+    const hooks = {
+      applyTheme: window.applyTheme,
+      applyWidth: applyWidth,
+      getHideResolved: isHideResolved,
+      setHideResolved: setHideResolved,
+      onHideResolvedChange: function () { refreshHideResolvedView(); },
+      hasActivePendingUpdates: hasActivePendingUpdates,
+      syncPendingUpdateButtons: syncPendingUpdateButtons,
+      announceCopy: announceCopy,
+      escape: escapeHtml,
+      themePalettes: window.hunkyard.palettes,
+      paletteDefaults: window.hunkyard.themePalette.pair(loadSettings(), window.hunkyard.palettes),
+      onRendererSettingChange: async function(key, value) {
+        setSetting(key, value);
+        if (key === 'lightPalette' || key === 'darkPalette' || key === 'boostContrast') {
+          applyHunkyardPalette();
+          const pool = await pierreWorkerPoolReady();
+          if (pool) await pool.setRenderOptions({ theme: pierreDisplayOptions().theme });
+          window.hunkyard.codeHighlight.configure({ pool: pierreWorkerPoolReady });
+          await reloadForScope();
+        } else {
+          const pool = await pierreWorkerPoolReady();
+          if (key === 'inlineDiff' && pool) await pool.setRenderOptions({ lineDiffType: pierreDisplayOptions().lineDiffType });
+          // Line numbers and long lines reach rendered markdown through CSS.
+          window.hunkyard.shared.applyDisplayAttributes();
+          renderAllFiles();
+          if (storyActive()) renderStory();
+        }
+      },
+    };
+    // Ignore-whitespace only applies to code diffs (git mode). Providing the
+    // hooks + show flag only in git mode keeps the toggle out of file/preview
+    // review, where there are no git diffs to recompute.
+    if (isGit) {
+      hooks.getIgnoreWhitespace = function () { return ignoreWhitespace; };
+      hooks.setIgnoreWhitespace = function (v) { ignoreWhitespace = !!v; setSetting('ignoreWhitespace', ignoreWhitespace); };
+      hooks.onIgnoreWhitespaceChange = function () { reloadForScope(); };
+    }
+    shared.renderSettingsTab(pane, {
+      mode: 'code-review',
+      cfg: cfg,
+      show: isGit ? { ignoreWhitespace: true } : undefined,
+      hooks: hooks,
+    });
+  }
+
+  function renderUpdatesPane(cfg) {
+    const shared = window.hunkyard && window.hunkyard.settingsPanes;
+    if (shared && shared.renderUpdatesPane) {
+      shared.renderUpdatesPane(document.getElementById('updatesPane'), cfg, {
+        hasActivePendingUpdates: hasActivePendingUpdates,
+        syncPendingUpdateButtons: syncPendingUpdateButtons,
+        announceCopy: announceCopy,
+      });
+    }
+  }
+
+  function renderShortcutsPane() {
+    const shared = window.hunkyard && window.hunkyard.settingsPanes;
+    if (shared && shared.renderShortcutsPane) {
+      shared.renderShortcutsPane(document.getElementById('shortcutsPane'), { mode: 'code-review' });
+    }
+  }
+
+  function renderAboutPane(cfg) {
+    const shared = window.hunkyard && window.hunkyard.settingsPanes;
+    if (shared && shared.renderAboutPane) {
+      shared.renderAboutPane(document.getElementById('aboutPane'), cfg, session);
+    }
+  }
+
+  // Settings overlay shell (open/close/Esc/?/focus-trap/sliding-underline/
+  // tab click + arrow nav) is owned by hunkyard-settings-overlay.js.
+  getSettingsCtl();
+
+  document.getElementById('noChangesOverlay').addEventListener('click', function(e) {
+    if (e.target === this) hideNoChangesConfirm();
+  });
+
+  document.addEventListener('keydown', function(e) {
+    const tag = document.activeElement.tagName;
+    if (tag === 'TEXTAREA' || tag === 'INPUT' || tag === 'SELECT' || document.activeElement.isContentEditable) {
+      if (e.key === 'Escape' && activeForms.length > 0) {
+        e.preventDefault();
+        const ta = document.activeElement;
+        if (ta && ta.dataset && ta.dataset.formKey) {
+          const form = activeForms.find(function(f) { return f.formKey === ta.dataset.formKey; });
+          if (form && confirmDiscardCommentForm(form)) cancelComment(form);
+        }
+      }
+      return;
+    }
+
+    if (document.getElementById('noChangesOverlay').classList.contains('active')) {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        hideNoChangesConfirm();
+      }
+      return;
+    }
+
+    // Esc/? while settings overlay is open are owned by hunkyard-settings-overlay.js;
+    // short-circuit the rest of the keymap so we don't double-handle.
+    if (settingsPanelOpen) return;
+
+    const shortcutRegistry = window.hunkyard && window.hunkyard.shortcuts;
+    const shortcutAction = shortcutRegistry ? shortcutRegistry.actionForEvent(e, 'code-review') : '';
+    if (!shortcutAction && (e.metaKey || e.ctrlKey || e.altKey)) return;
+    const interactive = e.target && e.target.closest && e.target.closest(
+      'button, a[href], summary, [role="button"], [role="link"], [role="radio"], [role="checkbox"], [role="switch"], [role="tab"], [role="menuitem"], [role="option"], [role="slider"]'
+    );
+    if (interactive && [' ', 'Enter', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(e.key)) return;
+
+    // Story navigation actions (chapter nav / overview / jump / help). Scoped
+    // to the active story view. Returns early if consumed.
+    if (handleStoryKey(e, shortcutAction)) return;
+
+    switch (shortcutAction || e.key) {
+      case 'next_block': case 'previous_block': {
+        e.preventDefault();
+        navigateBlock(shortcutAction === 'next_block' ? 1 : -1);
+        break;
+      }
+      case 'visual_mode': {
+        e.preventDefault();
+        if (pierreView && pierreViewActive()) {
+          if (pierreVisualAnchor) {
+            pierreVisualAnchor = null;
+            document.body.classList.remove('visual-mode');
+          } else if (pierreFocus) {
+            pierreVisualAnchor = Object.assign({}, pierreFocus);
+            document.body.classList.add('visual-mode');
+          }
+          showPierreFocus();
+        }
+        break;
+      }
+      case 'comment': {
+        e.preventDefault();
+        // If text is selected, comment on the selection (with quote).
+        // Otherwise fall back to the focused block.
+        if (tryOpenFormFromSelection()) return;
+        if (pierreView && pierreViewActive()) {
+          if (!pierreFocus) return;
+          const anchor = pierreVisualAnchor && pierreVisualAnchor.path === pierreFocus.path ? pierreVisualAnchor : pierreFocus;
+          const start = Math.min(anchor.line, pierreFocus.line);
+          pierreVisualAnchor = null;
+          document.body.classList.remove('visual-mode');
+          if (pierreFocus.block !== undefined) {
+            // Document blocks: the form sits after the last block of the range.
+            clearPierreDocVisual();
+            openForm({ filePath: pierreFocus.path, afterBlockIndex: Math.max(anchor.block, pierreFocus.block),
+              startLine: start, endLine: Math.max(anchor.endLine, pierreFocus.endLine), editingId: null });
+            return;
+          }
+          const end = Math.max(anchor.line, pierreFocus.line);
+          const side = anchor.side;
+          openForm({ filePath: pierreFocus.path, afterBlockIndex: null, startLine: start, endLine: end, editingId: null, side: side || undefined });
+          return;
+        }
+        if (!focusedElement) return;
+        // Markdown line block
+        if (focusedElement.dataset.filePath && focusedElement.dataset.blockIndex !== undefined) {
+          const fp = focusedElement.dataset.filePath;
+          const bi = parseInt(focusedElement.dataset.blockIndex);
+          const file = getFileByPath(fp);
+          if (!file || !file.lineBlocks) return;
+          const block = file.lineBlocks[bi];
+          openForm({ filePath: fp, afterBlockIndex: bi, startLine: block.startLine, endLine: block.endLine, editingId: null });
+        }
+        // Diff line
+        else {
+          const loc = getFocusedCommentLocation();
+          if (!loc || loc.lineNum === undefined) return;
+          openForm({ filePath: loc.filePath, afterBlockIndex: null, startLine: loc.lineNum, endLine: loc.lineNum, editingId: null, side: loc.side || undefined });
+        }
+        break;
+      }
+      case 'edit_comment':
+      case 'delete_comment': {
+        e.preventDefault();
+        const loc = getFocusedCommentLocation();
+        if (!loc) return;
+        const file = getFileByPath(loc.filePath);
+        if (!file || !file.comments || file.comments.length === 0) return;
+        // Find comments for the focused line
+        let comment = null;
+        if (loc.blockIndex !== undefined && !isNaN(loc.blockIndex)) {
+          const block = file.lineBlocks[loc.blockIndex];
+          if (block) {
+            comment = file.comments.find(function(c) { return c.end_line >= block.startLine && c.end_line <= block.endLine; });
+          }
+        } else if (loc.lineNum !== undefined) {
+          comment = file.comments.find(function(c) { return c.end_line === loc.lineNum && (c.side || '') === loc.side; });
+        }
+        if (!comment) return;
+        if (shortcutAction === 'edit_comment') editComment(comment, loc.filePath);
+        else deleteComment(comment.id, loc.filePath);
+        break;
+      }
+      case 'finish_review': {
+        e.preventDefault();
+        if (uiState !== 'reviewing') return;
+        document.getElementById('finishBtn').click();
+        break;
+      }
+      case 'general_comment': {
+        e.preventDefault();
+        openReviewCommentForm();
+        break;
+      }
+      case 'toggle_comments': {
+        e.preventDefault();
+        if (storyActive() && tryOpenFormFromSelection()) return;
+        toggleCommentsPanel();
+        break;
+      }
+      case 'toggle_resolved': {
+        e.preventDefault();
+        setHideResolved(!isHideResolved());
+        refreshHideResolvedView();
+        const ht = document.getElementById('hideResolvedToggle');
+        if (ht) ht.checked = isHideResolved();
+        break;
+      }
+      case 'toggle_file_tree': {
+        const treeBtn = document.getElementById('fileTreeToggle');
+        // CSS hides the button on mobile (diff) / single-file; inline style
+        // only covers the single-file path in renderFileTree. Read computed
+        // display so `b` no-ops whenever the control is meant to be unavailable.
+        // In story mode the same button stays visible and toggles the chapter rail.
+        if (!treeBtn || getComputedStyle(treeBtn).display === 'none') return;
+        e.preventDefault();
+        treeBtn.click();
+        break;
+      }
+      case 'toggle_toc': {
+        const tocBtn = document.getElementById('tocToggle');
+        if (tocBtn.style.display === 'none') return;
+        e.preventDefault();
+        tocBtn.click();
+        break;
+      }
+      case 'next_comment': {
+        e.preventDefault();
+        navigateToComment(1);
+        break;
+      }
+      case 'previous_comment': {
+        e.preventDefault();
+        navigateToComment(-1);
+        break;
+      }
+      case 'next_change': {
+        e.preventDefault();
+        navigateToChange(1);
+        break;
+      }
+      case 'previous_change': {
+        e.preventDefault();
+        navigateToChange(-1);
+        break;
+      }
+      case 'scope_all': case 'scope_branch': case 'scope_staged': case 'scope_unstaged': {
+        if (session.mode !== 'git') break;
+        const scopeMap = { scope_all: 'all', scope_branch: 'branch', scope_staged: 'staged', scope_unstaged: 'unstaged' };
+        const scope = scopeMap[shortcutAction];
+        const btn = document.querySelector('#scopeToggle .toggle-btn[data-scope="' + scope + '"]');
+        if (btn && !btn.disabled && !btn.classList.contains('active')) {
+          e.preventDefault();
+          btn.click();
+        }
+        break;
+      }
+      case '?': {
+        if (settingsPanelOpen) break;
+        e.preventDefault();
+        openSettingsPanel('shortcuts');
+        break;
+      }
+      case 'Escape': {
+        e.preventDefault();
+        // The find bar is the top layer, unless the diagram overlay or the
+        // stack chip popover (their own Esc handlers run after this one) is.
+        if (!document.querySelector('.diagram-overlay.active') && !isStackChipOpen() && hunkyardFind.closeFromEscape(e)) break;
+        if (reviewCommentFormActive) {
+          if (confirmDiscardReviewCommentForm()) cancelReviewCommentForm();
+        }
+        else if (activeForms.length > 0) {
+          const form = activeForms[activeForms.length - 1];
+          if (confirmDiscardCommentForm(form)) cancelComment(form);
+        }
+        else if (selectionStart !== null) {
+          const clearPath = activeFilePath;
+          selectionStart = null;
+          selectionEnd = null;
+          activeFilePath = null;
+          if (clearPath) renderFileByPath(clearPath);
+        } else if (pierreVisualAnchor) {
+          // Leave visual mode, keep the focused line.
+          pierreVisualAnchor = null;
+          document.body.classList.remove('visual-mode');
+          showPierreFocus();
+        } else if (pierreFocus) {
+          clearPierreFocus();
+          document.body.classList.remove('visual-mode');
+          clearKeyboardFocusTarget();
+        } else if (focusedElement) {
+          document.querySelectorAll('.kb-nav.focused').forEach(function(el) { el.classList.remove('focused'); });
+          focusedBlockIndex = null;
+          focusedFilePath = null;
+          focusedElement = null;
+          clearKeyboardFocusTarget();
+        }
+        break;
+      }
+    }
+  });
+
+  // ===== Select-to-Comment helper =====
+  // Selection alone never opens the form — copying text stays unhindered.
+  // The user presses `c` after selecting to comment on the selection.
+  // Returns true if a form was opened from an active selection.
+  function tryOpenFormFromSelection() {
+    const selection = window.getSelection();
+    // Code lines (Pierre shadow roots, list or story); otherwise the light
+    // DOM path below (rendered markdown documents).
+    const sel = window.hunkyard.pierreDOM.pierreSelectionForComment(selection);
+    if (sel) {
+      selection.removeAllRanges();
+      openForm({
+        filePath: sel.filePath, afterBlockIndex: null, startLine: sel.startLine, endLine: sel.endLine,
+        editingId: null, side: sel.side || undefined, quote: sel.quote, quoteOffset: sel.quoteOffset,
+      });
+      return true;
+    }
+    const range = getLineRangeFromSelection(selection);
+    if (!range) return false;
+
+    // Capture the selected text for the quote field.
+    // If the selection covers the full text of the line range, skip the quote.
+    let quote = null;
+    let quoteOffset = null;
+    try {
+      let selectedText = selection.toString().trim();
+      if (selectedText) {
+        // Strip diff gutter markers (+/-) from the start of each line
+        selectedText = selectedText.replace(/^[+\-]/gm, '').trim();
+
+        let fullText = '';
+        const contentEls = [];
+        for (let ln = range.startLine; ln <= range.endLine; ln++) {
+          document.querySelectorAll('.line-block[data-file-path]').forEach(function(el) {
+            if (el.dataset.filePath !== range.filePath) return;
+            const s = parseInt(el.dataset.startLine), endLn = parseInt(el.dataset.endLine);
+            if (s <= ln && endLn >= ln) {
+              el.querySelectorAll('.line-content').forEach(function(content) {
+                if (contentEls.indexOf(content) === -1) {
+                  fullText += (fullText ? '\n' : '') + content.textContent.trim();
+                  contentEls.push(content);
+                }
+              });
+            }
+          });
+        }
+        // Prefer text clipped to side-filtered contentEls so unified del+add
+        // selections don't pollute the quote with the opposite side.
+        const clipped = selectedTextWithinElements(selection, contentEls);
+        if (contentEls.length > 0) selectedText = clipped;
+
+        const normalizedSelected = selectedText.replace(/\s+/g, ' ');
+        const normalizedFull = fullText.trim().replace(/\s+/g, ' ');
+        if (normalizedSelected !== normalizedFull && selectedText.length <= 300) {
+          quote = selectedText;
+
+          // Compute quote_offset: character index of the selection start within
+          // the normalized full text. Disambiguates duplicate substrings.
+          try {
+            const selRange = selection.getRangeAt(0);
+            const startContainer = selRange.startContainer;
+            const startOff = selRange.startOffset;
+
+            let charsBefore = 0;
+            let foundEl = false;
+            for (let ci = 0; ci < contentEls.length; ci++) {
+              if (ci > 0) charsBefore++;
+              if (contentEls[ci].contains(startContainer)) {
+                const walker = document.createTreeWalker(contentEls[ci], NodeFilter.SHOW_TEXT, null);
+                let tn;
+                while ((tn = walker.nextNode())) {
+                  if (tn === startContainer) {
+                    charsBefore += startOff;
+                    break;
+                  }
+                  charsBefore += tn.textContent.length;
+                }
+                foundEl = true;
+                break;
+              }
+              charsBefore += contentEls[ci].textContent.length;
+            }
+
+            if (foundEl) {
+              const rawAll = contentEls.map(function(el) { return el.textContent; }).join(' ');
+              const textBefore = rawAll.slice(0, charsBefore);
+              quoteOffset = textBefore.replace(/\s+/g, ' ').trimStart().length;
+            }
+          } catch { /* offset is a nice-to-have */ }
+        }
+      }
+    } catch { /* quote is a nice-to-have, don't break form opening */ }
+
+    selection.removeAllRanges();
+    openForm({
+      filePath: range.filePath,
+      afterBlockIndex: range.afterBlockIndex,
+      startLine: range.startLine,
+      endLine: range.endLine,
+      editingId: null,
+      quote: quote,
+      quoteOffset: quoteOffset
+    });
+    return true;
+  }
+
+  // ===== Stack breadcrumb + working-tree pill =====
+  //
+  // Replaces the old multi-section focus picker popover with a flatter UI:
+  //   - Stack breadcrumb (in-stack PR navigation) — only when focus is a
+  //     stacked range. Inline DOM, not a popover.
+  //   - Working-tree pill — always visible in range focus (git mode).
+  //
+  // Other PRs / Remote branches are deliberately dropped. The CLI is the
+  // only entry point into range mode from working tree (`hunkyard --pr <N>` or
+  // `hunkyard --range A..B`). See printHelp().
+  const stackChipEl = document.getElementById('stackChip');
+  const stackChipBtnEl = document.getElementById('stackChipBtn');
+  const stackChipLabelEl = document.getElementById('stackChipLabel');
+  const stackPopoverEl = document.getElementById('stackPopover');
+  const stackChipExitEl = document.getElementById('stackChipExit');
+  const resumePrPillEl = document.getElementById('resumePrPill');
+  const compareRailEl = document.getElementById('compareRail');
+  const baseBranchArrowEl = document.getElementById('baseBranchArrow');
+  const wtScopeToggleEl = document.getElementById('scopeToggle');
+
+  // Cached /api/picker.stack array. We only consume `stack` now — `other_prs`
+  // and `branches` are intentionally unused. Refreshed on focus-changed SSE.
+  let stackCache = null;
+  // Repo's literal default branch name (e.g. "master" / "main"). Cached
+  // from /api/picker so the popover root marker reflects what the repo
+  // actually calls its default branch instead of hardcoding "main".
+  let defaultBranchNameCache = '';
+  let pickerLoadInFlight = null;
+
+  // Truncate a label so the chip and popover entries stay readable.
+  function truncateLabel(s, max) {
+    if (!s) return '';
+    if (s.length <= max) return s;
+    return s.slice(0, max - 1) + '\u2026';
+  }
+
+  // entryLabel formats a stack entry as "#<num>: <title>" or "<short branch>".
+  function entryLabel(entry, max) {
+    if (!entry) return '';
+    if (max === undefined || max === null) max = 30;
+    if (entry.pr_number) {
+      let suffix = '';
+      const m = (entry.label || '').match(/^PR #\d+:\s*(.+)$/);
+      if (m && m[1]) suffix = ': ' + m[1];
+      return truncateLabel('#' + entry.pr_number + suffix, max);
+    }
+    return truncateLabel(entry.label || (entry.head_sha ? entry.head_sha.slice(0, 7) : ''), max);
+  }
+
+  // Build the focus payload for switching to a different stack entry.
+  function focusPayloadFromStackEntry(entry, currentFocus) {
+    const fallbackDefault = currentFocus && currentFocus.default_sha ? currentFocus.default_sha : '';
+    const focus = {
+      kind: 'range',
+      base_sha: entry.base_sha,
+      head_sha: entry.head_sha,
+      diff_scope: 'layer',
+      is_stacked: true,
+    };
+    if (entry.pr_number) {
+      focus.change_number = entry.pr_number;
+      focus.forge = 'github';
+    }
+    if (entry.base_ref_name) focus.base_ref_name = entry.base_ref_name;
+    if (!entry.pr_number && entry.label) focus.label = entry.label;
+    const defaultSHA = entry.default_sha || fallbackDefault;
+    if (defaultSHA) focus.default_sha = defaultSHA;
+    return focus;
+  }
+
+  // ----- Stack chip + popover -----
+  //
+  // Replaces the old horizontal breadcrumb. The chip shows the current
+  // entry's label; clicking it opens a vertical tree popover with all
+  // stack entries plus a default-branch entry that flips diff_scope to
+  // full_stack. Scales to any depth without ellipsising the middle.
+  function chipLabelForFocus(focus) {
+    if (!focus || focus.kind !== 'range') return '';
+    if (Array.isArray(stackCache)) {
+      const cur = stackCache.find(function(e) { return e.head_sha === focus.head_sha; });
+      if (cur) return entryLabel(cur, 24);
+    }
+    // No stack data yet (the /api/picker round-trip may take 2+ seconds
+    // because of `gh pr list`). Fall back to fields already on Focus so
+    // the chip's label is correct on first paint.
+    if (focus.change_number) {
+      return '#' + focus.change_number;
+    }
+    if (focus.head_ref_name) return truncateLabel(focus.head_ref_name, 24);
+    if (focus.label) return truncateLabel(focus.label, 24);
+    if (focus.head_sha) return focus.head_sha.slice(0, 7);
+    return 'Stack';
+  }
+
+  function isStackChipOpen() {
+    return stackChipEl && stackChipEl.classList.contains('open');
+  }
+  // Returns interactive popover items in DOM order. Excludes the
+  // non-interactive root marker and any disabled scope option.
+  function focusableStackPopoverItems() {
+    if (!stackPopoverEl) return [];
+    return Array.from(stackPopoverEl.querySelectorAll('button:not(:disabled)'));
+  }
+  function closeStackChip() {
+    if (!stackChipEl) return;
+    const wasOpen = stackChipEl.classList.contains('open');
+    stackChipEl.classList.remove('open');
+    if (stackChipBtnEl) stackChipBtnEl.setAttribute('aria-expanded', 'false');
+    // Return focus to the chip so keyboard users don't lose their place.
+    // Only when we just closed an open popover that has focus inside it.
+    if (wasOpen && stackPopoverEl && stackPopoverEl.contains(document.activeElement) && stackChipBtnEl) {
+      stackChipBtnEl.focus();
+    }
+  }
+  function openStackChip() {
+    if (!stackChipEl) return;
+    stackChipEl.classList.add('open');
+    if (stackChipBtnEl) stackChipBtnEl.setAttribute('aria-expanded', 'true');
+    // Move focus to the first interactive popover item so the menu is
+    // immediately keyboard-navigable. Defer to the next frame so the
+    // popover render has flushed and items exist.
+    requestAnimationFrame(function() {
+      const items = focusableStackPopoverItems();
+      if (items.length > 0) items[0].focus();
+    });
+  }
+
+  // renderStackChip decides whether the chip is visible and paints the
+  // popover contents. The chip hides when stack is < 2 (no navigation
+  // possible). The popover renders a vertical ASCII-tree of all entries.
+  function renderStackChip(focus, stack) {
+    if (!stackChipEl) return;
+    const inRange = focus && focus.kind === 'range';
+    if (!inRange) {
+      stackChipEl.style.display = 'none';
+      stackPopoverEl.innerHTML = '';
+      closeStackChip();
+      return;
+    }
+    // Show the chip immediately from focus data — don't wait for the
+    // /api/picker fetch (which may take 2+ seconds against `gh pr list`).
+    // Three popover states based on stack data:
+    //   stack === null/undefined     → fetch still in flight, show "Loading…"
+    //   stack length ≤ 1             → no surrounding stack to navigate
+    //                                  (e.g. `hunkyard --range A..B` with no
+    //                                  ancestor branches, or an unstacked PR)
+    //   stack length > 1             → render the full tree
+    stackChipEl.style.display = '';
+    if (stackChipLabelEl) stackChipLabelEl.textContent = chipLabelForFocus(focus);
+    if (!Array.isArray(stack)) {
+      stackPopoverEl.innerHTML = '<div class="stack-popover-title">Stack</div>' +
+        '<div class="stack-popover-loading" role="status" aria-live="polite">Loading stack…</div>';
+      return;
+    }
+    if (stack.length <= 1) {
+      // Loaded but no surrounding stack. Render a minimal popover so the
+      // user understands the chip's role (and Escape/click-outside still
+      // close it) without misleading them into thinking there's
+      // somewhere to navigate.
+      stackPopoverEl.innerHTML = '<div class="stack-popover-title">Stack</div>' +
+        '<div class="stack-popover-loading" role="status">No surrounding stack — this is a standalone range.</div>';
+      return;
+    }
+
+    const ordered = stack.slice();
+    const defaultBranchName = defaultBranchNameCache || (ordered[0] && ordered[0].base_ref_name) || 'main';
+    const activeScope = focus.diff_scope || 'layer';
+    const targetIdx = ordered.findIndex(function(entry) { return entry.head_sha === focus.head_sha; });
+    const baseIdx = ordered.findIndex(function(entry) { return entry.head_sha === focus.base_sha; });
+    const hasRootBase = activeScope === 'full_stack' && !!focus.default_sha;
+    // Layer parent is usually focus.base_sha on a stack entry; when base_sha is a
+    // merge-base off-stack, fall back to the next older stack entry below target.
+    let parentIdx = baseIdx;
+    if (!hasRootBase && parentIdx < 0 && targetIdx >= 0 && targetIdx < ordered.length - 1) {
+      parentIdx = targetIdx + 1;
+    }
+
+    function rangeStateForIndex(i) {
+      // Layer scope marks target + any entries down to base when base is present.
+      // Full stack marks target + all entries down to the root default-base marker.
+      if (targetIdx < 0) {
+        return { inRange: false, isRangeStart: false, isRangeEnd: false };
+      }
+      let start = targetIdx;
+      let end = targetIdx;
+      if (hasRootBase) {
+        end = ordered.length - 1;
+      } else if (baseIdx >= 0) {
+        start = Math.min(targetIdx, baseIdx);
+        end = Math.max(targetIdx, baseIdx);
+      }
+      const isInRange = i >= start && i <= end;
+      return { inRange: isInRange };
+    }
+
+    const parts = [];
+    parts.push('<div class="stack-popover-title">Stack</div>');
+
+    // Stack entries — head→base (newest at top), with ├─ / └─ prefixes.
+    ordered.forEach(function(entry, i) {
+      const isLast = i === ordered.length - 1;
+      const tree = isLast ? '\u2514\u2500 ' : '\u251C\u2500 ';
+      const isCurrent = entry.head_sha === focus.head_sha;
+      const isBase = !hasRootBase && parentIdx >= 0 && i === parentIdx;
+      const rangeState = rangeStateForIndex(i);
+      let rowClass = 'stack-popover-item';
+      if (rangeState.inRange) rowClass += ' stack-popover-in-range';
+      if (isBase) rowClass += ' stack-popover-is-base';
+      if (isCurrent) rowClass += ' stack-popover-current stack-popover-is-target';
+      const label = entryLabel(entry, 34);
+      const shortSha = entry.head_sha ? entry.head_sha.slice(0, 7) : '';
+      const marker = '<span class="stack-popover-marker-wrap" aria-hidden="true">'
+        + (isCurrent ? '<span class="stack-popover-marker stack-popover-marker-target">target</span>' : '')
+        + (isBase ? '<span class="stack-popover-marker stack-popover-marker-base">parent</span>' : '')
+        + '</span>';
+      if (isCurrent) {
+        parts.push('<span class="' + rowClass + '" aria-current="page" role="menuitem"' +
+          ' data-head-sha="' + escapeHtml(entry.head_sha || '') + '">' +
+          marker +
+          '<span class="stack-popover-tree" aria-hidden="true">' + tree + '</span>' +
+          '<span class="stack-popover-label">' + escapeHtml(label) + '</span>' +
+          (shortSha ? '<span class="stack-popover-sha">' + escapeHtml(shortSha) + '</span>' : '') +
+          '</span>');
+      } else {
+        const payload = focusPayloadFromStackEntry(entry, focus);
+        const aria = entry.pr_number ? ('Switch to PR #' + entry.pr_number) : ('Switch to ' + label);
+        parts.push('<button type="button" class="' + rowClass + '" role="menuitem"' +
+          ' data-action="switch"' +
+          ' data-head-sha="' + escapeHtml(entry.head_sha || '') + '"' +
+          ' data-focus-payload="' + escapeHtml(JSON.stringify(payload)) + '"' +
+          ' aria-label="' + escapeHtml(aria) + '">' +
+          marker +
+          '<span class="stack-popover-tree" aria-hidden="true">' + tree + '</span>' +
+          '<span class="stack-popover-label">' + escapeHtml(label) + '</span>' +
+          (shortSha ? '<span class="stack-popover-sha">' + escapeHtml(shortSha) + '</span>' : '') +
+          '</button>');
+      }
+    });
+
+    // Base marker — non-interactive root at the bottom of the tree.
+    parts.push('<span class="stack-popover-item stack-popover-root stack-popover-default' + (hasRootBase ? ' stack-popover-in-range' : '') + '"' +
+      ' role="presentation">' +
+      '<span class="stack-popover-marker-wrap" aria-hidden="true"></span>' +
+      '<span class="stack-popover-tree" aria-hidden="true">  </span>' +
+      '<span class="stack-popover-label">stack root: ' + escapeHtml(defaultBranchName) + '</span>' +
+      '</span>');
+
+    // "Compare against" radio section. Lives inside the popover so the
+    // page header doesn't need a second toolbar row for what is a
+    // relatively rare action. One-line subcopy explains what each scope
+    // means — first-time users always ask "wait, what does This commit mean?"
+    // Scope rows are always rendered in range mode — "This commit" is the
+    // canonical default. Full stack is disabled (with explanation) when
+    // default_sha is missing, which keeps the option discoverable so the
+    // user understands why they can't reach it rather than wondering
+    // where the option went.
+    {
+      const fullStackEnabled = !!focus.default_sha;
+      // Subcopy mirrors what full-stack diffs against: the literal
+      // default branch tip.
+      const fullStackBaseName = defaultBranchName || 'default';
+      parts.push('<div class="stack-popover-divider" role="separator"></div>');
+      parts.push('<div class="stack-popover-title">Compare against</div>');
+      parts.push(
+        '<button type="button" class="stack-popover-scope' + (activeScope === 'layer' ? ' is-active' : '') + '"' +
+        ' role="menuitemradio" aria-checked="' + (activeScope === 'layer') + '"' +
+        ' data-action="scope" data-diff-scope="layer">' +
+          '<span class="stack-popover-scope-radio" aria-hidden="true"></span>' +
+          '<span class="stack-popover-scope-text">' +
+            '<span class="stack-popover-scope-name">This commit</span>' +
+            '<span class="stack-popover-scope-sub">Only changes in this commit</span>' +
+          '</span>' +
+        '</button>'
+      );
+      parts.push(
+        '<button type="button" class="stack-popover-scope' + (activeScope === 'full_stack' ? ' is-active' : '') + '"' +
+        ' role="menuitemradio" aria-checked="' + (activeScope === 'full_stack') + '"' +
+        (fullStackEnabled ? '' : ' disabled aria-disabled="true" title="Requires resolved default branch SHA"') +
+        ' data-action="scope" data-diff-scope="full_stack">' +
+          '<span class="stack-popover-scope-radio" aria-hidden="true"></span>' +
+          '<span class="stack-popover-scope-text">' +
+            '<span class="stack-popover-scope-name">Full stack</span>' +
+            '<span class="stack-popover-scope-sub">All changes from ' + escapeHtml(fullStackBaseName) + ' to here</span>' +
+          '</span>' +
+        '</button>'
+      );
+    }
+
+    stackPopoverEl.innerHTML = parts.join('');
+  }
+
+  function renderStackChipExit(focus, mode) {
+    if (!stackChipExitEl) return;
+    const show = mode === 'git' && focus && focus.kind === 'range';
+    stackChipExitEl.style.display = show ? '' : 'none';
+  }
+
+  // renderResumePill shows a "Resume PR #N" (or "Resume A..B" for ranges
+  // without a PR number) affordance whenever the user is in working_tree
+  // mode AND there's a stashed last range focus on the session.
+  function renderResumePill(focus, lastRange, mode) {
+    if (!resumePrPillEl) return;
+    const inWT = focus && (focus.kind === 'working_tree' || !focus.kind);
+    const show = mode === 'git' && inWT && lastRange && lastRange.kind === 'range';
+    if (!show) {
+      resumePrPillEl.style.display = 'none';
+      return;
+    }
+    let label;
+    if (lastRange.change_number) {
+      label = 'Resume PR #' + lastRange.change_number;
+    } else if (lastRange.head_ref_name) {
+      label = 'Resume stack: ' + lastRange.head_ref_name;
+    } else {
+      const b = lastRange.base_sha ? lastRange.base_sha.slice(0, 7) : '?';
+      const h = lastRange.head_sha ? lastRange.head_sha.slice(0, 7) : '?';
+      label = 'Resume ' + b + '..' + h;
+    }
+    resumePrPillEl.textContent = label;
+    resumePrPillEl.setAttribute('aria-label', label);
+    resumePrPillEl.style.display = '';
+  }
+
+  function applyFocusToHeader(focus) {
+    const mode = session && session.mode;
+    renderStackChip(focus, stackCache);
+    renderStackChipExit(focus, mode);
+    renderResumePill(focus, session && session.last_range_focus, mode);
+    const inRange = focus && focus.kind === 'range';
+    updateCompareAndCommitChrome();
+    // Toggle compare-rail mode class — drives the segmented-composite
+    // visual merge of branch chip + stack chip in stack mode.
+    if (compareRailEl) compareRailEl.classList.toggle('is-stack', !!inRange);
+    // Diff-scope (Layer / Full stack) lives inside the stack popover
+    // (see "Compare against" section in renderStackChip).
+    // Working-tree scope toggle (All / Branch / Staged / Unstaged)
+    // filters by working-tree state vs baseRef — meaningless when the
+    // diff is pinned to BaseSHA..HeadSHA. Hide it in range mode to
+    // prevent confusing half-baked interactions where the file list
+    // gets working-tree-filtered but diffs stay range-pinned. Restore
+    // visibility when leaving range mode in git mode (clicking the ✕
+    // exits to working tree without re-running init's setup, so
+    // without this branch the toggle stays hidden until next reload).
+    if (wtScopeToggleEl) {
+      if (inRange) {
+        wtScopeToggleEl.style.display = 'none';
+      } else if (mode === 'git') {
+        wtScopeToggleEl.style.display = '';
+      }
+    }
+  }
+
+  // Fetch /api/picker and cache the stack array. Concurrent calls share
+  // the in-flight promise so init + focus-changed SSE don't double-fetch,
+  // but a transition that arrives WHILE a previous fetch is still pending
+  // schedules a follow-up refresh — without this, focus A→B→C where A is
+  // still loading would never refetch C-side data and the popover would
+  // stay stale until the next external trigger. The /api/picker endpoint
+  // is server-cached for 60s so the extra round-trip is essentially free.
+  let pickerRefetchQueued = false;
+  async function loadStackFromPicker() {
+    if (pickerLoadInFlight) {
+      pickerRefetchQueued = true;
+      return pickerLoadInFlight;
+    }
+    pickerLoadInFlight = (async function() {
+      try {
+        const res = await fetch('/api/picker');
+        if (!res.ok) {
+          // Stamp an empty cache so the popover transitions out of the
+          // "Loading…" placeholder state. Otherwise a transient picker
+          // failure leaves the user staring at a stuck spinner.
+          if (!Array.isArray(stackCache)) stackCache = [];
+          applyFocusToHeader((session && session.focus) || { kind: 'working_tree' });
+          return;
+        }
+        const data = await res.json();
+        stackCache = Array.isArray(data.stack) ? data.stack : [];
+        defaultBranchNameCache = data.default_branch_name || '';
+        applyFocusToHeader((session && session.focus) || { kind: 'working_tree' });
+      } catch (err) {
+        console.error('picker fetch failed:', err);
+        if (!Array.isArray(stackCache)) stackCache = [];
+        applyFocusToHeader((session && session.focus) || { kind: 'working_tree' });
+      } finally {
+        pickerLoadInFlight = null;
+      }
+    })();
+    const result = pickerLoadInFlight;
+    result.then(function() {
+      if (pickerRefetchQueued) {
+        pickerRefetchQueued = false;
+        loadStackFromPicker();
+      }
+    });
+    return result;
+  }
+
+  async function postFocus(focus) {
+    try {
+      const res = await fetch('/api/focus', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(focus),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        console.error('Focus switch failed:', text);
+      }
+    } catch (err) {
+      console.error('Focus switch error:', err);
+    }
+  }
+
+  if (stackChipBtnEl) {
+    stackChipBtnEl.addEventListener('click', function(e) {
+      e.stopPropagation();
+      if (isStackChipOpen()) closeStackChip();
+      else openStackChip();
+    });
+    // ArrowDown / ArrowUp on the chip button opens the popover with
+    // focus already on the first item — standard menu-button pattern.
+    stackChipBtnEl.addEventListener('keydown', function(e) {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+      e.preventDefault();
+      if (!isStackChipOpen()) openStackChip();
+    });
+  }
+  if (stackPopoverEl) {
+    stackPopoverEl.addEventListener('click', function(e) {
+      const btn = e.target.closest('button[data-action]');
+      if (!btn || btn.hasAttribute('disabled')) return;
+      const action = btn.getAttribute('data-action');
+      const focus = session && session.focus;
+      if (!focus || focus.kind !== 'range') return;
+      if (action === 'switch') {
+        const payloadAttr = btn.getAttribute('data-focus-payload');
+        closeStackChip();
+        if (!payloadAttr) return;
+        try {
+          postFocus(JSON.parse(payloadAttr));
+        } catch (err) {
+          console.error('Failed to parse stack popover payload:', err);
+        }
+      } else if (action === 'scope') {
+        const newScope = btn.getAttribute('data-diff-scope');
+        if (!newScope || newScope === (focus.diff_scope || 'layer')) return;
+        closeStackChip();
+        postFocus(Object.assign({}, focus, { diff_scope: newScope }));
+      }
+    });
+    // Arrow-key navigation between popover items + Home/End jumps. Tab
+    // continues to work natively (escapes the menu), Escape closes the
+    // popover via the document-level handler.
+    stackPopoverEl.addEventListener('keydown', function(e) {
+      const navKeys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+      if (navKeys.indexOf(e.key) === -1) return;
+      const items = focusableStackPopoverItems();
+      if (items.length === 0) return;
+      const currentIdx = items.indexOf(document.activeElement);
+      let nextIdx = currentIdx;
+      if (e.key === 'ArrowDown') {
+        nextIdx = currentIdx < 0 ? 0 : (currentIdx + 1) % items.length;
+      } else if (e.key === 'ArrowUp') {
+        nextIdx = currentIdx <= 0 ? items.length - 1 : currentIdx - 1;
+      } else if (e.key === 'Home') {
+        nextIdx = 0;
+      } else if (e.key === 'End') {
+        nextIdx = items.length - 1;
+      }
+      e.preventDefault();
+      items[nextIdx].focus();
+    });
+  }
+  // Click-outside + Escape close the popover.
+  document.addEventListener('click', function(e) {
+    if (!isStackChipOpen()) return;
+    if (stackChipEl && !stackChipEl.contains(e.target)) closeStackChip();
+  });
+  document.addEventListener('keydown', function(e) {
+    if (e.key === 'Escape' && isStackChipOpen()) {
+      closeStackChip();
+      e.stopImmediatePropagation();
+    }
+  });
+
+  if (stackChipExitEl) {
+    stackChipExitEl.addEventListener('click', function(e) {
+      e.stopPropagation();
+      closeStackChip();
+      postFocus({ kind: 'working_tree' });
+    });
+  }
+
+  if (resumePrPillEl) {
+    resumePrPillEl.addEventListener('click', function() {
+      const last = session && session.last_range_focus;
+      if (!last || last.kind !== 'range') return;
+      // Build a minimal range-focus payload from the stashed Focus.
+      const payload = {
+        kind: 'range',
+        base_sha: last.base_sha,
+        head_sha: last.head_sha,
+        diff_scope: last.diff_scope || 'layer',
+      };
+      if (last.change_number) {
+        payload.change_number = last.change_number;
+        payload.forge = last.forge;
+      }
+      if (last.default_sha) payload.default_sha = last.default_sha;
+      if (last.is_stacked) payload.is_stacked = true;
+      if (last.label) payload.label = last.label;
+      if (last.base_ref_name) payload.base_ref_name = last.base_ref_name;
+      if (last.head_ref_name) payload.head_ref_name = last.head_ref_name;
+      postFocus(payload);
+    });
+  }
+
+  // ===== Story mode =====
+  // Opt-in editorial layer: session.story groups the diff's hunks into
+  // chapters. When absent, storyState stays null and every branch below is
+  // skipped — flat file/diff rendering is byte-identical to before. The
+  // chapter body reuses the SAME diff renderer (renderDiffHunks) via a
+  // shallow file clone whose diffHunks are filtered to the chapter's hunks;
+  // comments follow their hunk with no duplicated comment logic.
+  //
+  // storyState (rebuilt on session.story change):
+  //   { story, pages: [{kind:'chapter'|'support', idx, id, title, summary,
+  //                      groups: [{filePath, hunks:[hunkObj]}] }],
+  //     hunkOwner: Map("<path>\0<oldStart>" -> pageIndex),
+  //     fileChapters: Map(path -> Set(pageIndex)) }
+  // storyView: 'overview' | page id ('ch1' | 'support' | chapter id).
+  let storyState = null;
+  let storyView = 'overview';
+  // storyHidden: per-page-session escape hatch. "Hide story view" sets this
+  // (non-destructive — the story stays on disk and in session.story); the flat
+  // file layout renders instead, with a "Show story view" re-entry affordance.
+  // NOT persisted: a reload with a story present shows the story view again. A
+  // fresh story via SSE resets it to false; a null story clears it entirely.
+  let storyHidden = false;
+  let storyCleared = false;
+  const storyExpandedFileCache = new Map();
+
+  function hunkKey(filePath, oldStart) { return filePath + '\0' + oldStart; }
+
+  // Stable page id: chapters use their author id (or 'chN'); support is 'support'.
+  function storyPageId(page) {
+    if (page.kind === 'support') return 'support';
+    return page.id || ('ch' + (page.idx + 1));
+  }
+
+  function storyHasContent(story) {
+    if (!story) return false;
+    const chapters = Array.isArray(story.chapters) ? story.chapters : [];
+    const support = Array.isArray(story.support) ? story.support : [];
+    return chapters.length > 0 || support.length > 0;
+  }
+
+  function storyNeedsRawDiff() {
+    return storyHasContent(session && session.story) && !storyHidden;
+  }
+
+  async function hydrateStoryIfMissing(nextSession) {
+    if (storyCleared) {
+      if (nextSession) delete nextSession.story;
+      return nextSession;
+    }
+    if (!nextSession || storyHasContent(nextSession.story)) return nextSession;
+    if (storyHasContent(session && session.story)) {
+      nextSession.story = session.story;
+      return nextSession;
+    }
+    try {
+      const res = await fetch('/api/story');
+      if (!res.ok || res.status === 204) return nextSession;
+      const story = await res.json();
+      if (storyHasContent(story)) nextSession.story = story;
+    } catch {
+      // Story mode is additive; a failed side fetch should not block diff review.
+    }
+    return nextSession;
+  }
+
+  function storyReferencedFilePaths(story) {
+    const paths = new Set();
+    function addRefs(refs) {
+      (refs || []).forEach(function (ref) {
+        const fp = ref.file_path || ref.filePath;
+        if (fp !== undefined && fp !== null) paths.add(fp);
+      });
+    }
+    (Array.isArray(story && story.chapters) ? story.chapters : []).forEach(function (chapter) {
+      addRefs(chapter.hunk_refs || chapter.hunkRefs);
+    });
+    (Array.isArray(story && story.support) ? story.support : []).forEach(function (entry) {
+      addRefs(entry.hunk_refs || entry.hunkRefs);
+    });
+    return paths;
+  }
+
+  function sessionIsMissingStoryFiles(nextSession) {
+    if (!nextSession || !storyHasContent(nextSession.story)) return false;
+    const sessionPaths = new Set((nextSession.files || []).map(function (fileInfo) { return fileInfo.path; }));
+    const storyPaths = storyReferencedFilePaths(nextSession.story);
+    for (const filePath of storyPaths) {
+      if (!sessionPaths.has(filePath)) return true;
+    }
+    return false;
+  }
+
+  async function hydrateFullSessionForStoryIfNeeded(nextSession) {
+    if (storyCleared) {
+      if (nextSession) delete nextSession.story;
+      return nextSession;
+    }
+    if (!nextSession || nextSession.mode !== 'git' || storyHidden || sessionFocusIsRange(nextSession)) return nextSession;
+    if (!sessionIsMissingStoryFiles(nextSession)) return nextSession;
+    try {
+      let fullSession = await fetchWhenReady('/api/session?scope=all');
+      if (!storyHasContent(fullSession.story)) fullSession.story = nextSession.story;
+      fullSession = await hydrateStoryIfMissing(fullSession);
+      return fullSession;
+    } catch {
+      return nextSession;
+    }
+  }
+
+  function updateStoryViewToggle() {
+    const toggle = document.getElementById('storyViewToggle');
+    if (!toggle) return;
+    const present = !!(session && storyHasContent(session.story));
+    toggle.style.display = present ? '' : 'none';
+    toggle.querySelectorAll('.toggle-btn').forEach(function (btn) {
+      const active = storyHidden ? btn.dataset.storyView === 'diff' : btn.dataset.storyView === 'story';
+      btn.classList.toggle('active', active);
+    });
+  }
+
+  function buildStoryState(story) {
+    // Accept a support-only story (chapters: [] or absent) — the --skip-llm
+    // stub places every hunk in one support entry to exercise the renderer.
+    if (!storyHasContent(story)) return null;
+    const pages = [];
+    const hunkOwner = new Map();
+    const fileChapters = new Map();
+
+    function addRefsToPage(refs, pageIndex) {
+      const byFile = new Map();
+      (refs || []).forEach(function (ref) {
+        const fp = ref.file_path || ref.filePath;
+        if (fp === undefined || fp === null) return;
+        let oldStart = 0;
+        if (ref.old_start !== undefined && ref.old_start !== null) oldStart = ref.old_start;
+        else if (ref.oldStart !== undefined && ref.oldStart !== null) oldStart = ref.oldStart;
+        hunkOwner.set(hunkKey(fp, oldStart), pageIndex);
+        if (!byFile.has(fp)) byFile.set(fp, []);
+        byFile.get(fp).push(oldStart);
+        if (!fileChapters.has(fp)) fileChapters.set(fp, new Set());
+        fileChapters.get(fp).add(pageIndex);
+      });
+      return byFile;
+    }
+
+    (Array.isArray(story.chapters) ? story.chapters : []).forEach(function (ch, i) {
+      const page = { kind: 'chapter', idx: i, id: ch.id || ('ch' + (i + 1)), title: ch.title || ('Chapter ' + (i + 1)), summary: ch.summary || '', diagram: ch.diagram || '', refsByFile: null };
+      page.refsByFile = addRefsToPage(ch.hunk_refs || ch.hunkRefs, pages.length);
+      pages.push(page);
+    });
+
+    if (Array.isArray(story.support) && story.support.length) {
+      // Support is a single page; concatenate every support entry's refs, but
+      // keep each entry's reason for display.
+      const supportPage = { kind: 'support', idx: 0, id: 'support', title: 'Support', summary: '', entries: story.support, refsByFile: null };
+      const allRefs = [];
+      story.support.forEach(function (e) { (e.hunk_refs || e.hunkRefs || []).forEach(function (r) { allRefs.push(r); }); });
+      supportPage.refsByFile = addRefsToPage(allRefs, pages.length);
+      pages.push(supportPage);
+    }
+
+    return { story: story, pages: pages, hunkOwner: hunkOwner, fileChapters: fileChapters };
+  }
+
+  // Display label for the support page. Falls back to a friendly label when
+  // the only reason is an internal ingest sentinel (stub / auto-repaired /
+  // ignored) or when no reason was authored.
+  function supportPageLabel(page) {
+    const reason = page && page.entries && page.entries[0] && page.entries[0].reason;
+    if (!reason) return 'Support';
+    if (reason === 'stub') return 'All changes';
+    if (reason === 'auto-repaired') return 'Auto-repaired changes';
+    if (reason === 'ignored') return 'Ignored files';
+    return reason;
+  }
+
+  function storyPageById(id) {
+    if (!storyState) return null;
+    for (let i = 0; i < storyState.pages.length; i++) {
+      if (storyPageId(storyState.pages[i]) === id) return storyState.pages[i];
+    }
+    return null;
+  }
+
+  // ----- Story progress -----
+  // Story mode uses the same file.viewed state and localStorage key as the
+  // regular diff. A file marked viewed in a chapter is viewed everywhere.
+  function isStoryFileViewed(filePath) {
+    const file = getFileByPath(filePath);
+    return !!(file && file.viewed);
+  }
+
+  // Progress for a page: {done, total} over its file groups.
+  function storyPageProgress(page) {
+    const groupFiles = Array.from(page.refsByFile.keys());
+    let done = 0;
+    groupFiles.forEach(function (fp) { if (isStoryFileViewed(fp)) done++; });
+    return { done: done, total: groupFiles.length };
+  }
+
+  // Keep the chapter mark button in sync when per-file Viewed state changes.
+  // Updates the existing button in place (preserves scroll/open state) — the
+  // click handler itself reads storyPageProgress live, so only the label needs
+  // syncing here.
+  function updateStoryMarkButton(page) {
+    if (!page || !storyState) return;
+    if (typeof storyView !== 'undefined' && storyView !== storyPageId(page)) return;
+    const view = document.getElementById('hunkyard-story-view-' + storyPageId(page));
+    if (!view) return;
+    const markBtn = view.querySelector('.hunkyard-story-chapter__mark');
+    if (!markBtn) return;
+    const prog = storyPageProgress(page);
+    const allViewed = prog.total > 0 && prog.done >= prog.total;
+    const label = allViewed ? 'Chapter viewed' : 'Mark chapter viewed';
+    if (markBtn.textContent !== label) markBtn.textContent = label;
+  }
+
+  function storyStatusClass(page) {
+    const p = storyPageProgress(page);
+    if (p.total === 0) return '';
+    if (p.done >= p.total) return 'done';
+    if (p.done > 0) return 'partial';
+    return '';
+  }
+  function storyStatusPercent(page) {
+    const p = storyPageProgress(page);
+    return p.total ? Math.round((p.done / p.total) * 100) : 0;
+  }
+
+  function storyExpandedFileKey(pageId, filePath, oldStarts) {
+    return pageId + '\0' + filePath + '\0' + (oldStarts || []).join(',');
+  }
+
+  function copyDiffHunk(hunk) {
+    return Object.assign({}, hunk, { Lines: (hunk.Lines || []).slice() });
+  }
+
+  function hunkContainsOldStart(hunk, oldStart) {
+    if (!hunk) return false;
+    if (hunk.OldStart === oldStart) return true;
+    if (hunk.OldCount <= 0) return false;
+    return oldStart >= hunk.OldStart && oldStart < hunk.OldStart + hunk.OldCount;
+  }
+
+  function syncStoryCloneFromFile(clone, file) {
+    clone.oldPath = file.oldPath;
+    clone.status = file.status;
+    clone.fileType = file.fileType;
+    clone.content = file.content;
+    clone.previousContent = file.previousContent;
+    clone.comments = file.comments;
+    clone.lineBlocks = file.lineBlocks;
+    clone.previousLineBlocks = file.previousLineBlocks;
+    clone.tocItems = file.tocItems;
+    clone.collapsed = file.collapsed;
+    clone.viewed = file.viewed;
+    clone.additions = file.additions;
+    clone.deletions = file.deletions;
+    clone.lazy = file.lazy;
+    clone.generated = file.generated;
+    clone.fileHash = file.fileHash;
+    clone.viewID = file.viewID;
+    clone.viewMode = 'diff';
+  }
+
+  // Story chapters render independently of the flat Diff-view <details>
+  // sections. Lazy files ship with empty diffHunks until opened there, which
+  // made Story show "These hunks are no longer in the diff." Hydrate
+  // the file data here so chapter groups can filter real hunks.
+  function ensureStoryLazyFile(file) {
+    if (!file || !file.lazy) return Promise.resolve(file);
+    if (file._storyLazyPromise) return file._storyLazyPromise;
+    // Match loadAllFileData: when Story is visible, file data is scoped to
+    // 'all' so chapter hunk_refs line up with the loaded diff.
+    file._storyLazyPromise = loadSingleFile({
+      path: file.path,
+      old_path: file.oldPath,
+      status: file.status,
+      file_type: file.fileType,
+      additions: file.additions,
+      deletions: file.deletions,
+    }, currentFileDataScope()).then(function (loaded) {
+      file.oldPath = loaded.oldPath;
+      file.content = loaded.content;
+      file.previousContent = loaded.previousContent;
+      file.diffHunks = loaded.diffHunks;
+      file._autoExpandDone = false;
+      file.lineBlocks = loaded.lineBlocks;
+      file.previousLineBlocks = loaded.previousLineBlocks;
+      file.tocItems = loaded.tocItems;
+      file.fileHash = loaded.fileHash;
+      file.viewID = loaded.viewID;
+      file.lazy = false;
+      file._lazyLoading = false;
+      delete file._storyLazyPromise;
+      // Drop clones built against the empty lazy placeholder.
+      storyExpandedFileCache.clear();
+      if (file.viewMode === 'rendered-diff') {
+        return ensurePreviousLineBlocks(file).then(function () { return file; });
+      }
+      return file;
+    }).catch(function (err) {
+      delete file._storyLazyPromise;
+      throw err;
+    });
+    return file._storyLazyPromise;
+  }
+
+  // Build a shallow file clone whose diffHunks are just the referenced ones,
+  // preserving comments/path so the existing diff+comment renderer works
+  // unchanged. Returns null if the file isn't loaded or has no matching hunks.
+  function cloneFileForHunks(filePath, oldStarts, pageId) {
+    const file = getFileByPath(filePath);
+    if (!file) return null;
+    const wanted = new Set(oldStarts);
+    const allHunks = file.diffHunks || [];
+    const key = storyExpandedFileKey(pageId, filePath, oldStarts);
+    const cached = storyExpandedFileCache.get(key);
+    if (cached && cached.fileHash === file.fileHash) {
+      syncStoryCloneFromFile(cached.clone, file);
+      return { clone: cached.clone, total: cached.total, shown: cached.clone.diffHunks.length };
+    }
+
+    // Deep-copy and apply the same small-gap coalescing that normal diff
+    // rendering applies before filtering. Story refs are generated from the
+    // reviewer-facing hunk starts, while the raw git diff can split a logical
+    // GitHub-style hunk into several close zero-context hunks. Filtering first
+    // drops the later pieces of that visual hunk.
+    const expandedFile = Object.assign({}, file, {
+      diffHunks: allHunks.map(copyDiffHunk),
+      _autoExpandDone: false,
+      viewMode: 'diff',
+    });
+    autoExpandSmallGaps(expandedFile);
+    const expandedHunks = expandedFile.diffHunks || [];
+    const filtered = expandedHunks.filter(function (h) {
+      for (const oldStart of wanted) {
+        if (hunkContainsOldStart(h, oldStart)) return true;
+      }
+      return false;
+    });
+    const copiedHunks = filtered.map(copyDiffHunk);
+    const clone = Object.assign({}, file, {
+      diffHunks: copiedHunks,
+      // Every hunk of the file, so Pierre's old-side content is rebuilt
+      // correctly when the chapter shows only some of them.
+      allDiffHunks: expandedHunks,
+      _autoExpandDone: false,
+      // Force diff view for the group body regardless of markdown viewMode.
+      viewMode: 'diff',
+    });
+    storyExpandedFileCache.set(key, { fileHash: file.fileHash, clone: clone, total: expandedHunks.length });
+    return { clone: clone, total: expandedHunks.length, shown: copiedHunks.length };
+  }
+
+  // ----- Rail -----
+  function renderStoryRail() {
+    const rail = document.getElementById('storyRail');
+    if (!rail || !storyState) return;
+    const chapters = storyState.pages.filter(function (p) { return p.kind === 'chapter'; });
+    const support = storyState.pages.filter(function (p) { return p.kind === 'support'; });
+    const totalHunks = storyState.hunkOwner.size;
+
+    rail.innerHTML = '';
+
+    const titleRow = document.createElement('div');
+    titleRow.className = 'hunkyard-story-rail__title';
+    titleRow.innerHTML = '<h2>Story</h2>';
+    rail.appendChild(titleRow);
+
+    const meta = document.createElement('div');
+    meta.className = 'hunkyard-story-rail__meta';
+    const hunkLbl = totalHunks + ' hunk' + (totalHunks === 1 ? '' : 's');
+    if (chapters.length) {
+      meta.textContent = hunkLbl + ' across ' + chapters.length + ' chapter' + (chapters.length === 1 ? '' : 's') + (support.length ? ' · support' : '');
+    } else {
+      // Support-only story (e.g. the --skip-llm stub).
+      meta.textContent = hunkLbl + ' · support only';
+    }
+    rail.appendChild(meta);
+
+    function railRow(page, isOverview) {
+      const row = document.createElement('button');
+      row.type = 'button';
+      row.className = 'hunkyard-story-row' + (page && page.kind === 'support' ? ' support' : '');
+      const targetId = isOverview ? 'overview' : storyPageId(page);
+      row.dataset.storyTarget = targetId;
+      if (storyView === targetId) row.classList.add('active');
+
+      let indexLabel, name, sub, statusHtml = '';
+      if (isOverview) {
+        indexLabel = '◇';
+        name = 'Prologue &amp; index';
+        sub = 'Why this change exists';
+      } else if (page.kind === 'support') {
+        indexLabel = 'S';
+        const prog = storyPageProgress(page);
+        name = escapeHtml(supportPageLabel(page));
+        sub = prog.total + ' file' + (prog.total === 1 ? '' : 's');
+        statusHtml = railStatusHtml(page);
+      } else {
+        indexLabel = String(page.idx + 1);
+        name = escapeHtml(page.title);
+        const prog = storyPageProgress(page);
+        const nh = countHunksForPage(page);
+        sub = prog.total + ' file' + (prog.total === 1 ? '' : 's') + ' · ' + nh + ' hunk' + (nh === 1 ? '' : 's');
+        statusHtml = railStatusHtml(page);
+      }
+      row.innerHTML =
+        '<span class="hunkyard-story-row__index">' + indexLabel + '</span>' +
+        '<span class="hunkyard-story-row__body">' +
+          '<span class="hunkyard-story-row__name">' + name + '</span>' +
+          '<span class="hunkyard-story-row__sub">' + escapeHtml(sub) + '</span>' +
+        '</span>' + statusHtml;
+      row.addEventListener('click', function () { showStory(targetId); });
+      return row;
+    }
+
+    const ovLabel = document.createElement('div');
+    ovLabel.className = 'hunkyard-story-rail__label';
+    ovLabel.textContent = 'Overview';
+    rail.appendChild(ovLabel);
+    rail.appendChild(railRow(null, true));
+
+    if (chapters.length) {
+      const chLabel = document.createElement('div');
+      chLabel.className = 'hunkyard-story-rail__label';
+      chLabel.textContent = 'Chapters';
+      rail.appendChild(chLabel);
+      chapters.forEach(function (p) { rail.appendChild(railRow(p, false)); });
+    }
+
+    if (support.length) {
+      const sLabel = document.createElement('div');
+      sLabel.className = 'hunkyard-story-rail__label';
+      sLabel.textContent = 'Support';
+      rail.appendChild(sLabel);
+      support.forEach(function (p) { rail.appendChild(railRow(p, false)); });
+    }
+
+    const spacer = document.createElement('div');
+    spacer.className = 'hunkyard-story-rail__spacer';
+    rail.appendChild(spacer);
+
+  }
+
+  function railStatusHtml(page) {
+    const cls = storyStatusClass(page);
+    const pct = storyStatusPercent(page);
+    const style = cls === 'partial' ? ' style="--p:' + pct + '%"' : '';
+    const title = cls === 'done' ? 'Reviewed' : (cls === 'partial' ? pct + '% reviewed' : 'Not reviewed');
+    return '<span class="hunkyard-story-status ' + cls + '"' + style + ' title="' + title + '"></span>';
+  }
+
+  function countHunksForPage(page) {
+    let n = 0;
+    page.refsByFile.forEach(function (arr) { n += arr.length; });
+    return n;
+  }
+
+  // ----- Overview -----
+  function renderStoryOverview() {
+    const inner = document.getElementById('storyPaneInner');
+    const view = document.createElement('section');
+    view.className = 'hunkyard-story-view active';
+    view.id = 'hunkyard-story-view-overview';
+
+    const story = storyState.story;
+    const prologue = story.prologue || {};
+    const chapterPages = storyState.pages.filter(function (p) { return p.kind === 'chapter'; });
+    const hasPrologueContent = !!(prologue.title || prologue.overview ||
+      (Array.isArray(prologue.key_changes) && prologue.key_changes.length) ||
+      (Array.isArray(prologue.risks) && prologue.risks.length) ||
+      prologue.diagram);
+
+    const prologueEl = document.createElement('div');
+    prologueEl.className = 'hunkyard-story-prologue';
+    let ph = '<div class="hunkyard-story-prologue__eyebrow"><span class="dot"></span> Prologue</div>';
+    if (prologue.title) {
+      ph += '<h2>' + escapeHtml(prologue.title) + '</h2>';
+    } else if (!hasPrologueContent) {
+      // Support-only / stub story with no authored prologue — give the page a
+      // heading so it doesn't read as a bare eyebrow.
+      ph += '<h2>' + (chapterPages.length ? 'Story overview' : 'Changes grouped for review') + '</h2>';
+    }
+    prologueEl.innerHTML = ph;
+    if (prologue.overview) {
+      const overview = document.createElement('div');
+      overview.className = 'hunkyard-story-prologue__overview';
+      overview.innerHTML = commentMd.render(prologue.overview);
+      prologueEl.appendChild(overview);
+    }
+    const bullets = renderStoryPrologueBullets(prologue);
+    if (bullets) prologueEl.appendChild(bullets);
+    if (prologue.diagram) {
+      const dia = document.createElement('div');
+      dia.className = 'hunkyard-story-chapter__diagram';
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      code.className = 'language-mermaid';
+      code.textContent = prologue.diagram;
+      pre.appendChild(code);
+      dia.appendChild(pre);
+      prologueEl.appendChild(dia);
+    }
+    view.appendChild(prologueEl);
+
+    const divider = document.createElement('div');
+    divider.className = 'hunkyard-story-divider';
+    divider.textContent = chapterPages.length ? 'Read in order' : 'Changes';
+    view.appendChild(divider);
+
+    const toc = document.createElement('div');
+    toc.className = 'hunkyard-story-toc';
+    storyState.pages.forEach(function (page) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'hunkyard-story-toc__item' + (page.kind === 'support' ? ' support' : '');
+      const pid = storyPageId(page);
+      item.dataset.storyTarget = pid;
+      const prog = storyPageProgress(page);
+      const nh = countHunksForPage(page);
+      const indexLabel = page.kind === 'support' ? 'S' : String(page.idx + 1);
+      const title = page.kind === 'support' ? supportPageLabel(page) : page.title;
+      const summaryHtml = page.kind === 'support'
+        ? 'Mechanical or repaired changes — skimmable.'
+        : (page.summary ? commentMd.renderInline(page.summary) : '');
+      item.innerHTML =
+        '<span class="hunkyard-story-toc__index">' + indexLabel + '</span>' +
+        '<span class="hunkyard-story-toc__main">' +
+          '<span class="hunkyard-story-toc__title">' + escapeHtml(title) + '</span>' +
+          (summaryHtml ? '<span class="hunkyard-story-toc__summary">' + summaryHtml + '</span>' : '') +
+        '</span>' +
+        '<span class="hunkyard-story-toc__meta">' +
+          railStatusHtml(page) +
+          '<span>' + prog.total + 'f · ' + nh + 'h</span>' +
+          '<span class="hunkyard-story-toc__go">→</span>' +
+        '</span>';
+      item.addEventListener('click', function () { showStory(pid); });
+      toc.appendChild(item);
+    });
+    view.appendChild(toc);
+
+    inner.appendChild(view);
+  }
+
+  function renderStoryPrologueBullets(prologue) {
+    const groups = [
+      { label: 'Key changes', items: prologue.key_changes || [] },
+      { label: 'Risks', items: prologue.risks || [] },
+    ].filter(function (group) { return Array.isArray(group.items) && group.items.length; });
+    if (!groups.length) return null;
+
+    const wrap = document.createElement('div');
+    wrap.className = 'hunkyard-story-prologue__bullets';
+    groups.forEach(function (group) {
+      const section = document.createElement('section');
+      section.className = 'hunkyard-story-prologue__bullet-group';
+      const heading = document.createElement('h3');
+      heading.textContent = group.label;
+      section.appendChild(heading);
+      const list = document.createElement('ul');
+      group.items.forEach(function (item) {
+        const li = document.createElement('li');
+        li.innerHTML = commentMd.renderInline(String(item || ''));
+        list.appendChild(li);
+      });
+      section.appendChild(list);
+      wrap.appendChild(section);
+    });
+    return wrap;
+  }
+
+  // ----- Chapter / Support page -----
+  function renderStoryPage(page) {
+    const inner = document.getElementById('storyPaneInner');
+    const isSupport = page.kind === 'support';
+    const pid = storyPageId(page);
+    const chapters = storyState.pages.filter(function (p) { return p.kind === 'chapter'; });
+
+    const view = document.createElement('section');
+    view.className = 'hunkyard-story-view active';
+    view.id = 'hunkyard-story-view-' + pid;
+
+    // Heading
+    const top = document.createElement('div');
+    top.className = 'hunkyard-story-chapter__top';
+    const eyebrow = isSupport ? 'Support · mechanical' : ('Chapter ' + (page.idx + 1) + ' of ' + chapters.length);
+    const indexLabel = isSupport ? 'S' : String(page.idx + 1);
+    const title = isSupport ? supportPageLabel(page) : page.title;
+    top.innerHTML =
+      '<span class="hunkyard-story-chapter__index' + (isSupport ? ' support' : '') + '">' + indexLabel + '</span>' +
+      '<div class="hunkyard-story-chapter__heading">' +
+        '<div class="hunkyard-story-chapter__eyebrow">' + escapeHtml(eyebrow) + '</div>' +
+        '<h2>' + escapeHtml(title) + '</h2>' +
+      '</div>';
+    view.appendChild(top);
+
+    // Summary
+    if (isSupport) {
+      const sum = document.createElement('p');
+      sum.className = 'hunkyard-story-chapter__summary';
+      sum.textContent = 'Skimmable — nothing here changes behaviour.';
+      view.appendChild(sum);
+    } else if (page.summary) {
+      const sum = document.createElement('div');
+      sum.className = 'hunkyard-story-chapter__summary';
+      sum.innerHTML = commentMd.render(page.summary);
+      view.appendChild(sum);
+    }
+    if (!isSupport && page.diagram) {
+      const dia = document.createElement('div');
+      dia.className = 'hunkyard-story-chapter__diagram';
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      code.className = 'language-mermaid';
+      code.textContent = page.diagram;
+      pre.appendChild(code);
+      dia.appendChild(pre);
+      view.appendChild(dia);
+    }
+
+    // Per-file hunk groups
+    const supportReasonByFile = new Map();
+    if (isSupport && page.entries) {
+      page.entries.forEach(function (e) {
+        (e.hunk_refs || e.hunkRefs || []).forEach(function (r) {
+          const fp = r.file_path || r.filePath;
+          if (fp && !supportReasonByFile.has(fp)) supportReasonByFile.set(fp, e.reason || '');
+        });
+      });
+    }
+
+    page.refsByFile.forEach(function (oldStarts, filePath) {
+      view.appendChild(renderStoryFileGroup(page, filePath, oldStarts, supportReasonByFile.get(filePath)));
+    });
+
+    const prog = storyPageProgress(page);
+    const allViewed = prog.total > 0 && prog.done >= prog.total;
+    const markRow = document.createElement('div');
+    markRow.className = 'hunkyard-story-chapter__mark-row';
+    const markBtn = document.createElement('button');
+    markBtn.type = 'button';
+    markBtn.className = 'hunkyard-story-chapter__mark';
+    markBtn.textContent = allViewed ? 'Chapter viewed' : 'Mark chapter viewed';
+    markBtn.addEventListener('click', function () {
+      const cur = storyPageProgress(page);
+      const curAll = cur.total > 0 && cur.done >= cur.total;
+      markPageViewed(page, !curAll);
+    });
+    markRow.appendChild(markBtn);
+    view.appendChild(markRow);
+
+    // Footer: previous/next chapter navigation.
+    const footer = document.createElement('div');
+    footer.className = 'hunkyard-story-footer';
+    const pageIndexInPages = storyState.pages.indexOf(page);
+    const prevPage = storyState.pages[pageIndexInPages - 1];
+    if (prevPage || pageIndexInPages === 0) {
+      const prevCard = document.createElement('button');
+      prevCard.type = 'button';
+      prevCard.className = 'hunkyard-story-next prev';
+      const pidPrev = prevPage ? storyPageId(prevPage) : 'overview';
+      const pLabel = prevPage ? (prevPage.kind === 'support' ? 'S' : String(prevPage.idx + 1)) : 'P';
+      const pTitle = prevPage ? (prevPage.kind === 'support' ? supportPageLabel(prevPage) : prevPage.title) : 'Prologue';
+      prevCard.innerHTML =
+        '<span class="go">←</span>' +
+        '<span class="idx">' + pLabel + '</span>' +
+        '<span class="body"><span class="lbl">Previous</span><span class="nm">' + escapeHtml(pTitle) + '</span></span>';
+      prevCard.addEventListener('click', function () { showStory(pidPrev); });
+      footer.appendChild(prevCard);
+    }
+    const nextCard = document.createElement('button');
+    nextCard.type = 'button';
+    nextCard.className = 'hunkyard-story-next';
+    const nextPage = storyState.pages[pageIndexInPages + 1];
+    if (nextPage) {
+      const nid = storyPageId(nextPage);
+      const nLabel = nextPage.kind === 'support' ? 'S' : String(nextPage.idx + 1);
+      const nTitle = nextPage.kind === 'support' ? supportPageLabel(nextPage) : nextPage.title;
+      nextCard.innerHTML =
+        '<span class="idx">' + nLabel + '</span>' +
+        '<span class="body"><span class="lbl">Next</span><span class="nm">' + escapeHtml(nTitle) + '</span></span>' +
+        '<span class="go">→</span>';
+      nextCard.addEventListener('click', function () { showStory(nid); });
+    } else {
+      nextCard.className += ' done';
+      nextCard.innerHTML =
+        '<span class="idx">✓</span>' +
+        '<span class="body"><span class="lbl">End of story</span><span class="nm">Back to overview</span></span>' +
+        '<span class="go">→</span>';
+      nextCard.addEventListener('click', function () { showStory('overview'); });
+    }
+    footer.appendChild(nextCard);
+    view.appendChild(footer);
+
+    inner.appendChild(view);
+  }
+
+  function renderStoryFileGroup(page, filePath, oldStarts, supportReason) {
+    const pid = storyPageId(page);
+    const file = getFileByPath(filePath);
+    // Lazy placeholders have empty diffHunks — don't filter/cache them as a miss.
+    const built = (file && file.lazy) ? null : cloneFileForHunks(filePath, oldStarts, pid);
+    const section = document.createElement('details');
+    section.className = 'file-section hunkyard-story-file-group';
+    section.id = 'story-file-section-' + pid + '-' + filePath;
+    section.dataset.storyFile = filePath;
+    if (file && file.viewed) section.classList.add('viewed');
+    if (!file || !file.collapsed) section.open = true;
+
+    const header = document.createElement('summary');
+    header.className = 'file-header hunkyard-review-file-header hunkyard-story-file-header';
+    header.addEventListener('click', function (e) {
+      if (e.target.closest('.file-header-toggle') || e.target.closest('.file-header-viewed') || e.target.closest('.file-comment-btn') || e.target.closest('.file-header-copy-path') || e.target.closest('.hunkyard-story-elsewhere')) {
+        e.preventDefault();
+        return;
+      }
+      if (file && section.open) {
+        e.preventDefault();
+        if (section.getBoundingClientRect().top < 0) section.scrollIntoView({ behavior: 'instant' });
+        section.open = false;
+        file.collapsed = true;
+      }
+    });
+    section.addEventListener('toggle', function () {
+      if (file) file.collapsed = !section.open;
+    });
+
+    const shown = built ? built.shown : 0;
+    const total = built ? built.total : 0;
+    let statText;
+    if (supportReason) statText = escapeHtml(supportReason);
+    else if (file && file.lazy) statText = 'Loading\u2026';
+    else if (total > 1 && shown < total) statText = 'hunk' + (shown === 1 ? ' ' : 's ') + shown + ' of ' + total;
+    else statText = shown + ' hunk' + (shown === 1 ? '' : 's');
+    const adds = file ? (file.additions || 0) : 0;
+    const dels = file ? (file.deletions || 0) : 0;
+    const dirParts = filePath.split('/');
+    const fileName = dirParts.pop();
+    const dirPath = dirParts.length > 0 ? dirParts.join('/') + '/' : '';
+    header.innerHTML =
+      '<div class="file-header-chevron"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M12.78 5.22a.749.749 0 0 1 0 1.06l-4.25 4.25a.749.749 0 0 1-1.06 0L3.22 6.28a.749.749 0 1 1 1.06-1.06L8 8.939l3.72-3.719a.749.749 0 0 1 1.06 0Z"/></svg></div>' +
+      ICON_FILE +
+      '<span class="file-header-name"><span class="dir">' + escapeHtml(dirPath) + '</span><span class="filename">' + escapeHtml(fileName || filePath) + '</span>' +
+        '<button type="button" class="file-header-copy-path" aria-label="Copy file path">' + ICON_COPY_PATH + '</button>' +
+      '</span>' +
+      '<span class="hunkyard-story-file-group__stat">' + statText +
+        (adds ? ' · <span class="add">+' + adds + '</span>' : '') +
+        (dels ? ' <span class="del">-' + dels + '</span>' : '') +
+      '</span>';
+
+    const copyPathBtn = header.querySelector('.file-header-copy-path');
+    if (copyPathBtn) {
+      copyPathBtn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        const originalLabel = copyPathBtn.getAttribute('aria-label');
+        const abs = session.cwd ? session.cwd + '/' + filePath : filePath;
+        navigator.clipboard.writeText(abs).then(function() {
+          copyPathBtn.innerHTML = ICON_COPY_PATH_CHECK;
+          copyPathBtn.setAttribute('aria-label', 'Copied!');
+          setTimeout(function() { copyPathBtn.innerHTML = ICON_COPY_PATH; copyPathBtn.setAttribute('aria-label', originalLabel); }, 1500);
+        }).catch(function() {
+          // Clipboard access is best-effort.
+        });
+      });
+    }
+
+    // Elsewhere hint: this file's other hunks live in other pages.
+    const owners = storyState.fileChapters.get(filePath);
+    if (owners && owners.size > 1) {
+      const others = [];
+      owners.forEach(function (pi) { if (pi !== storyState.pages.indexOf(page)) others.push(pi); });
+      if (others.length) {
+        const first = storyState.pages[others[0]];
+        const hint = document.createElement('button');
+        hint.type = 'button';
+        hint.className = 'hunkyard-story-elsewhere';
+        const lbl = first.kind === 'support' ? 'Support' : ('Ch ' + (first.idx + 1));
+        hint.textContent = 'also in ' + lbl + (others.length > 1 ? ' +' + (others.length - 1) : '');
+        hint.title = 'This file has hunks in other chapters';
+        hint.addEventListener('click', function () { showStory(storyPageId(first)); });
+        header.appendChild(hint);
+      }
+    }
+
+    if (file && !file.orphaned) {
+      const fileCommentBtn = document.createElement('button');
+      fileCommentBtn.className = 'file-comment-btn';
+      fileCommentBtn.title = 'Add file-level comment';
+      fileCommentBtn.setAttribute('aria-label', 'Add file-level comment');
+      fileCommentBtn.innerHTML = ICON_COMMENT;
+      fileCommentBtn.addEventListener('click', function(e) {
+        e.stopPropagation();
+        e.preventDefault();
+        openFileCommentForm(file.path);
+      });
+      header.appendChild(fileCommentBtn);
+    }
+
+    const viewedLabel = document.createElement('label');
+    viewedLabel.className = 'file-header-viewed';
+    viewedLabel.title = 'Viewed';
+    viewedLabel.innerHTML = '<input type="checkbox"' + (file && file.viewed ? ' checked' : '') + '><span>Viewed</span>';
+    viewedLabel.addEventListener('click', function(e) { e.stopPropagation(); });
+    viewedLabel.querySelector('input').addEventListener('change', function () {
+      toggleViewed(filePath);
+      if (file && file.viewed && section.open) section.open = false;
+      section.classList.toggle('viewed', !!(file && file.viewed));
+      renderStoryRail();
+      updateStoryMarkButton(page);
+    });
+    header.appendChild(viewedLabel);
+    section.appendChild(header);
+
+    if (file) {
+      const fileComments = file.comments.filter(function(c) { return c.scope === 'file'; });
+      const fileForm = getFileComposeForm(file.path);
+      if (fileComments.length > 0 || fileForm) {
+        const fileCommentsContainer = document.createElement('div');
+        fileCommentsContainer.className = 'file-comments';
+        fileComments.forEach(function(comment) {
+          fileCommentsContainer.appendChild(comment.resolved ? createResolvedElement(comment, file.path) : createCommentElement(comment, file.path));
+        });
+        if (fileForm) fileCommentsContainer.appendChild(createFileCommentForm(fileForm));
+        section.appendChild(fileCommentsContainer);
+      }
+    }
+
+    // Body: reuse the existing diff renderer via the filtered file clone.
+    const body = document.createElement('div');
+    body.className = 'file-body';
+    if (built && built.clone.diffHunks.length) {
+      body.appendChild(renderPierreInlineDiff(built.clone));
+    } else {
+      const empty = document.createElement('div');
+      empty.className = 'hunkyard-story-file-group__empty';
+      if (!file) empty.textContent = 'File not loaded.';
+      else if (file.lazy) empty.textContent = 'Loading diff\u2026';
+      else empty.textContent = 'These hunks are no longer in the diff.';
+      body.appendChild(empty);
+    }
+    section.appendChild(body);
+    if (built && built.clone) highlightQuotesInSection(section, built.clone);
+
+    if (file && file.lazy) {
+      ensureStoryLazyFile(file).then(function () {
+        if (!section.isConnected) return;
+        const replacement = renderStoryFileGroup(page, filePath, oldStarts, supportReason);
+        replacement.open = section.open;
+        cleanUpStoryDiffs(section);
+        section.replaceWith(replacement);
+        renderPluggableBlocks();
+        rebuildNavList();
+        applyHideResolved();
+        renderStoryRail();
+        updateStoryMarkButton(page);
+      }).catch(function () {
+        const emptyEl = section.querySelector('.hunkyard-story-file-group__empty');
+        if (emptyEl) emptyEl.textContent = 'Failed to load diff.';
+      });
+    }
+
+    return section;
+  }
+
+  function storySupportReasonForFile(page, filePath) {
+    if (!page || page.kind !== 'support' || !page.entries) return undefined;
+    for (let i = 0; i < page.entries.length; i++) {
+      const entry = page.entries[i];
+      const refs = entry.hunk_refs || entry.hunkRefs || [];
+      for (let r = 0; r < refs.length; r++) {
+        const fp = refs[r].file_path || refs[r].filePath;
+        if (fp === filePath) return entry.reason || '';
+      }
+    }
+    return undefined;
+  }
+
+  function renderStoryFileByPath(filePath) {
+    if (!storyState || storyView === 'overview') return false;
+    const page = storyPageById(storyView);
+    if (!page || !page.refsByFile || !page.refsByFile.has(filePath)) return false;
+    const view = document.getElementById('hunkyard-story-view-' + storyPageId(page));
+    if (!view) return false;
+    const oldSection = view.querySelector('.hunkyard-story-file-group[data-story-file="' + CSS.escape(filePath) + '"]');
+    if (!oldSection) return false;
+    const replacement = renderStoryFileGroup(page, filePath, page.refsByFile.get(filePath), storySupportReasonForFile(page, filePath));
+    cleanUpStoryDiffs(oldSection);
+    oldSection.replaceWith(replacement);
+    renderPluggableBlocks();
+    rebuildNavList();
+    applyHideResolved();
+    renderStoryRail();
+    updateStoryMarkButton(page);
+    return true;
+  }
+
+  function markPageViewed(page, viewed) {
+    page.refsByFile.forEach(function (_starts, filePath) {
+      const file = getFileByPath(filePath);
+      if (!file || file.viewed === viewed) return;
+      file.viewed = viewed;
+      if (viewed) file.collapsed = true;
+    });
+    saveViewedState();
+    updateViewedCount();
+    updateTreeViewedState();
+    renderStory();
+  }
+
+  // ----- Router -----
+  function renderStory() {
+    if (!storyState) return;
+    const inner = document.getElementById('storyPaneInner');
+    cleanUpStoryDiffs();
+    inner.innerHTML = '';
+    if (storyView === 'overview' || !storyPageById(storyView)) {
+      storyView = storyPageById(storyView) ? storyView : 'overview';
+      if (storyView === 'overview') {
+        renderStoryOverview();
+      } else {
+        renderStoryPage(storyPageById(storyView));
+      }
+    } else {
+      renderStoryPage(storyPageById(storyView));
+    }
+    renderStoryRail();
+    renderPluggableBlocks();
+    rebuildNavList();
+    applyHideResolved();
+    // Keep active rail row visible. Instant: a smooth scroll here outlives the
+    // resetStoryScroll() that showStory() runs next.
+    const activeRow = document.querySelector('.hunkyard-story-row.active');
+    if (activeRow) activeRow.scrollIntoView({ block: 'nearest', behavior: 'instant' });
+  }
+
+  function resetStoryScroll() {
+    const pane = document.getElementById('storyPane');
+    if (pane) pane.scrollTop = 0;
+    const scrollingEl = document.scrollingElement || document.documentElement;
+    if (scrollingEl) scrollingEl.scrollTop = 0;
+    window.scrollTo({ top: 0, left: 0, behavior: 'instant' });
+  }
+
+  function showStory(target) {
+    if (!storyState) return;
+    if (target !== 'overview' && !storyPageById(target)) target = 'overview';
+    storyView = target;
+    const hash = target === 'overview' ? '#story' : '#story/' + target;
+    if (location.hash !== hash) history.replaceState(null, '', hash);
+    // Close the mobile chapter drawer on navigate; leave desktop collapsed state alone.
+    document.body.classList.remove('hunkyard-story-rail-open');
+    syncSidebarToggleAria();
+    renderStory();
+    resetStoryScroll();
+  }
+
+  function storyFromHash() {
+    const h = location.hash || '';
+    if (h.indexOf('#story') !== 0) return;
+    if (h.indexOf('/') > -1) {
+      const target = h.split('/')[1];
+      storyView = storyPageById(target) ? target : 'overview';
+    } else {
+      storyView = 'overview';
+    }
+  }
+
+  // Activate/deactivate the whole story layout. Respects storyHidden: when a
+  // story is present but the reviewer chose "Hide story view", the flat layout
+  // renders and a "Show story view" re-entry affordance is surfaced instead.
+  function applyStoryPresence() {
+    const present = !!(session && storyHasContent(session.story));
+    if (present) {
+      storyState = buildStoryState(session.story);
+      if (storyHidden) {
+        // Present but hidden: flat layout + re-entry affordance. Navigating to
+        // a #story hash un-hides (handled in the hashchange listener).
+        document.body.classList.remove('hunkyard-story-active');
+        document.body.classList.remove('hunkyard-story-rail-open');
+        document.body.classList.remove('hunkyard-story-rail-collapsed');
+        document.body.classList.add('hunkyard-story-hidden');
+      } else {
+        document.body.classList.remove('hunkyard-story-hidden');
+        document.body.classList.add('hunkyard-story-active');
+        storyFromHash();
+        renderStory();
+        syncSidebarToggleVisibility();
+        syncSidebarToggleAria();
+      }
+    } else {
+      storyState = null;
+      storyHidden = false;
+      document.body.classList.remove('hunkyard-story-active');
+      document.body.classList.remove('hunkyard-story-hidden');
+      document.body.classList.remove('hunkyard-story-rail-open');
+      document.body.classList.remove('hunkyard-story-rail-collapsed');
+      cleanUpStoryDiffs();
+      const inner = document.getElementById('storyPaneInner');
+      if (inner) inner.innerHTML = '';
+      const rail = document.getElementById('storyRail');
+      if (rail) rail.innerHTML = '';
+    }
+    updateStoryViewToggle();
+    updateDiffModeToggle();
+    syncSidebarToggleVisibility();
+  }
+
+  // "Hide story view" is a non-destructive view toggle (Task 7 user-feedback
+  // fix): it does NOT delete the story. It flips into the flat file layout for
+  // this page session and surfaces a "Show story view" re-entry affordance. The
+  // story stays on disk and in session.story; a reload restores the story view.
+  // Real removal is `hunkyard story --clear` / DELETE /api/story.
+  async function hideStoryView() {
+    storyHidden = true;
+    applyStoryPresence();
+    await reloadForScope();
+  }
+
+  // Restore the story view after "Hide story view". Un-hides and renders at the
+  // overview (or the page named by the current #story hash, if any).
+  async function showStoryView() {
+    storyHidden = false;
+    await reloadForScope();
+  }
+
+  // Chapter that owns the hunk containing a given (filePath, line). Returns
+  // the story page id, or null. Used to make comment/anchor navigation
+  // cross chapter boundaries.
+  function storyRawHunkForLine(hunks, line, side) {
+    const candidates = [];
+    (hunks || []).forEach(function (hunk) {
+      storyRawHunks(hunk).forEach(function (rawHunk) {
+        candidates.push({ hunk: hunk, rawHunk: rawHunk });
+      });
+    });
+
+    // Preserve the anchor's coordinate space when it is known. A deletion can
+    // shift a later NewNum onto an earlier hunk's OldNum (and an old-side
+    // deletion can collide with a NewNum elsewhere), so crossing sides for an
+    // explicit anchor can select the wrong chapter. Side-less legacy anchors
+    // retain the historical new-then-old fallback.
+    const fields = side === 'old'
+      ? ['OldNum']
+      : (side === 'new' || side === '' ? ['NewNum'] : ['NewNum', 'OldNum']);
+    for (let fi = 0; fi < fields.length; fi++) {
+      const field = fields[fi];
+      for (let i = 0; i < candidates.length; i++) {
+        const lines = candidates[i].rawHunk.Lines || [];
+        for (let li = 0; li < lines.length; li++) {
+          if (lines[li][field] === line) return candidates[i];
+        }
+      }
+    }
+    return null;
+  }
+
+  // Translate a Story anchor's review coordinate into the row identity used
+  // by the active renderer. Ownership always stays in the anchor's true
+  // old/new coordinate space; only unified context rows need translation
+  // because they are represented once, using NewNum and the new-side DOM tag.
+  function storyDisplayAnchorForLine(hunks, line, side, mode) {
+    let normalizedSide = side === 'old'
+      ? 'old'
+      : (side === 'new' || side === '' ? 'new' : undefined);
+    const match = storyRawHunkForLine(hunks, line, normalizedSide);
+    if (!match) return null;
+    if (normalizedSide === undefined) {
+      const lines = match.rawHunk.Lines || [];
+      normalizedSide = lines.some(function (rawLine) { return rawLine.NewNum === line; })
+        ? 'new'
+        : 'old';
+    }
+    const field = normalizedSide === 'old' ? 'OldNum' : 'NewNum';
+    const lines = match.rawHunk.Lines || [];
+    let rawLine = null;
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i][field] === line) { rawLine = lines[i]; break; }
+    }
+    if (!rawLine) return null;
+    if (mode === 'unified' && normalizedSide === 'old' &&
+        rawLine.Type === 'context' && rawLine.NewNum > 0) {
+      return { line: rawLine.NewNum, side: '' };
+    }
+    return { line: line, side: normalizedSide === 'old' ? 'old' : '' };
+  }
+
+  function storyPageForLine(filePath, line, side) {
+    if (!storyState) return null;
+    const file = getFileByPath(filePath);
+    if (!file || !file.diffHunks) return null;
+    const match = storyRawHunkForLine(file.diffHunks, line, side);
+    if (match) {
+      let owner = storyState.hunkOwner.get(hunkKey(filePath, match.rawHunk.OldStart));
+      if (owner === undefined) {
+        const ownedStarts = storyOwnedStartsInHunk(filePath, match.hunk);
+        if (ownedStarts.length) {
+          let chosen = ownedStarts[0];
+          for (let s = 0; s < ownedStarts.length; s++) {
+            if (ownedStarts[s] <= match.rawHunk.OldStart) chosen = ownedStarts[s];
+          }
+          owner = storyState.hunkOwner.get(hunkKey(filePath, chosen));
+        }
+      }
+      if (owner !== undefined) return storyPageId(storyState.pages[owner]);
+    }
+    // Only side-less legacy callers get the historical file-level fallback.
+    // An explicit-side miss must not jump to an unrelated chapter.
+    if (side === undefined || side === null) {
+      return storyPageForFile(filePath);
+    }
+    return null;
+  }
+
+  function storyPageForFile(filePath) {
+    if (!storyState) return null;
+    const owners = storyState.fileChapters.get(filePath);
+    if (!owners || !owners.size) return null;
+    const first = Array.from(owners)[0];
+    return storyPageId(storyState.pages[first]);
+  }
+
+  function storyOwnedStartsInHunk(filePath, hunk) {
+    if (!storyState || !hunk) return [];
+    const starts = [];
+    const oldEnd = hunk.OldStart + Math.max(1, hunk.OldCount || 0);
+    storyState.pages.forEach(function (page) {
+      const refs = page.refsByFile && page.refsByFile.get(filePath);
+      (refs || []).forEach(function (oldStart) {
+        const inRange = hunk.OldCount <= 0
+          ? oldStart === hunk.OldStart
+          : oldStart >= hunk.OldStart && oldStart < oldEnd;
+        if (inRange) starts.push(oldStart);
+      });
+    });
+    starts.sort(function (a, b) { return a - b; });
+    return starts;
+  }
+
+  // Ensure the chapter owning (filePath, line) is active; returns true if a
+  // navigation happened (caller should defer scroll to next frame).
+  function storyActivatePageForLine(filePath, line, side) {
+    if (!storyState) return false;
+    const pid = storyPageForLine(filePath, line, side);
+    if (pid && pid !== storyView) { showStory(pid); return true; }
+    return false;
+  }
+
+  function storyActivatePageForFile(filePath) {
+    if (!storyState) return false;
+    const pid = storyPageForFile(filePath);
+    if (pid && pid !== storyView) { showStory(pid); return true; }
+    return false;
+  }
+
+  function storyActive() { return !!storyState && document.body.classList.contains('hunkyard-story-active'); }
+
+  // Handle a keydown when story view is active. Returns true if consumed.
+  // Scoped story actions don't fire when typing or outside the story view.
+  function handleStoryKey(e, shortcutAction) {
+    if (!storyActive()) return false;
+    const pages = storyState.pages;
+    const curIdx = storyView === 'overview' ? -1 : pages.indexOf(storyPageById(storyView));
+    switch (shortcutAction || e.key) {
+      case 'story_next':
+        e.preventDefault();
+        if (curIdx === -1) { if (pages.length) showStory(storyPageId(pages[0])); }
+        else if (curIdx < pages.length - 1) showStory(storyPageId(pages[curIdx + 1]));
+        return true;
+      case 'story_previous':
+        e.preventDefault();
+        if (curIdx <= 0) showStory('overview');
+        else showStory(storyPageId(pages[curIdx - 1]));
+        return true;
+      case 'story_prologue':
+        e.preventDefault(); showStory('overview'); return true;
+      case 'story_support':
+        e.preventDefault();
+        { const sp = storyPageById('support'); if (sp) showStory('support'); }
+        return true;
+      case '1': case '2': case '3': case '4': case '5':
+      case '6': case '7': case '8': case '9': {
+        const n = parseInt(e.key, 10) - 1;
+        const chs = pages.filter(function (p) { return p.kind === 'chapter'; });
+        if (n < chs.length) { e.preventDefault(); showStory(storyPageId(chs[n])); return true; }
+        return false;
+      }
+      case 'story_toggle_list':
+        e.preventDefault();
+        setStoryRailCollapsed(!isStoryRailCollapsed(), true);
+        return true;
+      case 'Escape':
+        if (document.body.classList.contains('hunkyard-story-rail-open')) {
+          e.preventDefault(); setStoryRailCollapsed(true, true); return true;
+        }
+        return false;
+    }
+    return false;
+  }
+
+  // Scrim closes the mobile chapter drawer (safe when element absent).
+  (function wireStoryChrome() {
+    const scrim = document.getElementById('storyRailScrim');
+    if (scrim) scrim.addEventListener('click', function () { setStoryRailCollapsed(true, true); });
+    const storyViewToggle = document.getElementById('storyViewToggle');
+    if (storyViewToggle) {
+      storyViewToggle.addEventListener('click', function (e) {
+        const btn = e.target.closest('.toggle-btn');
+        if (!btn || !storyViewToggle.contains(btn)) return;
+        if (btn.dataset.storyView === 'diff') hideStoryView();
+        else showStoryView();
+      });
+    }
+    window.addEventListener('hashchange', function () {
+      const h = location.hash || '';
+      if (h.indexOf('#story') !== 0) return;
+      // Navigating to a #story hash un-hides a hidden-but-present story.
+      if (storyHidden && storyState) { showStoryView(); return; }
+      if (!storyActive()) return;
+      storyFromHash();
+      renderStory();
+    });
+  })();
+
+  // ===== Start =====
+  init()
+    .then(function() {
+      if (session) applyFocusToHeader(session.focus || { kind: 'working_tree' });
+      // Pre-fetch /api/picker.stack so the breadcrumb has data without
+      // waiting for the user to do anything. Fire for any range focus in
+      // git mode — the breadcrumb's visibility decision uses stack.length,
+      // not is_stacked, so we need the stack data to know whether to render.
+      const f = session && session.focus;
+      if (session && session.mode === 'git' && f && f.kind === 'range') {
+        loadStackFromPicker();
+      }
+    })
+    .then(connectSSE)
+    .then(function() {
+      // Register as InlineContentRenderer
+      if (window.hunkyard && window.hunkyard.renderer) {
+        // eslint-disable-next-line no-unused-vars
+        let annotationIntentCb = null;
+
+        window.hunkyard.renderer.register({
+          scrollToAnchor: function (anchor) {
+            if (anchor.type !== 'line') return Promise.resolve();
+            // Story view: activate the owning chapter, then scroll to the
+            // matching diff line inside the story pane.
+            if (storyActive()) {
+              const side = anchor.side === 'old'
+                ? 'old'
+                : (anchor.side === undefined || anchor.side === null ? undefined : 'new');
+              const file = getFileByPath(anchor.filePath);
+              if (anchor.scope === 'file') {
+                const navigated = storyActivatePageForFile(anchor.filePath);
+                const locateFile = function () {
+                  const pane = document.getElementById('storyPane');
+                  if (!pane) return;
+                  const group = pane.querySelector('.hunkyard-story-file-group[data-story-file="' + CSS.escape(anchor.filePath) + '"]');
+                  if (group) group.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                };
+                if (navigated) requestAnimationFrame(locateFile); else locateFile();
+                return Promise.resolve();
+              }
+              const displayAnchor = file
+                ? storyDisplayAnchorForLine(file.diffHunks, anchor.endLine, side, diffMode)
+                : null;
+              const navigated = storyActivatePageForLine(anchor.filePath, anchor.endLine, side);
+              const locate = function () {
+                const pane = document.getElementById('storyPane');
+                if (!pane || !displayAnchor) return;
+                const group = pane.querySelector('.hunkyard-story-file-group[data-story-file="' + CSS.escape(anchor.filePath) + '"]');
+                const el = window.hunkyard.pierreDOM.pierreLineElement(group, displayAnchor.line, displayAnchor.side) ||
+                  (side !== 'old' ? pane.querySelector('.line-block[data-file-path="' + CSS.escape(anchor.filePath) + '"][data-end-line="' + anchor.endLine + '"]') : null);
+                if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              };
+              if (navigated) requestAnimationFrame(locate); else locate();
+              return Promise.resolve();
+            }
+            if (pierreView && pierreViewActive()) {
+              if (anchor.scope === 'file') return pierreView.scrollToFile(anchor.filePath);
+              return pierreView.scrollToLine(anchor.filePath, anchor.endLine, anchor.side === 'old' ? 'old' : '', 'center');
+            }
+            const section = document.getElementById('file-section-' + anchor.filePath);
+            if (!section) return Promise.resolve();
+            if (!section.open) section.open = true;
+            const el = section.querySelector('.line-block[data-file-path="' + CSS.escape(anchor.filePath) + '"][data-end-line="' + anchor.endLine + '"]');
+            if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            return Promise.resolve();
+          },
+
+          highlightAnchor: function (anchor) {
+            if (anchor.type !== 'line') return Promise.resolve();
+            if (storyActive()) return Promise.resolve();
+            const section = document.getElementById('file-section-' + anchor.filePath);
+            if (!section) return Promise.resolve();
+            const blocks = section.querySelectorAll('.line-block[data-file-path="' + CSS.escape(anchor.filePath) + '"]');
+            blocks.forEach(function (el) {
+              const start = parseInt(el.dataset.startLine);
+              const end = parseInt(el.dataset.endLine);
+              if (start >= anchor.startLine && end <= anchor.endLine) {
+                el.classList.remove('comment-card-highlight');
+                void el.offsetWidth;
+                el.classList.add('comment-card-highlight');
+                el.addEventListener('animationend', function () {
+                  el.classList.remove('comment-card-highlight');
+                }, { once: true });
+              }
+            });
+            return Promise.resolve();
+          },
+
+          clearHighlight: function () {
+            document.querySelectorAll('.line-block.comment-card-highlight').forEach(function (el) {
+              el.classList.remove('comment-card-highlight');
+            });
+          },
+
+          onAnnotationIntent: function (callback) {
+            annotationIntentCb = callback;
+            return function () { annotationIntentCb = null; };
+          },
+
+          getMode: function () {
+            return (session && session.mode) || 'files';
+          },
+
+          getAnchorType: function () {
+            return 'line';
+          },
+        });
+      }
+    })
+    .catch(function(err) {
+      console.error('Init failed:', err.message);
+    });
+
+})();

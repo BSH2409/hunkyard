@@ -1,0 +1,106 @@
+package session
+
+import (
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"github.com/BSH2409/hunkyard/internal/daemon"
+)
+
+var probeDaemonFocusFn = probeDaemonFocusReal
+
+// ProbeDaemonFocus contacts the running daemon (if any) and returns its Focus.
+func ProbeDaemonFocus() *Focus {
+	return probeDaemonFocusFn()
+}
+
+// ProbeDaemonFocusForSession reads focus from one explicitly selected daemon.
+// It avoids inheriting focus metadata from a sibling review in the same cwd.
+func ProbeDaemonFocusForSession(entry daemon.SessionEntry) *Focus {
+	return fetchSessionFocus(&http.Client{Timeout: 2 * time.Second}, entry.Host, entry.Port)
+}
+
+// SetProbeDaemonFocusFnForTest replaces daemon focus probing during tests.
+func SetProbeDaemonFocusFnForTest(fn func() *Focus) (restore func()) {
+	prev := probeDaemonFocusFn
+	if fn == nil {
+		probeDaemonFocusFn = func() *Focus { return nil }
+	} else {
+		probeDaemonFocusFn = fn
+	}
+	return func() { probeDaemonFocusFn = prev }
+}
+
+func probeDaemonFocusReal() *Focus {
+	cwd, err := daemon.ResolvedCWD()
+	if err != nil {
+		return nil
+	}
+	sessions, _ := daemon.ListSessionsForCWD(cwd)
+	if len(sessions) == 0 {
+		return nil
+	}
+	client := &http.Client{Timeout: 2 * time.Second}
+	var rangeFoci []*Focus
+	var workingFoci []*Focus
+	for _, sess := range sessions {
+		f := fetchSessionFocus(client, sess.Host, sess.Port)
+		if f == nil {
+			continue
+		}
+		if f.Kind == FocusRange {
+			rangeFoci = append(rangeFoci, f)
+		} else {
+			workingFoci = append(workingFoci, f)
+		}
+	}
+	if len(rangeFoci) == 1 {
+		return rangeFoci[0]
+	}
+	if len(rangeFoci) > 1 {
+		return nil
+	}
+	if len(workingFoci) == 1 {
+		return workingFoci[0]
+	}
+	return nil
+}
+
+func fetchSessionFocus(client *http.Client, host string, port int) *Focus {
+	base := (daemon.SessionEntry{Host: host, Port: port}).ConnURL()
+	resp, err := client.Get(base + "/api/session")
+	if err != nil {
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil
+	}
+	var info struct {
+		Focus *Focus `json:"focus"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&info); err != nil {
+		return nil
+	}
+	return info.Focus
+}
+
+// ResolvePullScope reconstructs the active change-request layer for imported
+// remote comments. Forge + ChangeNumber preserve the PR focus key (pr:N);
+// BaseSHA + HeadSHA preserve range identity as a fallback.
+func ResolvePullScope(cj *HunkyardJSON) InheritedScope {
+	if focus := ProbeDaemonFocus(); focus != nil && focus.Kind == FocusRange {
+		return InheritedScope{
+			HeadSHA:      focus.HeadSHA,
+			BaseSHA:      focus.BaseSHA,
+			Forge:        focus.Forge,
+			ChangeNumber: focus.ChangeNumber,
+			DiffScope:    "layer",
+		}
+	}
+	if cj != nil && cj.ActiveDiffScope != "" {
+		return InheritedScope{DiffScope: "layer"}
+	}
+	return InheritedScope{}
+}
