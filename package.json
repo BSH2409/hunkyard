@@ -2,7 +2,7 @@
   "name": "hunkyard",
   "private": true,
   "dependencies": {
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.6.1",
     "@sanity/diff-match-patch": "3.2.1",
     "dompurify": "3.4.16",
     "gemoji": "8.1.0",
