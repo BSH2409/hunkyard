@@ -14,7 +14,7 @@ test.describe('File Tree — File Mode', () => {
     await expect(tree.locator('.tree-file-name', { hasText: 'plan.md' })).toBeVisible();
     await expect(tree.locator('.tree-file-name', { hasText: 'server.go' })).toBeVisible();
     await expect(tree.locator('.tree-file-name', { hasText: 'handler.js' })).toBeVisible();
-    await expect(page.locator('#fileTreeStats')).toContainText('3');
+    await expect(page.locator('#fileTreeCount')).toHaveText('3');
   });
 
   test('comment badge appears after adding a comment on markdown', async ({ page }) => {

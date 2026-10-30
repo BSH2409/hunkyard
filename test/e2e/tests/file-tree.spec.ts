@@ -26,9 +26,7 @@ test.describe('File Tree — Git Mode', () => {
     }
 
     // Header: file count, addition and deletion stats.
-    const stats = page.locator('#fileTreeStats');
-    await expect(stats).toBeVisible();
-    await expect(stats).toContainText('10');
+    await expect(page.locator('#fileTreeCount')).toHaveText('10');
     await expect(page.locator('#fileTreeStats .tree-stat-add')).toHaveText(/\+\d+/);
     await expect(page.locator('#fileTreeStats .tree-stat-del')).toHaveText(/-\d+/);
 
