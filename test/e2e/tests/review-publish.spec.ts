@@ -51,6 +51,24 @@ test('publishing requires an explicit decision and persists one batch per reques
   expect(unauthorized.status()).toBe(403);
 });
 
+test('changes made after publishing relabel the button until they are sent', async ({ page, request }) => {
+  await clearAllComments(request);
+  await loadPage(page);
+  await page.locator('#finishBtn').click();
+  const dialog = page.getByRole('dialog', { name: 'Submit review', exact: true });
+  await dialog.getByLabel('Comment', { exact: true }).check();
+  await dialog.getByRole('button', { name: 'Submit review', exact: true }).click();
+  await expect(page.locator('#waitingHeading')).toHaveText('Review submitted');
+  await page.locator('#backToEditing').click();
+  await expect(page.locator('#finishBtn')).toHaveText('Review changes');
+
+  // A comment added after publishing has not reached the agent yet.
+  const form = await openLineComment(page, await goSection(page), 5);
+  await form.locator('textarea').fill('One more thing.');
+  await form.locator('.btn-primary').click();
+  await expect(page.locator('#finishBtn')).toHaveText('Send update');
+});
+
 test('skill picker shows only host IDs as text and preserves a cancelled selection', async ({ page, request }) => {
   await clearAllComments(request);
   await page.route('**/api/skills', route => route.fulfill({ json: { skills: [{ id: 'naming', name: '<img src=x onerror=alert(1)>', description: 'Check names' }] } }));

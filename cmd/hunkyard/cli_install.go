@@ -372,7 +372,23 @@ func destFor(f integration, global bool, home, name string) string {
 		}
 		return resolved
 	}
+	if global {
+		if dest, ok := claudeConfigDirPath(f.dest); ok {
+			return dest
+		}
+	}
 	return f.dest
+}
+
+// claudeConfigDirPath maps a ".claude/" dest into $CLAUDE_CONFIG_DIR, which
+// Claude Code reads user-level skills from instead of ~/.claude when set.
+func claudeConfigDirPath(dest string) (string, bool) {
+	rest, ok := strings.CutPrefix(filepath.ToSlash(dest), ".claude/")
+	dir := os.Getenv("CLAUDE_CONFIG_DIR")
+	if !ok || dir == "" {
+		return "", false
+	}
+	return filepath.Join(dir, filepath.FromSlash(rest)), true
 }
 
 // installOneFile copies a single embedded integration file to dest, skipping

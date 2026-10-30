@@ -464,6 +464,9 @@
 
   let filePickerReady = false;  // set true once /api/files/list is confirmed working
   let userActedThisRound = false; // tracks if user made any comment/resolve/edit action this round
+  // True once this round's review was published. Changes made afterwards stay in
+  // the browser until the reviewer publishes again, so the button says so.
+  let publishedThisRound = false;
 
   // Per-file active form state
   let activeFilePath = null;
@@ -1427,7 +1430,12 @@
     conversationSection.appendChild(buildReviewConversationTreeRow());
 
     renderTreeNode(body, tree, 0, '');
-    if (query && !matchingFiles.length) body.textContent = 'No matching files.';
+    if (query && !matchingFiles.length) {
+      const empty = document.createElement('div');
+      empty.className = 'file-tree-empty';
+      empty.textContent = 'No matching files.';
+      body.appendChild(empty);
+    }
 
     renderMobileFilePicker();
   }
@@ -4396,9 +4404,11 @@
     const tmplModule = window.hunkyard.commentTemplates;
 
     const templateBar = tmplModule.buildTemplateBar({
-      onInsert: function(text) {
+      onInsert: function(body) {
         const start = textarea.selectionStart;
         const end = textarea.selectionEnd;
+        // Start the template on its own line unless the cursor is already at a line start.
+        const text = start > 0 && textarea.value[start - 1] !== '\n' ? '\n' + body : body;
         textarea.value = textarea.value.substring(0, start) + text + textarea.value.substring(end);
         textarea.selectionStart = textarea.selectionEnd = start + text.length;
         textarea.focus();
@@ -4446,11 +4456,19 @@
     dialog.appendChild(title);
 
     const desc = document.createElement('p');
-    desc.textContent = 'Edit the template text, then save.';
+    desc.textContent = 'Give the template a short title, edit its text, then save.';
     dialog.appendChild(desc);
+
+    const titleInput = document.createElement('input');
+    titleInput.type = 'text';
+    titleInput.className = 'save-template-input save-template-title';
+    titleInput.placeholder = 'Title (optional)';
+    titleInput.setAttribute('aria-label', 'Template title');
+    dialog.appendChild(titleInput);
 
     const input = document.createElement('textarea');
     input.className = 'save-template-input';
+    input.setAttribute('aria-label', 'Template text');
     input.value = text;
     input.rows = 3;
     dialog.appendChild(input);
@@ -4469,7 +4487,7 @@
     saveBtn.addEventListener('click', function() {
       const val = input.value.trim();
       if (!val) return;
-      templateBar._saveNew(val);
+      templateBar._saveNew(titleInput.value.trim(), val);
       overlay.remove();
       textarea.focus();
     });
@@ -4479,13 +4497,14 @@
     dialog.appendChild(btns);
 
     bindSubmitCancelKeys(input, function() { saveBtn.click(); }, function() { cancelBtn.click(); }, { stopPropagation: false });
+    bindSubmitCancelKeys(titleInput, function() { saveBtn.click(); }, function() { cancelBtn.click(); }, { stopPropagation: false });
 
     overlay.appendChild(dialog);
     overlay.addEventListener('click', function(e) {
       if (e.target === overlay) { overlay.remove(); textarea.focus(); }
     });
     document.body.appendChild(overlay);
-    requestAnimationFrame(function() { input.focus(); input.select(); });
+    requestAnimationFrame(function() { titleInput.focus(); });
   }
 
   // ===== File Picker Autocomplete =====
@@ -6424,9 +6443,15 @@
     if (uiState === 'reviewing') {
       const openTotal = unresolved + hiddenUnresolved;
       const finishBtn = document.getElementById('finishBtn');
-      finishBtn.textContent = window.hunkyardReview ? 'Review changes' : openTotal === 0 ? 'Approve' : 'Finish Review';
+      finishBtn.textContent = finishButtonLabel(openTotal);
       window.hunkyard.shared.lockFinishBtnIfStopped(finishBtn);
     }
+  }
+
+  function finishButtonLabel(openTotal) {
+    if (publishedThisRound && userActedThisRound) return 'Send update';
+    if (window.hunkyardReview) return 'Review changes';
+    return openTotal === 0 ? 'Approve' : 'Finish Review';
   }
 
   function updateTocPosition() {
@@ -6906,7 +6931,7 @@
         }
         unresolvedComments += reviewComments.filter(function(c) { return !c.resolved; }).length;
         unresolvedComments += hiddenUnresolved;
-        finishBtn.textContent = window.hunkyardReview ? 'Review changes' : unresolvedComments === 0 ? 'Approve' : 'Finish Review';
+        finishBtn.textContent = finishButtonLabel(unresolvedComments);
         if (!promptTrustConfig.project_prompts_untrusted) {
           finishBtn.disabled = false;
         }
@@ -6944,6 +6969,11 @@
     return false;
   }
 
+  function markPublished() {
+    publishedThisRound = true;
+    userActedThisRound = false;
+  }
+
   async function doFinishReview() {
     if (!canSubmitReview()) return null;
     return await window.hunkyard.shared.runFinishReview({
@@ -6962,8 +6992,8 @@
           return ok;
         });
       },
-      onApproved: function () { waitingNotApproved = false; setUIState('waiting'); },
-      onWaiting: function () { waitingNotApproved = true; setUIState('waiting'); },
+      onApproved: function () { markPublished(); waitingNotApproved = false; setUIState('waiting'); },
+      onWaiting: function () { markPublished(); waitingNotApproved = true; setUIState('waiting'); },
       onError: function (err) {
         console.error('Error finishing review:', err);
         showMiniToast(err.message || 'Failed to finish review');
@@ -7094,6 +7124,7 @@
       try {
         // Reset action tracking for new round
         userActedThisRound = false;
+        publishedThisRound = false;
 
         // Capture per-file user state before rebuilding
         const prevState = {};

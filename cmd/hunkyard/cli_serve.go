@@ -18,6 +18,7 @@ import (
 	"github.com/BSH2409/hunkyard/internal/feedback"
 	"github.com/BSH2409/hunkyard/internal/reviewpath"
 	"github.com/BSH2409/hunkyard/internal/server"
+	"github.com/BSH2409/hunkyard/internal/session"
 )
 
 // liveSessionArgsTag is the leading element of sessionEntry.Args for a
@@ -42,7 +43,7 @@ func serveSessionKey(sc *server.DaemonCLIConfig) string {
 	if vcs := DetectVCS(sc.VCSOverride); vcs != nil {
 		branch = vcs.CurrentBranch()
 	}
-	return sessionKey(cwd, branch, server.FocusKeyArgs(sc))
+	return sessionKey(cwd, branch, session.ReviewKeyArgs(sc.Focus, sc.Files))
 }
 
 func checkStaleIntegrations(sc *server.DaemonCLIConfig, srv *Server, cwd string) {

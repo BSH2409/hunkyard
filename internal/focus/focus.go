@@ -264,6 +264,7 @@ func resolveFocusFromRange(rangeSpec string, remoteFiles bool, v vcs.VCS, repoRo
 		Label:            fmt.Sprintf("%s%s%s", shortSHA(requestedBase), separator, shortSHA(head)),
 		RangeMode:        mode,
 		RequestedBaseSHA: requestedBase,
+		RangeSpec:        rangeSpec,
 		DiffScope:        DiffScopeLayer,
 		IsStacked:        false,
 	}, nil

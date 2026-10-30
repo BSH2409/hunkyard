@@ -59,6 +59,9 @@ func RunReview(args []string) error {
 			if !sc.Quiet {
 				fmt.Fprintf(os.Stderr, "Connected to hunkyard daemon at %s (session %s)\n", entry.BaseURL(), key)
 			}
+			if note := movedRangeHeadNote(ProbeDaemonFocusForSession(entry), sc.VCSOverride); note != "" {
+				fmt.Fprint(os.Stderr, note)
+			}
 			if !sc.NoOpen && !daemon.DaemonHasBrowser(entry) {
 				go browser.OpenBrowserWithCommand(entry.BaseURL(), sc.OpenCmd)
 			}
@@ -121,4 +124,29 @@ func RunReview(args []string) error {
 	approved := runReviewClientForReview(entry, key, sc.Quiet)
 	stopDaemonOnApproval(approved, entry, key, config.LoadConfig(cwd).CleanupOnApproveEnabled())
 	return nil
+}
+
+// movedRangeHeadNote explains when a range review's head ref has moved since
+// the review pinned its commits. Reconnecting keeps the pinned range, so the
+// new commits only appear in a review started from the same --range again.
+func movedRangeHeadNote(focus *Focus, vcsOverride string) string {
+	if focus == nil || focus.Kind != FocusRange || focus.RangeSpec == "" {
+		return ""
+	}
+	headRef := focus.RangeSpec[strings.LastIndex(focus.RangeSpec, "..")+2:]
+	v := vcs.DetectVCS(vcsOverride)
+	if v == nil {
+		return ""
+	}
+	root, err := v.RepoRoot()
+	if err != nil {
+		return ""
+	}
+	current, err := vcs.ResolveCommitOID(v, headRef, root)
+	if err != nil || current == focus.HeadSHA {
+		return ""
+	}
+	return fmt.Sprintf("Note: this review is pinned to %s at %.7s, but %s now points to %.7s. "+
+		"Its new commits are not shown. Run `hunkyard --range %s` to review them.\n",
+		focus.RangeSpec, focus.HeadSHA, headRef, current, focus.RangeSpec)
 }

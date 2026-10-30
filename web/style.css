@@ -2061,6 +2061,9 @@ textarea.drag-active {
   color: var(--hunkyard-editor-fg);
   resize: vertical;
 }
+.save-template-title {
+  margin-bottom: 8px;
+}
 .save-template-input:focus {
   outline: none;
   border-color: var(--hunkyard-brand);
@@ -3544,6 +3547,12 @@ body.file-tree-anim #fileTreeResizer { transition: flex-basis 0.22s ease; }
   flex: 1;
   overflow-y: auto;
   padding: 6px 0;
+}
+
+.file-tree-empty {
+  padding: 4px 12px;
+  color: var(--hunkyard-editor-fg-muted);
+  font-size: 13px;
 }
 
 /* Tree folder rows */
