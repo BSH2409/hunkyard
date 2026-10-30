@@ -1382,11 +1382,12 @@
     // Stats
     let totalAdd = 0, totalDel = 0;
     for (let i = 0; i < files.length; i++) { totalAdd += files[i].additions; totalDel += files[i].deletions; }
-    const statsEl = document.getElementById('fileTreeStats');
-    statsEl.innerHTML =
-      '<span>' + files.length + '</span>' +
-      (totalAdd ? ' <span class="tree-stat-add">+' + totalAdd + '</span>' : '') +
-      (totalDel ? ' <span class="tree-stat-del">-' + totalDel + '</span>' : '');
+    const countEl = document.getElementById('fileTreeCount');
+    countEl.textContent = files.length;
+    countEl.title = files.length === 1 ? '1 file' : files.length + ' files';
+    document.getElementById('fileTreeStats').innerHTML =
+      (totalAdd ? '<span class="tree-stat-add">+' + totalAdd + '</span>' : '') +
+      (totalDel ? '<span class="tree-stat-del">-' + totalDel + '</span>' : '');
 
     // Collapse/expand all button
     const existingBtn = document.querySelector('.file-tree-collapse-btn');
