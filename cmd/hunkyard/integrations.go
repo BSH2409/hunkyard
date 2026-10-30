@@ -173,6 +173,9 @@ type candidate struct {
 // buildCandidates returns the list of candidate paths to check for an integration file.
 func buildCandidates(f integration, agent, projectDir, homeDir string) []candidate {
 	homePath := filepath.Join(homeDir, f.dest)
+	if configPath, ok := claudeConfigDirPath(f.dest); ok {
+		homePath = configPath
+	}
 	if f.globalDest != "" {
 		if resolved, err := resolveGlobalDest(f.globalDestKind, f.globalDest, homeDir); err == nil {
 			homePath = resolved

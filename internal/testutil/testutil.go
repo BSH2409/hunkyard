@@ -126,7 +126,7 @@ func MustMkdirAll(path string) string {
 // spawned daemon) and call the network.
 func RunWithTempHome(m *testing.M) int {
 	PinGoEnvBeforeHomeChange()
-	for _, key := range []string{"HUNKYARD_OWNER_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID"} {
+	for _, key := range []string{"HUNKYARD_OWNER_ID", "CODEX_THREAD_ID", "CODEX_SESSION_ID", "CLAUDE_SESSION_ID", "CLAUDE_CONFIG_DIR"} {
 		os.Unsetenv(key)
 	}
 	os.Setenv("HUNKYARD_NO_INTEGRATION_CHECK", "1")

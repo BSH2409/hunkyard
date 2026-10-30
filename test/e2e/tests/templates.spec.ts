@@ -31,20 +31,26 @@ test.describe('Comment Templates — Git Mode', () => {
 
     // The save dialog opens with the textarea content.
     await expect(overlay(page)).toBeVisible();
-    await expect(overlay(page).locator('.save-template-input')).toHaveValue('Needs a test for this');
+    await expect(overlay(page).locator('textarea.save-template-input')).toHaveValue('Needs a test for this');
+    await overlay(page).locator('.save-template-title').fill('Test');
     await overlay(page).locator('button', { hasText: 'Save' }).click();
     await expect(overlay(page)).toBeHidden();
 
-    // The chip appears in the template bar.
+    // The chip appears in the template bar, labelled by its title.
     await expect(bar(page)).toBeVisible();
     const chip = bar(page).locator('.template-chip');
     await expect(chip).toHaveCount(1);
-    await expect(chip.locator('.template-chip-label')).toHaveText('Needs a test for this');
+    await expect(chip.locator('.template-chip-label')).toHaveText('Test');
 
     // Clicking the chip inserts its text.
     await textarea.fill('');
     await chip.click();
     await expect(textarea).toHaveValue('Needs a test for this');
+
+    // Inserting after existing text starts the template on a new line.
+    await textarea.fill('Looks off.');
+    await chip.click();
+    await expect(textarea).toHaveValue('Looks off.\nNeeds a test for this');
 
     // Templates persist across form close and reopen.
     await page.locator('.comment-form-actions button', { hasText: 'Cancel' }).click();
@@ -52,7 +58,7 @@ test.describe('Comment Templates — Git Mode', () => {
     await openCommentForm(page);
     await expect(bar(page)).toBeVisible();
     await expect(bar(page).locator('.template-chip')).toHaveCount(1);
-    await expect(bar(page).locator('.template-chip-label').first()).toHaveText('Needs a test for this');
+    await expect(bar(page).locator('.template-chip-label').first()).toHaveText('Test');
 
     // × deletes the chip and hides the empty bar.
     const del = bar(page).locator('.template-chip').first().locator('.template-chip-delete');

@@ -60,6 +60,21 @@ func TestDestFor_GlobalMode(t *testing.T) {
 	}
 }
 
+func TestDestFor_GlobalModeHonorsClaudeConfigDir(t *testing.T) {
+	t.Setenv("CLAUDE_CONFIG_DIR", "/home/me/.claude-office")
+	claudeSkill := integrationMap["claude-code"][0]
+	if got, want := destFor(claudeSkill, true, "/home/me", "claude-code"), filepath.FromSlash("/home/me/.claude-office/skills/hunkyard/SKILL.md"); got != want {
+		t.Errorf("claude global: got %q, want %q", got, want)
+	}
+	if got := destFor(claudeSkill, false, "/home/me", "claude-code"); got != claudeSkill.dest {
+		t.Errorf("claude project install must stay in the project: got %q", got)
+	}
+	codexSkill := integrationMap["codex"][0]
+	if got := destFor(codexSkill, true, "/home/me", "codex"); got != codexSkill.dest {
+		t.Errorf("codex global must ignore CLAUDE_CONFIG_DIR: got %q", got)
+	}
+}
+
 func TestIntegrationMap_SnapshotGlobalRouting(t *testing.T) {
 	// Snapshot test: verifies each tool's globalDest configuration matches
 	// what the integration validation findings established. Update this test

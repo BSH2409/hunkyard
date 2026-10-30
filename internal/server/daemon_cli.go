@@ -110,6 +110,9 @@ func parseDaemonFlags(args []string) daemonFlagSet {
 	skillsFile := fs.String("skills-file", "", "Host-supplied local skill manifest")
 	sessionID := fs.String("session", "", "Reconnect to an existing review session by ID")
 	sessionKeyOverride := fs.String("session-key", "", "")
+	// Review results are always JSON on stdout; accept --json like the other
+	// agent-facing subcommands so agents that pass it are not rejected.
+	fs.Bool("json", false, "")
 	fs.Usage = func() {
 		if PrintHelpFn != nil {
 			PrintHelpFn()
@@ -125,6 +128,7 @@ func parseDaemonFlags(args []string) daemonFlagSet {
 		"q":                                    true,
 		"no-ignore":                            true,
 		"remote":                               true,
+		"json":                                 true,
 	})
 	fs.Parse(args)
 	portSet := false
@@ -319,25 +323,6 @@ func PreflightCheck(sc *DaemonCLIConfig) string {
 	return "No changed files found.\n\n" +
 		"  hunkyard              review changed files (needs changes against the base branch)\n" +
 		"  hunkyard <file...>    review specific file(s)\n"
-}
-
-// FocusKeyArgs returns the args slice used to key the daemon session for a
-// PR/range focus. PR-keyed daemons reuse the same review file across head
-// changes; range-keyed daemons are unique per (base, head) pair.
-//
-// DiffScope is NOT part of the key — the picker must let users toggle scopes
-// within a single session.
-func FocusKeyArgs(sc *DaemonCLIConfig) []string {
-	if sc == nil || sc.Focus == nil || sc.Focus.Kind != session.FocusRange {
-		if sc == nil {
-			return nil
-		}
-		return sc.Files
-	}
-	if sc.Focus.ChangeNumber > 0 {
-		return []string{session.PRFocusKey(sc.Focus.ChangeNumber, sc.Focus.RemoteBaseProject, sc.Focus.RemoteHost)}
-	}
-	return []string{fmt.Sprintf("range:%s..%s", sc.Focus.BaseSHA, sc.Focus.HeadSHA)}
 }
 
 // ResolvePortFromEnv mirrors config.ResolvePort for tests that assemble DaemonCLIConfig manually.

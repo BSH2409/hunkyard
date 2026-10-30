@@ -73,6 +73,17 @@ func TestFocusKeyArgs_Range(t *testing.T) {
 	}
 }
 
+func TestFocusKeyArgs_MergeBaseRange(t *testing.T) {
+	sc := &CLIReviewConfig{Focus: &Focus{
+		Kind: FocusRange, RangeMode: "merge_base",
+		RequestedBaseSHA: "req", BaseSHA: "mb", HeadSHA: "def",
+	}}
+	got := FocusKeyArgs(sc)
+	if len(got) != 1 || got[0] != "range:req...def" {
+		t.Errorf("got %v want [range:req...def]", got)
+	}
+}
+
 func TestFetchSessionFocus(t *testing.T) {
 	rangeFocus := &Focus{Kind: FocusRange, BaseSHA: "abc", HeadSHA: "def"}
 

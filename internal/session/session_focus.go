@@ -50,14 +50,17 @@ type Focus struct {
 	BaseBranchName string `json:"base_branch_name,omitempty"`
 
 	// FocusRange fields. All optional except BaseSHA + HeadSHA.
-	Forge             string    `json:"forge,omitempty"`
-	ChangeNumber      int       `json:"change_number,omitempty"`
-	PRURL             string    `json:"pr_url,omitempty"`
-	Label             string    `json:"label,omitempty"`
-	BaseSHA           string    `json:"base_sha,omitempty"`
-	HeadSHA           string    `json:"head_sha,omitempty"`
-	RangeMode         string    `json:"range_mode,omitempty"`
-	RequestedBaseSHA  string    `json:"requested_base_sha,omitempty"`
+	Forge            string `json:"forge,omitempty"`
+	ChangeNumber     int    `json:"change_number,omitempty"`
+	PRURL            string `json:"pr_url,omitempty"`
+	Label            string `json:"label,omitempty"`
+	BaseSHA          string `json:"base_sha,omitempty"`
+	HeadSHA          string `json:"head_sha,omitempty"`
+	RangeMode        string `json:"range_mode,omitempty"`
+	RequestedBaseSHA string `json:"requested_base_sha,omitempty"`
+	// RangeSpec is the --range value as typed (e.g. "main...HEAD"). The SHAs
+	// above stay pinned; reconnecting compares its head ref against HeadSHA.
+	RangeSpec         string    `json:"range_spec,omitempty"`
 	DefaultSHA        string    `json:"default_sha,omitempty"`
 	ForkURL           string    `json:"fork_url,omitempty"`
 	RemoteProject     string    `json:"remote_project,omitempty"`
