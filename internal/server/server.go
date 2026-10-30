@@ -486,9 +486,50 @@ func (s *Server) CheckForUpdates() {
 	if err := json.Unmarshal(body, &release); err != nil || release.TagName == "" {
 		return
 	}
+	if !releaseNewer(release.TagName, s.currentVersion) {
+		return
+	}
 	s.versionMu.Lock()
-	s.latestVersion = release.TagName
+	s.latestVersion = strings.TrimPrefix(release.TagName, "v")
 	s.versionMu.Unlock()
+}
+
+// releaseNewer reports whether release tag latest is a higher
+// major.minor.patch than current. Either side may carry a "v" prefix
+// (release builds are stamped with the tag name); a pre-release suffix is
+// ignored, and an unparseable version never counts as newer.
+func releaseNewer(latest, current string) bool {
+	l, ok := parseReleaseVersion(latest)
+	if !ok {
+		return false
+	}
+	c, ok := parseReleaseVersion(current)
+	if !ok {
+		return false
+	}
+	for i := range l {
+		if l[i] != c[i] {
+			return l[i] > c[i]
+		}
+	}
+	return false
+}
+
+func parseReleaseVersion(v string) ([3]int, bool) {
+	var out [3]int
+	core := strings.SplitN(strings.TrimPrefix(v, "v"), "-", 2)[0]
+	parts := strings.Split(core, ".")
+	if len(parts) != 3 {
+		return out, false
+	}
+	for i, p := range parts {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return out, false
+		}
+		out[i] = n
+	}
+	return out, true
 }
 
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) { //nolint:gocyclo // Response reflects multiple independent runtime capabilities.
@@ -502,7 +543,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) { //nolint
 	sess := s.session.Load()
 	resp := map[string]interface{}{
 		"local_only":          s.localOnly,
-		"version":             s.currentVersion,
+		"version":             strings.TrimPrefix(s.currentVersion, "v"),
 		"latest_version":      latestVersion,
 		"installation_source": s.installationSource,
 		"author":              s.author,

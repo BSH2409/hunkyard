@@ -1246,8 +1246,8 @@ func TestGetConfig(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
 		t.Fatal(err)
 	}
-	if resp["version"] != "v1.2.3" {
-		t.Errorf("version = %v, want v1.2.3", resp["version"])
+	if resp["version"] != "1.2.3" {
+		t.Errorf("version = %v, want 1.2.3", resp["version"])
 	}
 	if resp["latest_version"] != "" {
 		t.Errorf("latest_version should be empty before update check, got %v", resp["latest_version"])
@@ -1277,8 +1277,8 @@ func TestCheckForUpdates(t *testing.T) {
 	s.versionMu.RLock()
 	got := s.latestVersion
 	s.versionMu.RUnlock()
-	if got != "v9.9.9" {
-		t.Errorf("latestVersion = %q, want v9.9.9", got)
+	if got != "9.9.9" {
+		t.Errorf("latestVersion = %q, want 9.9.9", got)
 	}
 
 	// Verify config API reflects it
@@ -1289,8 +1289,52 @@ func TestCheckForUpdates(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if cfg["latest_version"] != "v9.9.9" {
-		t.Errorf("config latest_version = %v, want v9.9.9", cfg["latest_version"])
+	if cfg["latest_version"] != "9.9.9" {
+		t.Errorf("config latest_version = %v, want 9.9.9", cfg["latest_version"])
+	}
+}
+
+func TestReleaseNewer(t *testing.T) {
+	tests := []struct {
+		latest, current string
+		want            bool
+	}{
+		{"v1.0.1", "v1.0.0", true},
+		{"v1.0.1", "1.0.0", true},
+		{"v1.10.0", "v1.9.9", true},
+		{"v2.0.0", "v1.99.99", true},
+		{"v1.0.1", "v1.0.1", false},
+		{"v1.0.1", "1.0.1", false},
+		{"v1.0.0", "v1.0.1", false},
+		{"v1.0.1", "v1.0.1-3-gabc123", false},
+		{"latest", "v1.0.0", false},
+		{"v1.0.1", "dev", false},
+	}
+	for _, tt := range tests {
+		if got := releaseNewer(tt.latest, tt.current); got != tt.want {
+			t.Errorf("releaseNewer(%q, %q) = %v, want %v", tt.latest, tt.current, got, tt.want)
+		}
+	}
+}
+
+func TestCheckForUpdates_IgnoresSameOrOlderRelease(t *testing.T) {
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"tag_name":"v1.0.1"}`)
+	}))
+	defer gh.Close()
+
+	for _, current := range []string{"v1.0.1", "1.0.1", "v1.2.0"} {
+		s, _ := newTestServer(t)
+		s.currentVersion = current
+		s.githubAPIURL = gh.URL
+		s.CheckForUpdates()
+		s.versionMu.RLock()
+		got := s.latestVersion
+		s.versionMu.RUnlock()
+		if got != "" {
+			t.Errorf("current %q: latestVersion = %q, want empty", current, got)
+		}
 	}
 }
 
