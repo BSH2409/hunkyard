@@ -9,10 +9,11 @@ Reads benchstat output (from `benchstat old.txt new.txt` where both files are
     are ignored — shared CI runners produce ±70–90% noise on I/O-bound
     benches (e.g. ReviewSaveLoad), and benchstat can still mark those
     "significant".
-  - allocs/op: ANY significant increase on a real benchmark row. Allocs are
-    deterministic (unlike ns/op on shared runners), so 0 -> N allocs/op
-    always means a heap escape worth a look. Note benchstat prints 0 -> N
-    as `+Inf%`, which counts.
+  - allocs/op: a significant increase above ALLOC_NOISE_PCT (0.1%) on a
+    real benchmark row. Allocs are nearly deterministic, so 0 -> N allocs/op
+    always means a heap escape worth a look (benchstat prints it as
+    `+Inf%`, which counts). Large benches still drift by a few allocs on
+    shared runners (13.24k -> 13.25k), which the allowance absorbs.
 
 Geomean summary rows are never gated — they amplify one noisy bench into a
 package-wide fail (and float rounding can invent +0.02% allocs deltas).
@@ -31,6 +32,7 @@ import re
 import sys
 
 TIME_THRESHOLD_PCT = 20.0
+ALLOC_NOISE_PCT = 0.1
 # Skip time/op gating when either side's reported variance is this high.
 # Matches the ±N% annotations benchstat prints next to each mean.
 VARIANCE_SKIP_PCT = 25.0
@@ -134,7 +136,7 @@ def main() -> int:
                 skipped_noisy.append(line.rstrip())
                 continue
             time_regs.append(line.rstrip())
-        elif table == "alloc" and pct > 0:
+        elif table == "alloc" and pct > ALLOC_NOISE_PCT:
             alloc_regs.append(line.rstrip())
         elif table == "mem" and pct > 0:
             mem_warn.append(line.rstrip())
