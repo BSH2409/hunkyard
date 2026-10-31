@@ -58,6 +58,14 @@ hunkyard feedback ack --session REVIEW_ID --batch BATCH_ID --json
 
 Keep the same owner on every command. `--follow` waits until publication, cancellation, or an error and suppresses `pending` responses. `--timeout` (default 45s) bounds each HTTP wait, not the overall follow process. Ctrl+C stops the waiter without stopping the review daemon or acknowledging feedback. Omit `--follow` for a one-shot wait that can return `pending`; this means the browser review is still open. A timeout is never approval. After processing a change request, `hunkyard --session REVIEW_ID` starts the next review round. Queued publications survive a stopped daemon and an interrupted waiter.
 
+### Review tools
+
+- **Labels.** A line or file comment can carry a conventional-comment label (nit, issue, suggestion, praise, question) and a **blocking** flag. While a blocking comment is unresolved, Approve is disabled in the submit dialog.
+- **Since last review.** In Git mode, the **All changes | Since last review** toggle shows only what changed after your last published review. Before the first publication it shows all changes and says so.
+- **Changed since you viewed.** A file you marked Viewed comes back un-viewed with a badge when its content changes.
+- **Claimed fixed, code unchanged.** When the agent replies to a comment but leaves the commented lines identical, the next round reopens the comment and badges it, and the published batch sets `claim_unchanged`.
+- **Your own edits.** Lines you edit on disk during a review are published as `edit` comments (your version against the agent's), so the agent keeps them and can learn from them.
+
 See the [complete local protocol](integrations/shared/review-workflow.md) for trusted skill catalogs, human comment revisions, preference classification, replies, acknowledgments, and repeated review rounds. It is CLI/JSON and does not depend on a host SDK.
 
 ## Go-backed coding preferences
@@ -105,6 +113,18 @@ hunkyard preferences check --cwd . -- git commit -m x  # would this be blocked? 
 hunkyard preferences allow RULE_ID --once    # run it yourself, e.g. with ! in the CLI
 hunkyard preferences doctor --json          # hooks, trust, store, maintenance and cron
 ```
+
+### Preference Yard
+
+`hunkyard yard` opens the Preference Yard on `127.0.0.1` (`--port`, `--host`, `--no-open`). It is also the **Yard** tab in a review's Settings. It shows:
+
+- **Rules** with evidence and violation counts. You can retire a rule, promote a repository rule to global, or add a rule.
+- **Pipeline**: captured observations waiting for maintenance.
+- **Persona**: the generated files agents receive.
+- **Loads**: which rules each recent session received, and why. The reasons are core at session start, a surface matched in your prompt, kept from earlier, or a file being edited.
+- **Activity** and **Health**, with a button to run maintenance.
+
+Changes are accepted only from the Yard page itself (same-origin).
 
 Maintenance uses a **local proposal file** prepared by the launching host:
 

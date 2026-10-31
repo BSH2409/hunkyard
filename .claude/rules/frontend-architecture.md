@@ -45,6 +45,7 @@ All custom JS uses the IIFE + dual-export pattern:
 | `hunkyard-comment-card-helpers.js` | `window.hunkyard.commentCardHelpers` | Author colors, timestamps, markdown rendering |
 | `hunkyard-settings-overlay.js` | `window.hunkyard.settingsOverlay` | Settings dialog lifecycle |
 | `hunkyard-settings-panes.js` | `window.hunkyard.settingsPanes` | Settings tab content |
+| `hunkyard-yard.js` | `window.hunkyard.yard` | Preference Yard views (Settings Yard tab and standalone `/yard` page via `yard.html`); reads `/api/yard/*` |
 
 ## Code-Review Modules (used only by code-review mode)
 

@@ -88,6 +88,7 @@ func (s *Store) sessionStartHook(input io.Reader, output io.Writer) {
 	if session != "" && len(selection.RuleIDs) > 0 {
 		_ = s.updateSession(session, func(state *sessionState) {
 			state.InjectedRuleIDs = append(state.InjectedRuleIDs, selection.RuleIDs...)
+			state.noteLoads(reasonsFor(selection.RuleIDs, "core (session start)"))
 		})
 	}
 }
@@ -192,6 +193,7 @@ func (s *Store) promptSubmitHook(input io.Reader, output, errorOutput io.Writer)
 			health["selected_rule_count"] = len(selection.RuleIDs)
 			health["omitted_rule_count"] = selection.OmittedCount
 			state.InjectedRuleIDs = append(state.InjectedRuleIDs, selection.RuleIDs...)
+			state.noteLoads(selection.Reasons)
 		}
 	}
 	if session != "" {
@@ -209,6 +211,7 @@ func (s *Store) promptSubmitHook(input io.Reader, output, errorOutput io.Writer)
 		}
 		_ = s.updateSession(session, func(stored *sessionState) {
 			stored.InjectedRuleIDs = append(stored.InjectedRuleIDs, injected...)
+			stored.noteLoads(state.LoadReasons)
 			stored.CommitRequested = stored.CommitRequested || commitRequested
 			stored.TurnDiffDigest = turnDigest
 			stored.TurnAddedLines = baseline
@@ -497,14 +500,35 @@ func (s *Store) promptSelection(query, repo string, injected []string) (Selectio
 		}
 	}
 	ids := []string{}
+	reasons := map[string]string{}
+	surfaces := routedSurfaces(query)
 	for _, r := range selected {
-		ids = append(ids, textField(r["id"]))
+		id := textField(r["id"])
+		ids = append(ids, id)
+		reasons[id] = promptLoadReason(r, chosen[id], surfaces)
 	}
 	if len(selected) == 0 {
 		return Selection{RuleIDs: ids, OmittedCount: selection.OmittedCount}, nil
 	}
 	text := selectionText(selected)
-	return Selection{Text: text, RuleIDs: ids, OmittedCount: selection.OmittedCount, EstimatedTokens: estimatedTokens(text)}, nil
+	return Selection{Text: text, RuleIDs: ids, OmittedCount: selection.OmittedCount, EstimatedTokens: estimatedTokens(text), Reasons: reasons}, nil
+}
+
+// promptLoadReason explains a prompt-time selection: the prompt surface the
+// rule matched, or that it stayed from an earlier turn.
+func promptLoadReason(r rule, chosen bool, promptSurfaces []string) string {
+	if !chosen {
+		return "kept from earlier in this session"
+	}
+	for _, surface := range stringValues(r["surfaces"]) {
+		if slices.Contains(promptSurfaces, surface) {
+			return fmt.Sprintf("matched %q in your prompt", surface)
+		}
+	}
+	if isCoreRule(r) {
+		return "core (session start)"
+	}
+	return "matched your prompt"
 }
 
 var interruptMarkers = []string{"[Request interrupted by user", "The user doesn't want to proceed with this tool use"}

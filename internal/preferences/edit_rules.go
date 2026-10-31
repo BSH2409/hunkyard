@@ -117,6 +117,7 @@ func (s *Store) editRulesResponse(payload map[string]any) map[string]any {
 	}
 	var selected []rule
 	var ids []string
+	reasons := map[string]string{}
 	for _, r := range current.Rules.rules {
 		scope := record(r["scope"])
 		inScope := scope["kind"] == "global" || scope["kind"] == "repository" && scope["repo_key"] == repo
@@ -127,15 +128,29 @@ func (s *Store) editRulesResponse(payload map[string]any) map[string]any {
 		}
 		selected = append(selected, r)
 		ids = append(ids, id)
+		reasons[id] = "editing " + editedPathFor(r, paths, textField(payload["cwd"]))
 	}
 	if len(selected) == 0 {
 		return nil
 	}
-	_ = s.updateSession(session, func(state *sessionState) { state.InjectedRuleIDs = append(state.InjectedRuleIDs, ids...) })
+	_ = s.updateSession(session, func(state *sessionState) {
+		state.InjectedRuleIDs = append(state.InjectedRuleIDs, ids...)
+		state.noteLoads(reasons)
+	})
 	var text strings.Builder
 	fmt.Fprintf(&text, "Preferences for %s:\n", strings.Join(slices.Compact(paths), ", "))
 	for _, r := range selected {
 		text.WriteString(personaBullet(r))
 	}
 	return map[string]any{"hookEventName": "PreToolUse", "additionalContext": text.String()}
+}
+
+// editedPathFor names the first edited path whose surfaces the rule covers.
+func editedPathFor(r rule, paths []string, cwd string) string {
+	for _, path := range paths {
+		if overlapCount(stringValues(r["surfaces"]), pathSurfacesFor([]string{path}, cwd)) > 0 {
+			return path
+		}
+	}
+	return paths[0]
 }

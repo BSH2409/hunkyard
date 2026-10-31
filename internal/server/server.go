@@ -144,6 +144,8 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 
 	// Theme preview page — static samples, no session needed.
 	mux.HandleFunc("/themes", s.serveHTML("themes.html"))
+	mux.HandleFunc("/yard", s.serveHTML("yard.html"))
+	mux.HandleFunc("/api/yard/", s.handleYard)
 
 	// Live-mode routes — NOT wrapped in withReady.
 	mux.HandleFunc("/live", s.serveIndexHTML())
@@ -1038,6 +1040,10 @@ func (s *Server) handleFileDiff(w http.ResponseWriter, r *http.Request) {
 	if served := serveFileDiffAtRound(w, r, s.session.Load(), path); served {
 		return
 	}
+	if r.URL.Query().Get("since") == "published" {
+		s.serveSinceDiff(w, r, path)
+		return
+	}
 
 	scope := r.URL.Query().Get("scope")
 	commit := r.URL.Query().Get("commit")
@@ -1159,6 +1165,8 @@ func (s *Server) handleFileComments(w http.ResponseWriter, r *http.Request) {
 			DOMAnchor *DOMAnchor `json:"dom_anchor"`
 			ContentID string     `json:"content_id"`
 			ViewID    string     `json:"view_id"`
+			Label     string     `json:"label"`
+			Blocking  bool       `json:"blocking"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1167,6 +1175,19 @@ func (s *Server) handleFileComments(w http.ResponseWriter, r *http.Request) {
 		if req.Body == "" {
 			http.Error(w, "Comment body is required", http.StatusBadRequest)
 			return
+		}
+		if !feedback.ValidLabel(req.Label) {
+			http.Error(w, "Unknown comment label", http.StatusBadRequest)
+			return
+		}
+		labelled := func(c session.Comment) session.Comment {
+			if req.Label == "" && !req.Blocking {
+				return c
+			}
+			if updated, ok := s.session.Load().SetCommentLabel(path, c.ID, req.Label, req.Blocking); ok {
+				return updated
+			}
+			return c
 		}
 
 		// Live pin: route to AddLivePin before line validation.
@@ -1207,7 +1228,7 @@ func (s *Server) handleFileComments(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "File not found", http.StatusNotFound)
 				return
 			}
-			writeJSONStatus(w, http.StatusCreated, c)
+			writeJSONStatus(w, http.StatusCreated, labelled(c))
 			return
 		}
 
@@ -1225,7 +1246,7 @@ func (s *Server) handleFileComments(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "File not found", http.StatusNotFound)
 			return
 		}
-		writeJSONStatus(w, http.StatusCreated, c)
+		writeJSONStatus(w, http.StatusCreated, labelled(c))
 
 	default:
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

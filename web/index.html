@@ -156,6 +156,10 @@
       <button class="toggle-btn" data-scope="staged" title="Staged changes">Staged</button>
       <button class="toggle-btn" data-scope="unstaged" title="Unstaged changes">Unstaged</button>
     </div>
+    <div class="scope-toggle" id="sinceToggle" style="display:none" role="group" aria-label="Compare against">
+      <button class="toggle-btn active" data-since="all" aria-pressed="true" title="Changes against the base branch">All changes</button>
+      <button class="toggle-btn" data-since="published" aria-pressed="false" title="Only what changed since you last published a review">Since last review</button>
+    </div>
     <div class="diff-mode-toggle" id="diffModeToggle" style="display:none">
       <button class="toggle-btn active" data-mode="split" title="Split diff">Split</button>
       <button class="toggle-btn" data-mode="unified" title="Unified diff">Unified</button>
@@ -256,6 +260,7 @@
         <label><input type="radio" name="disposition" value="comment" checked> Comment</label>
         <label><input type="radio" name="disposition" value="approve"> Approve</label>
         <label><input type="radio" name="disposition" value="request_changes"> Request changes</label>
+        <p class="publish-approve-blocked" id="publishApproveBlocked" hidden></p>
       </fieldset>
       <div id="publishSkills"></div>
     </div>
@@ -290,6 +295,7 @@
     <div class="settings-tabs" role="tablist" aria-label="Settings sections">
       <button class="settings-tab active" data-tab="settings" role="tab" aria-selected="true" aria-controls="settingsPane" id="tab-settings">Settings</button>
       <button class="settings-tab" data-tab="shortcuts" role="tab" aria-selected="false" aria-controls="shortcutsPane" id="tab-shortcuts">Shortcuts</button>
+      <button class="settings-tab" data-tab="yard" role="tab" aria-selected="false" aria-controls="yardPane" id="tab-yard">Yard<span class="settings-tab-badge" id="yardTabBadge" hidden></span></button>
       <button class="settings-tab" data-tab="updates" role="tab" aria-selected="false" aria-controls="updatesPane" id="tab-updates">Updates</button>
       <button class="settings-tab" data-tab="about" role="tab" aria-selected="false" aria-controls="aboutPane" id="tab-about">About</button>
       <button class="settings-tab-close" id="settingsClose" aria-label="Close">&times;</button>
@@ -297,6 +303,7 @@
     <div class="settings-content">
       <div class="settings-pane active" data-pane="settings" id="settingsPane" role="tabpanel" aria-labelledby="tab-settings"></div>
       <div class="settings-pane" data-pane="shortcuts" id="shortcutsPane" role="tabpanel" aria-labelledby="tab-shortcuts"></div>
+      <div class="settings-pane" data-pane="yard" id="yardPane" role="tabpanel" aria-labelledby="tab-yard"></div>
       <div class="settings-pane" data-pane="updates" id="updatesPane" role="tabpanel" aria-labelledby="tab-updates"></div>
       <div class="settings-pane" data-pane="about" id="aboutPane" role="tabpanel" aria-labelledby="tab-about"></div>
     </div>
@@ -376,6 +383,7 @@
         'hunkyard-comment-card.js',
         'hunkyard-shortcuts.js',
         'hunkyard-settings-panes.js',
+        'hunkyard-yard.js',
         'hunkyard-settings-overlay.js',
         'agent-protocol.js',
         'live-mode.dispatch.js',
@@ -482,6 +490,7 @@
       var ks = document.createElement('script'); ks.src = 'hunkyard-shortcuts.js'; ks.async = false; document.body.appendChild(ks);
       // Shared settings-overlay panes (Shortcuts + About). Must load before app.js.
       var sp = document.createElement('script'); sp.src = 'hunkyard-settings-panes.js'; sp.async = false; document.body.appendChild(sp);
+      var yd = document.createElement('script'); yd.src = 'hunkyard-yard.js'; yd.async = false; document.body.appendChild(yd);
       // Optional boost for low-contrast syntax colours (window.hunkyard.themeBoost).
       var tb = document.createElement('script'); tb.src = 'hunkyard-theme-boost.js'; tb.async = false; document.body.appendChild(tb);
       // Shared settings-overlay shell (open/close/Esc/focus-trap/tab nav). Must load before app.js.

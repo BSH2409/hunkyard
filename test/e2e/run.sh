@@ -13,6 +13,8 @@ MULTI_PORT="${HUNKYARD_TEST_MULTI_PORT:-3127}"
 RANGE_PORT="${HUNKYARD_TEST_RANGE_PORT:-3128}"
 PERF_PORT="${HUNKYARD_TEST_PERF_PORT:-3134}"
 HUGE_PORT="${HUNKYARD_TEST_HUGE_PORT:-3136}"
+YARD_PORT="${HUNKYARD_TEST_YARD_PORT:-3137}"
+printf -v "E2E_READY_PATH_$YARD_PORT" '%s' /api/yard/health
 
 # E2E_SHARD splits the no-arg full run across CI matrix VMs while keeping
 # every test running somewhere (no coverage is dropped). "1/2" runs the git
@@ -23,7 +25,7 @@ HUGE_PORT="${HUNKYARD_TEST_HUGE_PORT:-3136}"
 SHARD="${E2E_SHARD:-all}"
 START_GIT=1; START_GIT2=1; START_FILE=1; START_SINGLE=1
 START_MULTI=1; START_RANGE=1; START_PERF=1
-START_HUGE=1
+START_HUGE=1; START_YARD=1
 if [ "$SHARD" = "1/2" ]; then
   # Runs git --shard=1/2 against the GIT_PORT fixture, so GIT2 is unneeded.
   START_GIT2=0
@@ -31,7 +33,7 @@ if [ "$SHARD" = "1/2" ]; then
 elif [ "$SHARD" = "2/2" ]; then
   # Runs git --shard=2/2 against the GIT2_PORT fixture, so GIT is unneeded.
   START_GIT=0
-  START_FILE=0; START_SINGLE=0; START_MULTI=0; START_HUGE=0
+  START_FILE=0; START_SINGLE=0; START_MULTI=0; START_HUGE=0; START_YARD=0
 fi
 
 # PIDs of fixture scripts and Playwright invocations. Per-port / per-project
@@ -92,7 +94,7 @@ fi
 # Kill any stale processes on our test ports before starting fresh (one
 # PowerShell call on Windows, not one per port).
 e2e_kill_ports "$GIT_PORT" "$GIT2_PORT" "$FILE_PORT" "$SINGLE_PORT" "$MULTI_PORT" \
-  "$RANGE_PORT" "$PERF_PORT" "$HUGE_PORT"
+  "$RANGE_PORT" "$PERF_PORT" "$HUGE_PORT" "$YARD_PORT"
 
 # Start fixture servers in parallel — only the ones this shard's projects
 # need, so a matrix shard doesn't pay for (or contend with) idle servers.
@@ -113,6 +115,7 @@ if [ "$START_MULTI" = 1 ]; then start_fixture "$MULTI_PORT" setup-fixtures-multi
 if [ "$START_RANGE" = 1 ]; then start_fixture "$RANGE_PORT" setup-fixtures-range-mode.sh "$RANGE_PORT"; fi
 if [ "$START_PERF" = 1 ]; then start_fixture "$PERF_PORT" setup-fixtures-perf.sh "$PERF_PORT"; fi
 if [ "$START_HUGE" = 1 ]; then start_fixture "$HUGE_PORT" setup-fixtures-huge.sh "$HUGE_PORT"; fi
+if [ "$START_YARD" = 1 ]; then start_fixture "$YARD_PORT" setup-fixtures-yard.sh "$YARD_PORT"; fi
 
 # Block until the fixture on $1 answers; fail fast if it died or hung.
 wait_fixture() {
@@ -176,6 +179,7 @@ if [ "$START_MULTI" = 1 ]; then run_project multi "$MULTI_PORT" E2E_ONLY_SERVER=
 if [ "$START_RANGE" = 1 ]; then run_project range "$RANGE_PORT" E2E_ONLY_SERVER=range -- --project=range-mode; fi
 if [ "$START_PERF" = 1 ]; then run_project perf "$PERF_PORT" E2E_ONLY_SERVER=perf -- --project=perf; fi
 if [ "$START_HUGE" = 1 ]; then run_project huge "$HUGE_PORT" E2E_ONLY_SERVER=huge -- --project=huge; fi
+if [ "$START_YARD" = 1 ]; then run_project yard "$YARD_PORT" E2E_ONLY_SERVER=yard -- --project=yard; fi
 
 # Mobile reuses a git-mode fixture, and both projects DELETE /api/comments in
 # beforeEach, so it must never overlap the git shard on that fixture. It runs

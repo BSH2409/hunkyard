@@ -220,3 +220,26 @@ test('GitHub badge omitted when comment.github_id is missing or zero', () => {
   );
   assert.equal(findByClass(zero.card, 'github-badge').length, 0, 'no badge when github_id is 0');
 });
+
+test('labelled blocking comments show label and blocking badges', () => {
+  const out = card.buildCommentCard(
+    { id: 'a1', body: 'fix', created_at: '2024-01-01T00:00:00Z', label: 'issue', blocking: true },
+    '',
+    { deps: baseDeps() }
+  );
+  const labels = findByClass(out.card, 'comment-label');
+  assert.equal(labels.length, 2);
+  assert.equal(labels[0].textContent, 'issue');
+  assert.equal(labels[1].textContent, 'blocking');
+  const plain = card.buildCommentCard({ id: 'b1', body: 'ok', created_at: '2024-01-01T00:00:00Z' }, '', { deps: baseDeps() });
+  assert.equal(findByClass(plain.card, 'comment-label').length, 0);
+});
+
+test('a claimed-fixed comment with unchanged code is badged until resolved', () => {
+  const open = card.buildCommentCard({ id: 'c1', body: 'fix', created_at: '2024-01-01T00:00:00Z', claim_unchanged_round: 2 }, '', { deps: baseDeps() });
+  const badges = findByClass(open.card, 'comment-label--claim');
+  assert.equal(badges.length, 1);
+  assert.equal(badges[0].textContent, 'Claimed fixed · code unchanged');
+  const resolved = card.buildCommentCard({ id: 'c2', body: 'fix', created_at: '2024-01-01T00:00:00Z', claim_unchanged_round: 2, resolved: true }, '', { deps: baseDeps() });
+  assert.equal(findByClass(resolved.card, 'comment-label--claim').length, 0);
+});

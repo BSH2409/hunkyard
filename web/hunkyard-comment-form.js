@@ -161,7 +161,47 @@
     };
   }
 
-  var api = { createForm: createForm };
+  var COMMENT_LABELS = ['nit', 'issue', 'suggestion', 'praise', 'question'];
+
+  // buildLabelPicker renders one-tap label chips (one label at a time) and a
+  // blocking toggle. getValue() returns { label, blocking }.
+  function buildLabelPicker() {
+    var el = document.createElement('div');
+    el.className = 'comment-label-picker';
+    var value = { label: '', blocking: false };
+    var buttons = [];
+    function chip(text, data) {
+      var btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'comment-label-chip';
+      btn.textContent = text;
+      Object.keys(data).forEach(function (k) { btn.dataset[k] = data[k]; });
+      btn.setAttribute && btn.setAttribute('aria-pressed', 'false');
+      el.appendChild(btn);
+      buttons.push(btn);
+      return btn;
+    }
+    function sync() {
+      buttons.forEach(function (b) {
+        var on = b.dataset.blocking === 'true' ? value.blocking : b.dataset.label === value.label;
+        b.className = 'comment-label-chip' + (on ? ' active' : '');
+        if (b.setAttribute) b.setAttribute('aria-pressed', on ? 'true' : 'false');
+      });
+    }
+    COMMENT_LABELS.forEach(function (label) {
+      chip(label, { label: label }).addEventListener('click', function () {
+        value.label = value.label === label ? '' : label;
+        sync();
+      });
+    });
+    chip('blocking', { blocking: 'true' }).addEventListener('click', function () {
+      value.blocking = !value.blocking;
+      sync();
+    });
+    return { el: el, getValue: function () { return { label: value.label, blocking: value.blocking }; } };
+  }
+
+  var api = { createForm: createForm, buildLabelPicker: buildLabelPicker, COMMENT_LABELS: COMMENT_LABELS };
 
   if (typeof window !== 'undefined') {
     window.hunkyard = window.hunkyard || {};

@@ -11,6 +11,7 @@ const RANGE_PORT = process.env.HUNKYARD_TEST_RANGE_PORT || '3128';
 const PERF_PORT = process.env.HUNKYARD_TEST_PERF_PORT || '3134';
 // Huge-review fixture (~2,500 files) whose flat document is taller than 2^22px.
 const HUGE_PORT = process.env.HUNKYARD_TEST_HUGE_PORT || '3136';
+const YARD_PORT = process.env.HUNKYARD_TEST_YARD_PORT || '3137';
 // The local-only build omits executable-preview projects.
 // Mobile project re-uses the git-mode fixture — no separate server needed.
 const MOBILE_PORT = GIT_PORT;
@@ -100,6 +101,14 @@ const allFixtureServers: FixtureServer[] = [
     timeout: 180_000,
     stdout: 'pipe',
   },
+  {
+    key: 'yard',
+    command: `bash setup-fixtures-yard.sh ${YARD_PORT}`,
+    url: `http://localhost:${YARD_PORT}/api/yard/health`,
+    reuseExistingServer: true,
+    timeout: 30_000,
+    stdout: 'pipe',
+  },
 ];
 
 export default defineConfig({
@@ -138,7 +147,7 @@ export default defineConfig({
   projects: [
     {
       name: 'git-mode',
-      testMatch: /^(?!.*\.(filemode|singlefile|multifile|rangemode|mobile|livemode|perf|huge)\.).*\.spec\.ts$/,
+      testMatch: /^(?!.*\.(filemode|singlefile|multifile|rangemode|mobile|livemode|perf|huge|yard)\.).*\.spec\.ts$/,
       use: {
         browserName: 'chromium',
         baseURL: `http://localhost:${GIT_PORT}`,
@@ -210,6 +219,14 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         baseURL: `http://localhost:${HUGE_PORT}`,
+      },
+    },
+    {
+      name: 'yard',
+      testMatch: /\.yard\.spec\.ts$/,
+      use: {
+        browserName: 'chromium',
+        baseURL: `http://localhost:${YARD_PORT}`,
       },
     },
   ],

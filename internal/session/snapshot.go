@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"sort"
 	"strings"
 
@@ -244,3 +245,19 @@ func SaveReviewSnapshot(reviewDir string, snapshot ReviewSnapshot) error {
 	}
 	return AtomicWriteFile(target, encoded, 0600)
 }
+
+// LoadReviewSnapshot reads a published snapshot saved by SaveReviewSnapshot.
+func LoadReviewSnapshot(reviewDir, id string) (ReviewSnapshot, error) {
+	var snapshot ReviewSnapshot
+	if !reviewSnapshotIDPattern.MatchString(id) {
+		return snapshot, fmt.Errorf("invalid review snapshot identity")
+	}
+	data, err := os.ReadFile(filepath.Join(reviewDir, "review-snapshots", id+".json"))
+	if err != nil {
+		return snapshot, err
+	}
+	err = json.Unmarshal(data, &snapshot)
+	return snapshot, err
+}
+
+var reviewSnapshotIDPattern = regexp.MustCompile(`^snapshot_[0-9a-f]{64}$`)

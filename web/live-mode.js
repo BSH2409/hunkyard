@@ -1627,6 +1627,7 @@
       if (shared.applyThemeFromCookie) shared.applyThemeFromCookie();
     }
 
+    var yardSince = new Date().toISOString();
     function renderAllPanes() {
       var panes = window.hunkyard && window.hunkyard.settingsPanes;
       if (!panes) return;
@@ -1674,6 +1675,10 @@
       }
       if (panes.renderAboutPane) {
         panes.renderAboutPane(overlay.querySelector('#aboutPane'), cfg, sessionDescriptor);
+      }
+      var yard = window.hunkyard && window.hunkyard.yard;
+      if (yard) {
+        yard.render(overlay.querySelector('#yardPane'), { mode: 'tab', since: yardSince });
       }
     }
 

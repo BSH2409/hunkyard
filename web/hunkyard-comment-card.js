@@ -103,6 +103,25 @@
       authorBadge.textContent = '@' + comment.author;
       headerLeft.appendChild(authorBadge);
     }
+    if (comment.label) {
+      var labelBadge = document.createElement('span');
+      labelBadge.className = 'comment-label comment-label--' + comment.label;
+      labelBadge.textContent = comment.label;
+      headerLeft.appendChild(labelBadge);
+    }
+    if (comment.blocking) {
+      var blockingBadge = document.createElement('span');
+      blockingBadge.className = 'comment-label comment-label--blocking';
+      blockingBadge.textContent = 'blocking';
+      headerLeft.appendChild(blockingBadge);
+    }
+    if (comment.claim_unchanged_round && !comment.resolved) {
+      var claimBadge = document.createElement('span');
+      claimBadge.className = 'comment-label comment-label--claim';
+      claimBadge.textContent = 'Claimed fixed · code unchanged';
+      claimBadge.title = 'The agent replied in round ' + comment.claim_unchanged_round + ' but the commented lines did not change, so the comment was reopened.';
+      headerLeft.appendChild(claimBadge);
+    }
     if (comment.review_round >= 1) {
       var roundBadge = document.createElement('span');
       var currentRound = getReviewRound();

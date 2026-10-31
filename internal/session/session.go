@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/BSH2409/hunkyard/internal/feedback"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,18 +122,25 @@ type DOMAnchor struct {
 
 // Comment represents a single inline review comment.
 type Comment struct {
-	AuthorKind  string `json:"author_kind,omitempty"`
-	ID          string `json:"id"`
-	ContentID   string `json:"content_id,omitempty"`
-	ViewID      string `json:"view_id,omitempty"`
-	StartLine   int    `json:"start_line"`
-	EndLine     int    `json:"end_line"`
-	Side        string `json:"side,omitempty"`
-	Body        string `json:"body"`
-	Quote       string `json:"quote,omitempty"`
-	QuoteOffset *int   `json:"quote_offset,omitempty"`
-	Anchor      string `json:"anchor,omitempty"`
-	Drifted     bool   `json:"drifted,omitempty"`
+	// Label classifies a review comment (feedback.ValidLabel); Blocking marks
+	// one that must be resolved before approval.
+	Label    string `json:"label,omitempty"`
+	Blocking bool   `json:"blocking,omitempty"`
+	// ClaimUnchangedRound is the round in which the agent replied to this
+	// comment but left the commented code byte-for-byte unchanged.
+	ClaimUnchangedRound int    `json:"claim_unchanged_round,omitempty"`
+	AuthorKind          string `json:"author_kind,omitempty"`
+	ID                  string `json:"id"`
+	ContentID           string `json:"content_id,omitempty"`
+	ViewID              string `json:"view_id,omitempty"`
+	StartLine           int    `json:"start_line"`
+	EndLine             int    `json:"end_line"`
+	Side                string `json:"side,omitempty"`
+	Body                string `json:"body"`
+	Quote               string `json:"quote,omitempty"`
+	QuoteOffset         *int   `json:"quote_offset,omitempty"`
+	Anchor              string `json:"anchor,omitempty"`
+	Drifted             bool   `json:"drifted,omitempty"`
 	// DriftedOnRound is set to the review round that newly classified this pin
 	// as Drifted. Used to surface "Drifted on round N" in the live-mode side
 	// panel. Zero (omitempty) means "not stamped". Distinct from `Drifted bool`
@@ -1667,6 +1675,24 @@ func (s *Session) SetCommentResolved(filePath, id string, resolved bool) (Commen
 	} else {
 		f.Comments[i].ResolvedRound = 0
 	}
+	f.Comments[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	s.scheduleWrite()
+	return f.Comments[i], true
+}
+
+// SetCommentLabel sets a comment's label and blocking flag.
+func (s *Session) SetCommentLabel(filePath, id, label string, blocking bool) (Comment, bool) {
+	if !feedback.ValidLabel(label) {
+		return Comment{}, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	f, i := s.locateFileCommentLocked(filePath, id)
+	if f == nil {
+		return Comment{}, false
+	}
+	f.Comments[i].Label = label
+	f.Comments[i].Blocking = blocking
 	f.Comments[i].UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	s.scheduleWrite()
 	return f.Comments[i], true

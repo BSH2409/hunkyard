@@ -42,6 +42,17 @@
         dialog.addEventListener('cancel', cancel);
         document.getElementById('publishReviewCancel').addEventListener('click', cancel);
         submit.disabled = false;
+        var blocking = typeof window.hunkyardOpenBlockingComments === 'function' ? window.hunkyardOpenBlockingComments() : 0;
+        var approve = form.querySelector('input[name="disposition"][value="approve"]');
+        var approveHint = document.getElementById('publishApproveBlocked');
+        if (approve) {
+          approve.disabled = blocking > 0;
+          if (approve.disabled && approve.checked) form.querySelector('input[name="disposition"][value="comment"]').checked = true;
+        }
+        if (approveHint) {
+          approveHint.hidden = blocking === 0;
+          approveHint.textContent = blocking === 1 ? '1 blocking comment is unresolved.' : blocking + ' blocking comments are unresolved.';
+        }
         dialog.showModal();
         summary.focus();
       });

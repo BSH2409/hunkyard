@@ -50,6 +50,9 @@
     return shortcuts && shortcuts.isReservedBinding ? shortcuts.isReservedBinding(binding) : false;
   }
 
+  // Shortcut groups declare a section; sections render in this order.
+  var SHORTCUT_SECTIONS = { general: 'General', review: 'Review', live: 'Live' };
+
   function renderShortcutsPane(pane, opts) {
     if (!pane) return;
     opts = opts || {};
@@ -62,11 +65,21 @@
     html += '<button type="button" class="shortcut-reset-all">Reset all</button>';
     html += '</div>';
 
-    shortcuts.groups.forEach(function (group) {
+    var shownSections = {};
+    var sectionOrder = Object.keys(SHORTCUT_SECTIONS);
+    var orderedGroups = shortcuts.groups.slice().sort(function (a, b) {
+      return sectionOrder.indexOf(a.section || 'general') - sectionOrder.indexOf(b.section || 'general');
+    });
+    orderedGroups.forEach(function (group) {
       var visible = group.shortcuts.filter(function (s) {
         return s.modes && s.modes.indexOf(mode) !== -1;
       });
       if (visible.length === 0) return;
+      var section = SHORTCUT_SECTIONS[group.section] || SHORTCUT_SECTIONS.general;
+      if (!shownSections[section]) {
+        shownSections[section] = true;
+        html += '<div class="shortcuts-section-label">' + section + '</div>';
+      }
       html += '<div class="shortcuts-group-label">' + group.label + '</div>';
       html += '<table class="shortcuts-table">';
       visible.forEach(function (s) {
@@ -519,10 +532,13 @@
     var currentTheme = getSetting('theme', 'system');
     var currentWidth = getSetting('width', 'default');
 
+    // Rows go into the General or Review section; review holds the Review
+    // rows until the General group closes.
     var html = '';
+    var review = '';
 
-    // ---------- Display ----------
-    html += '<div class="settings-section-label">Display</div>';
+    // ---------- General ----------
+    html += '<div class="settings-section-label">General</div>';
     html += '<div class="settings-display-group">';
 
     // Theme row (always shown)
@@ -568,14 +584,14 @@
 
     if (hooks.themePalettes && hooks.onRendererSettingChange) {
       var rendererSelects = [
-        { key: 'lineNumbers', label: 'Line numbers', fallback: 'on', options: [{ id: 'on', name: 'On' }, { id: 'off', name: 'Off' }] },
+        { key: 'lineNumbers', section: 'review', label: 'Line numbers', fallback: 'on', options: [{ id: 'on', name: 'On' }, { id: 'off', name: 'Off' }] },
         { key: 'lightPalette', label: 'Light theme (UI + code)', fallback: hooks.paletteDefaults.light, options: hooks.themePalettes.filter(function(p) { return p.type === 'light'; }) },
         { key: 'darkPalette', label: 'Dark theme (UI + code)', fallback: hooks.paletteDefaults.dark, options: hooks.themePalettes.filter(function(p) { return p.type === 'dark'; }) },
         { key: 'boostContrast', label: 'Syntax contrast', fallback: 'off', options: [{ id: 'off', name: 'Theme default' }, { id: 'on', name: 'Increased' }] },
-        { key: 'codeOverflow', label: 'Long code lines', fallback: 'scroll', options: [{ id: 'scroll', name: 'Horizontal scrolling' }, { id: 'wrap', name: 'Wrap lines' }] },
-        { key: 'inlineDiff', label: 'Inline diff highlighting', fallback: 'word-alt', options: [{ id: 'word-alt', name: 'Words (alternate)' }, { id: 'word', name: 'Words' }, { id: 'char', name: 'Characters' }, { id: 'none', name: 'Off' }] },
-        { key: 'changeIndicators', label: 'Change indicators', fallback: 'classic', options: [{ id: 'classic', name: '+ / − markers' }, { id: 'bars', name: 'Bars' }, { id: 'none', name: 'None' }] },
-        { key: 'unchangedContext', label: 'Unchanged context', fallback: 'collapsed', options: [{ id: 'collapsed', name: 'Collapsed (expandable)' }, { id: 'expanded', name: 'Expand all' }] },
+        { key: 'codeOverflow', section: 'review', label: 'Long code lines', fallback: 'scroll', options: [{ id: 'scroll', name: 'Horizontal scrolling' }, { id: 'wrap', name: 'Wrap lines' }] },
+        { key: 'inlineDiff', section: 'review', label: 'Inline diff highlighting', fallback: 'word-alt', options: [{ id: 'word-alt', name: 'Words (alternate)' }, { id: 'word', name: 'Words' }, { id: 'char', name: 'Characters' }, { id: 'none', name: 'Off' }] },
+        { key: 'changeIndicators', section: 'review', label: 'Change indicators', fallback: 'classic', options: [{ id: 'classic', name: '+ / − markers' }, { id: 'bars', name: 'Bars' }, { id: 'none', name: 'None' }] },
+        { key: 'unchangedContext', section: 'review', label: 'Unchanged context', fallback: 'collapsed', options: [{ id: 'collapsed', name: 'Collapsed (expandable)' }, { id: 'expanded', name: 'Expand all' }] },
       ];
       // Live/preview mode has no code view: only the theme choice applies.
       if (opts.mode === 'live') {
@@ -586,12 +602,13 @@
         if (isPalette) s.options = s.options.slice().sort(function(a, b) { return a.displayName.localeCompare(b.displayName); });
         // Palettes use the validated saved theme (unknown ids fall back to defaults).
         var value = isPalette ? s.fallback : getSetting(s.key, s.fallback);
-        html += '<div class="settings-display-row"><label class="settings-display-label" for="' + s.key + 'Select">' + esc(s.label) + '</label>';
-        html += '<select class="settings-select" id="' + s.key + 'Select" data-renderer-setting="' + s.key + '">';
+        var row = '<div class="settings-display-row"><label class="settings-display-label" for="' + s.key + 'Select">' + esc(s.label) + '</label>';
+        row += '<select class="settings-select" id="' + s.key + 'Select" data-renderer-setting="' + s.key + '">';
         s.options.forEach(function(o) {
-          html += '<option value="' + esc(o.id) + '"' + (value === o.id ? ' selected' : '') + '>' + esc(o.displayName || o.name || o.id) + '</option>';
+          row += '<option value="' + esc(o.id) + '"' + (value === o.id ? ' selected' : '') + '>' + esc(o.displayName || o.name || o.id) + '</option>';
         });
-        html += '</select></div>';
+        row += '</select></div>';
+        if (s.section === 'review') review += row; else html += row;
         if (s.key === 'darkPalette' && show.themePreview) {
           html += '<div class="settings-display-row"><span class="settings-display-label"></span>' +
             '<a class="settings-theme-preview-link" href="/themes" target="_blank" rel="noopener">Preview all themes</a></div>';
@@ -616,28 +633,34 @@
     // Hide resolved row
     if (show.hideResolved && hooks.getHideResolved) {
       var hideResolved = !!hooks.getHideResolved();
-      html += '<div class="settings-display-row">';
-      html += '<span class="settings-display-label">Hide resolved comments</span>';
-      html += '<label class="comments-panel-switch">';
-      html += '<input type="checkbox" id="hideResolvedToggle" aria-label="Hide resolved comments"' + (hideResolved ? ' checked' : '') + '>';
-      html += '<span class="comments-panel-switch-track"><span class="comments-panel-switch-thumb"></span></span>';
-      html += '</label>';
-      html += '</div>';
+      review += '<div class="settings-display-row">';
+      review += '<span class="settings-display-label">Hide resolved comments</span>';
+      review += '<label class="comments-panel-switch">';
+      review += '<input type="checkbox" id="hideResolvedToggle" aria-label="Hide resolved comments"' + (hideResolved ? ' checked' : '') + '>';
+      review += '<span class="comments-panel-switch-track"><span class="comments-panel-switch-thumb"></span></span>';
+      review += '</label>';
+      review += '</div>';
     }
 
     // Ignore whitespace row (code diffs / git mode only)
     if (show.ignoreWhitespace && hooks.getIgnoreWhitespace) {
       var ignoreWhitespace = !!hooks.getIgnoreWhitespace();
-      html += '<div class="settings-display-row">';
-      html += '<span class="settings-display-label">Ignore whitespace</span>';
-      html += '<label class="comments-panel-switch">';
-      html += '<input type="checkbox" id="ignoreWhitespaceToggle" aria-label="Ignore whitespace changes in diffs"' + (ignoreWhitespace ? ' checked' : '') + '>';
-      html += '<span class="comments-panel-switch-track"><span class="comments-panel-switch-thumb"></span></span>';
-      html += '</label>';
-      html += '</div>';
+      review += '<div class="settings-display-row">';
+      review += '<span class="settings-display-label">Ignore whitespace</span>';
+      review += '<label class="comments-panel-switch">';
+      review += '<input type="checkbox" id="ignoreWhitespaceToggle" aria-label="Ignore whitespace changes in diffs"' + (ignoreWhitespace ? ' checked' : '') + '>';
+      review += '<span class="comments-panel-switch-track"><span class="comments-panel-switch-thumb"></span></span>';
+      review += '</label>';
+      review += '</div>';
     }
 
-    html += '</div>'; // close settings-display-group
+    html += '</div>'; // close the General settings-display-group
+
+    // ---------- Review ----------
+    if (review) {
+      html += '<div class="settings-section-label">Review</div>';
+      html += '<div class="settings-display-group">' + review + '</div>';
+    }
 
     // ---------- Configuration ----------
     if (show.agent) {

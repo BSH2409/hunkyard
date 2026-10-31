@@ -13,6 +13,8 @@ type Selection struct {
 	RuleIDs         []string `json:"rule_ids"`
 	OmittedCount    int      `json:"omitted_count"`
 	EstimatedTokens int      `json:"estimated_tokens"`
+	// Reasons maps each selected rule to why it was loaded (hook paths only).
+	Reasons map[string]string `json:"-"`
 }
 
 const precedenceSentence = "Current user instructions and repository standards win. Repository preferences override global preferences; personal preferences override source-pack defaults."

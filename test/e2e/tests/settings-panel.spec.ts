@@ -32,8 +32,10 @@ test.describe('Settings Panel', () => {
     const settings = page.locator('.settings-pane[data-pane="settings"]');
     await expect(settings).toHaveClass(/active/);
 
-    // Display section: theme, code font and width.
+    // General then Review sections; General holds theme, code font and width.
+    await expect(settings.locator('.settings-section-label')).toHaveText(['General', 'Review']);
     await expect(settings.locator('.settings-display-label').first()).toHaveText('Theme');
+    await expect(settings.locator('.settings-display-group').nth(1).locator('.settings-display-label', { hasText: 'Hide resolved comments' })).toBeVisible();
     await expect(settings.locator('.settings-display-label').filter({ hasText: 'Code font' })).toBeVisible();
     await expect(settings.locator('.settings-display-label').filter({ hasText: 'Content Width' })).toBeVisible();
     // Subprocess agent controls stay absent.
@@ -64,13 +66,12 @@ test.describe('Settings Panel', () => {
     await page.keyboard.press('?');
     await expect(overlay(page)).toHaveClass(/active/);
     await expect(page.locator('.settings-tab.active')).toHaveText('Shortcuts');
-    // Code-review mode shows five groups: Navigation, Comments, Review, Story,
-    // View (the Live group is filtered out; Story shortcuts carry a "story mode"
-    // badge and always render, like the "file mode"/"vcs mode" badged entries).
+    // Code-review mode shows five groups in two sections: General (Navigation,
+    // View) and Review (Comments, Review, Story). The Live group is filtered
+    // out; Story shortcuts carry a "story mode" badge and always render.
     const pane = page.locator('.settings-pane[data-pane="shortcuts"]');
-    await expect(pane.locator('.shortcuts-group-label')).toHaveCount(5);
-    await expect(pane.locator('.shortcuts-group-label').first()).toHaveText('Navigation');
-    await expect(pane.locator('.shortcuts-group-label').nth(3)).toHaveText('Story');
+    await expect(pane.locator('.shortcuts-section-label')).toHaveText(['General', 'Review']);
+    await expect(pane.locator('.shortcuts-group-label')).toHaveText(['Navigation', 'View', 'Comments', 'Review', 'Story']);
 
     // ? again on the Shortcuts tab closes.
     await page.keyboard.press('?');

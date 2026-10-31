@@ -573,3 +573,41 @@ test('local-only settings omit unsupported external and subprocess controls', ()
   sp.renderSettingsTab(pane, { mode: 'code-review', cfg: { local_only: true, no_integration_check: true } });
   assert.doesNotMatch(pane.innerHTML, /config-card-title">Agent Command/);
 });
+
+test('settings group into General then Review sections', () => {
+  const panes = loadShared();
+  const pane = makePane();
+  const hooks = Object.assign(paletteHooks(), { getHideResolved: () => false, getIgnoreWhitespace: () => false });
+  panes.renderSettingsTab(pane, { mode: 'code-review', cfg: {}, hooks, show: { hideResolved: true, ignoreWhitespace: true } });
+  const html = pane.innerHTML;
+  const general = html.indexOf('settings-section-label">General<');
+  const review = html.indexOf('settings-section-label">Review<');
+  assert.ok(general >= 0 && review > general, 'General precedes Review');
+  for (const label of ['>Theme<', 'Syntax contrast', 'Light theme']) {
+    assert.ok(html.indexOf(label) > general && html.indexOf(label) < review, label + ' is under General');
+  }
+  for (const label of ['Line numbers', 'Long code lines', 'Inline diff highlighting', 'Change indicators', 'Unchanged context', 'Hide resolved comments', 'Ignore whitespace']) {
+    assert.ok(html.indexOf(label) > review, label + ' is under Review');
+  }
+});
+
+test('live mode settings show only the General section', () => {
+  const panes = loadShared();
+  const pane = makePane();
+  panes.renderSettingsTab(pane, { mode: 'live', cfg: {}, hooks: paletteHooks() });
+  assert.match(pane.innerHTML, /settings-section-label">General</);
+  assert.doesNotMatch(pane.innerHTML, /settings-section-label">Review</);
+});
+
+test('shortcuts group into General and Review sections', () => {
+  const panes = loadShared();
+  const pane = makePane();
+  panes.renderShortcutsPane(pane, { mode: 'code-review' });
+  const html = pane.innerHTML;
+  const general = html.indexOf('shortcuts-section-label">General<');
+  const review = html.indexOf('shortcuts-section-label">Review<');
+  assert.ok(general >= 0 && review > general, 'General precedes Review');
+  assert.ok(html.indexOf('>Navigation<') > general && html.indexOf('>Navigation<') < review);
+  assert.ok(html.indexOf('>Comments<') > review);
+  assert.ok(html.indexOf('>View<') > general && html.indexOf('>View<') < review, 'View stays under General');
+});
