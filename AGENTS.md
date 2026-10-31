@@ -104,7 +104,7 @@ Two-level JSON config files, merged (project overrides global):
 - **Global**: `~/.hunkyard.config.json` — user-wide defaults
 - **Project**: `.hunkyard.config.json` in repo root — per-project overrides
 
-Config keys: `port`, `host`, `no_open`, `quiet`, `output`, `author`, `base_branch`, `ignore_patterns`, `auto_viewed_patterns`, `default_markdown_view`, `agent_cmd`, `plan_approve_mode`, `cleanup_on_approve`, `notify_on_round_ready`, `disable_stats`, `no_update_check`, `no_integration_check`, `vcs`, `live_cookie`, `live_cookie_file`, `live_cdp_url`, `close_on_approve_after_ms`, `stale_review_days`.
+Config keys: `port`, `host`, `no_open`, `quiet`, `output`, `author`, `base_branch`, `ignore_patterns`, `auto_viewed_patterns`, `default_markdown_view`, `agent_cmd`, `plan_approve_mode`, `cleanup_on_approve`, `notify_on_round_ready`, `disable_stats`, `no_integration_check`, `vcs`, `live_cookie`, `live_cookie_file`, `live_cdp_url`, `close_on_approve_after_ms`, `stale_review_days`.
 
 - `base_branch` overrides auto-detected default branch (used as diff base in git mode, and by `hunkyard pull`/`hunkyard push`/`hunkyard comment`)
 - `author` falls back to the configured VCS user name if not set
@@ -113,6 +113,7 @@ Config keys: `port`, `host`, `no_open`, `quiet`, `output`, `author`, `base_branc
 - `cleanup_on_approve` (default: `true`) — auto-delete review file when reviewer approves with no unresolved comments
 - `stale_review_days` (default: `14`) — age in days after which the background sweep started by `hunkyard review` / `hunkyard plan` deletes an untouched review; unset or non-positive values use the default. Not included in `hunkyard config --generate` scaffolding.
 - `notify_on_round_ready` (default: `false`) — opt in to a desktop notification when a review round becomes ready for the human. On macOS, install `terminal-notifier` so the notification's click action opens the review URL; without it, clicking falls back to AppleScript `display notification`, which macOS attributes to Script Editor instead of the browser
+- `no_update_check` is still accepted for older configs but has no effect: Hunkyard never checks for updates
 - `disable_stats` (default: `false`) — disable session stats recording to `~/.hunkyard/stats.json`
 - `ignore_patterns` are unioned (global + project both apply); types: `*.ext`, `dir/`, `exact.file`, `path/*.ext`
 - `auto_viewed_patterns` are unioned (global + project both apply); matched client-side against file paths and applied once per launch to auto-mark matching files viewed (collapsed). No runtime default (empty). Plumbed through `/api/config` only — Go does no glob matching.
@@ -204,7 +205,7 @@ Session-scoped:
 - `GET  /api/health` — liveness probe (no readiness gate; used for daemon health checks); `{status, browser_clients, api_version}` — bump `APIVersion` only for breaking HTTP API changes; missing `api_version` = 0
 - `POST /api/shutdown?pid=<daemon pid>` - graceful stop, same path as SIGTERM; CLI-only (403 on `Sec-Fetch-Site`/`Origin`), 409 when `pid` is another daemon's (checked before readiness, so also during init)
 - `GET  /api/session` — session metadata
-- `GET  /api/config` — `{version, latest_version, ...}`
+- `GET  /api/config` — `{version, installation_source, ...}`
 - `GET  /api/review-cycle` — review-cycle metadata (round number, edits-since-last)
 - `POST /api/finish` — write review file, return prompt for agent
 - `GET  /api/events` — SSE stream (file-changed, edit-detected, server-shutdown)

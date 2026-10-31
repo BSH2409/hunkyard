@@ -289,13 +289,14 @@ test('renderUpdatesPane: uses brand icons for all agents with SVG assets', () =>
   assert.doesNotMatch(pane.innerHTML, /updates-agent-icon--fallback/);
 });
 
-test('renderUpdatesPane: current Hunkyard still shows its version and release notes', () => {
+test('renderUpdatesPane: shows the running version without claiming it is current', () => {
   const sp = loadShared();
   const pane = makePane();
-  sp.renderUpdatesPane(pane, { version: '0.20.2' }, {});
+  // Hunkyard never checks for releases, so even a stale latest_version is ignored.
+  sp.renderUpdatesPane(pane, { version: '0.20.2', latest_version: '9.9.9' }, {});
   assert.match(pane.innerHTML, /v0\.20\.2/);
-  assert.match(pane.innerHTML, /Release notes/);
-  assert.match(pane.innerHTML, /Up to date/);
+  assert.match(pane.innerHTML, /href="https:\/\/github\.com\/BSH2409\/hunkyard\/releases"/);
+  assert.doesNotMatch(pane.innerHTML, /Up to date|Update available|9\.9\.9|Don't remind me/);
 });
 
 test('renderUpdatesPane: shows muted integrations before uninstalled integrations', () => {
@@ -610,4 +611,25 @@ test('shortcuts group into General and Review sections', () => {
   assert.ok(html.indexOf('>Navigation<') > general && html.indexOf('>Navigation<') < review);
   assert.ok(html.indexOf('>Comments<') > review);
   assert.ok(html.indexOf('>View<') > general && html.indexOf('>View<') < review, 'View stays under General');
+});
+
+test('renderUpdatesPane: an unrecognised install points at the release page and a rebuild', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderUpdatesPane(pane, { version: '1.0.2', installation_source: 'unknown' }, {});
+  assert.match(pane.innerHTML, /release page/);
+  assert.match(pane.innerHTML, /go build -o &quot;\$\(command -v hunkyard\)&quot; \.\/cmd\/hunkyard|go build -o "\$\(command -v hunkyard\)" \.\/cmd\/hunkyard/);
+  assert.doesNotMatch(pane.innerHTML, /from the release notes/);
+});
+
+test('renderUpdatesPane: release and checkout builds get their own update steps', () => {
+  const sp = loadShared();
+  const release = makePane();
+  sp.renderUpdatesPane(release, { version: '1.0.2', installation_source: 'release' }, {});
+  assert.match(release.innerHTML, /Download your platform's binary from the release page/);
+  assert.doesNotMatch(release.innerHTML, /go build/);
+  const source = makePane();
+  sp.renderUpdatesPane(source, { version: '1.0.2', installation_source: 'source' }, {});
+  assert.match(source.innerHTML, /git pull &amp;&amp; go build -o &quot;\$\(command -v hunkyard\)&quot; \.\/cmd\/hunkyard/);
+  assert.doesNotMatch(source.innerHTML, /release page/);
 });

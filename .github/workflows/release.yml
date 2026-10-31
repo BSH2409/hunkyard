@@ -70,7 +70,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build binaries
-        run: make build-all VERSION=${{ github.ref_name }} COMMIT=${{ github.sha }} DATE=$(date -u +%Y-%m-%d)
+        run: make build-all VERSION=${{ github.ref_name }} COMMIT=${{ github.sha }} DATE=$(date -u +%Y-%m-%d) DISTRIBUTION=release
 
       - name: Generate checksums
         working-directory: dist

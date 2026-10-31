@@ -310,22 +310,6 @@
       if (firstMissing) list.insertBefore(item, firstMissing);
     }
 
-    var dismissBtn = pane.querySelector('#updateDismissBtn');
-    if (dismissBtn) {
-      dismissBtn.addEventListener('click', function () {
-        var version = dismissBtn.dataset.dismissVersion || '';
-        setSetting('updatesDismissed', version);
-        if (hooks.syncPendingUpdateButtons) hooks.syncPendingUpdateButtons();
-        var updateBtn = document.getElementById('updateBtn');
-        var pending = hooks.hasActivePendingUpdates ? !!hooks.hasActivePendingUpdates() : false;
-        if (updateBtn && !pending) updateBtn.style.display = 'none';
-        var body = pane.querySelector('#updateCardBody');
-        if (body) {
-          dismissBtn.outerHTML = '<span class="config-card-dismissed" id="updateDismissedNote">Dismissed — will remind you on next version</span>';
-        }
-      });
-    }
-
     pane.querySelectorAll('[data-dismiss-integration]').forEach(function (integrationDismissBtn) {
       integrationDismissBtn.addEventListener('click', function () {
         var agent = integrationDismissBtn.dataset.dismissIntegration || '';
@@ -415,7 +399,15 @@
     if (source === 'nix') {
       return '<div class="updates-row-note">Update the Nix profile or flake that provides Hunkyard.</div>';
     }
-    return '<div class="updates-row-note">Download the latest binary for your platform from the release notes.</div>';
+    if (source === 'release') {
+      return '<div class="updates-row-note">Download your platform\'s binary from the release page and replace this one.</div>';
+    }
+    if (source === 'source') {
+      return '<div class="updates-row-note">Pull your Hunkyard checkout and rebuild, from the checkout:</div>'
+        + updateCommandHTML('git pull && go build -o "$(command -v hunkyard)" ./cmd/hunkyard', '');
+    }
+    return '<div class="updates-row-note">Download your platform\'s binary from the release page, or pull your checkout and rebuild:</div>'
+      + updateCommandHTML('go build -o "$(command -v hunkyard)" ./cmd/hunkyard', '');
   }
 
   function renderUpdatesPane(pane, cfg, hooks) {
@@ -426,23 +418,13 @@
     var html = '';
 
     html += '<div class="updates-pane">';
-    if (cfg.latest_version && cfg.version && cfg.latest_version !== cfg.version && !cfg.no_update_check) {
-      var releaseUrl = 'https://github.com/BSH2409/hunkyard/releases/tag/v' + esc(cfg.latest_version);
-      var alreadyDismissed = getSetting('updatesDismissed', '') === cfg.latest_version;
-      html += '<div class="updates-section-head"><span class="settings-section-label">Hunkyard</span><span class="updates-section-state">Update available</span></div>';
-      html += '<div class="updates-hunkyard-row updates-hunkyard-row--open"><span class="updates-row-icon updates-row-icon--status updates-row-icon--warning" aria-hidden="true">&#11014;</span><span class="updates-row-name">Hunkyard</span><span class="updates-version">v' + esc(cfg.version) + '</span><span class="updates-status updates-status--stale">v' + esc(cfg.latest_version) + '</span></div>';
-      html += '<div class="updates-hunkyard-detail" id="updateCardBody">' + hunkyardUpdateInstructions(cfg.installation_source) + '</div>';
-      html += '<div class="config-card-actions"><a class="updates-release-notes" href="' + releaseUrl + '" target="_blank" rel="noopener">Release notes and downloads</a>';
-      if (alreadyDismissed) {
-        html += '<span class="config-card-dismissed">Dismissed — will remind you on next version</span>';
-      } else {
-        html += '<button type="button" class="config-card-dismiss" id="updateDismissBtn" data-dismiss-version="' + esc(cfg.latest_version) + '">Don\'t remind me until next version</button>';
-      }
-      html += '</div>';
-    } else {
-      html += '<div class="updates-section-head"><span class="settings-section-label">Hunkyard</span><span class="updates-section-state">Current</span></div>';
-      html += '<div class="updates-hunkyard-row"><span class="updates-row-icon updates-row-icon--status updates-row-icon--ok" aria-hidden="true">&#10003;</span><span class="updates-row-name">Hunkyard</span><span class="updates-version">v' + esc(cfg.version || 'dev') + '</span><a class="updates-release-notes updates-release-link" href="https://github.com/BSH2409/hunkyard/releases" target="_blank" rel="noopener">Release notes</a><span class="updates-status updates-status--ok">Up to date</span></div>';
-    }
+    // Hunkyard is local-only and never checks for new releases, so this shows
+    // the running version and where to look, not an "up to date" claim.
+    html += '<div class="updates-section-head"><span class="settings-section-label">Hunkyard</span></div>';
+    var version = cfg.version || 'dev';
+    html += '<div class="updates-hunkyard-row"><span class="updates-row-name">Hunkyard</span><span class="updates-version">' + esc(/^\d/.test(version) ? 'v' + version : version) + '</span></div>';
+    html += '<div class="updates-hunkyard-detail">' + hunkyardUpdateInstructions(cfg.installation_source)
+      + '<a class="updates-release-notes" href="https://github.com/BSH2409/hunkyard/releases" target="_blank" rel="noopener">Release notes and downloads</a></div>';
 
     if (!cfg.no_integration_check) {
       var dismissedMap = getSetting('dismissedIntegrations', {}) || {};

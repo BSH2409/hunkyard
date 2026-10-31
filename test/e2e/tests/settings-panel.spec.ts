@@ -20,6 +20,47 @@ test.describe('Settings Panel', () => {
     await loadPage(page);
   });
 
+  test('the dialog keeps one height across tabs and tab labels are centred', async ({ page }) => {
+    await page.click('#settingsToggle');
+    await expect(overlay(page)).toHaveClass(/active/);
+    const dialog = page.locator('.settings-dialog');
+    const heights: number[] = [];
+    for (const tab of ['settings', 'shortcuts', 'yard', 'updates', 'about']) {
+      await page.click(`.settings-tab[data-tab="${tab}"]`);
+      await expect(page.locator(`.settings-pane[data-pane="${tab}"]`)).toHaveClass(/active/);
+      await expect.poll(async () => (await dialog.boundingBox())?.height ?? 0).toBeGreaterThan(0);
+      heights.push(Math.round((await dialog.boundingBox())!.height));
+    }
+    expect(new Set(heights).size, `heights per tab: ${heights}`).toBe(1);
+    // Tab contents are centred, with or without the Yard attention badge,
+    // and the Yard label lines up with the other tab labels.
+    const centring = (hideBadge: boolean) => page.evaluate(hide => {
+      const badge = document.getElementById('yardTabBadge')!;
+      const wasHidden = badge.hidden;
+      if (hide) badge.hidden = true; else { badge.hidden = false; badge.textContent = badge.textContent || '1'; }
+      const measure = (el: HTMLElement) => {
+        const style = getComputedStyle(el);
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const content = range.getBoundingClientRect();
+        const box = el.getBoundingClientRect();
+        const label = document.createRange();
+        label.selectNodeContents(el.firstChild!);
+        const text = label.getBoundingClientRect();
+        return { slack: (content.left - box.left - parseFloat(style.paddingLeft)) - (box.right - content.right - parseFloat(style.paddingRight)), mid: text.top + text.height / 2 };
+      };
+      const yard = measure(document.getElementById('tab-yard')!);
+      const settings = measure(document.getElementById('tab-settings')!);
+      badge.hidden = wasHidden;
+      return { slack: Math.abs(yard.slack), drift: Math.abs(yard.mid - settings.mid) };
+    }, hideBadge);
+    for (const hide of [true, false]) {
+      const { slack, drift } = await centring(hide);
+      expect(slack, `horizontal slack with badge ${hide ? 'hidden' : 'shown'}`).toBeLessThan(2);
+      expect(drift, `vertical drift with badge ${hide ? 'hidden' : 'shown'}`).toBeLessThan(1);
+    }
+  });
+
   test('gear opens the Settings tab; each tab shows its pane', async ({ page }) => {
     // The theme pill lives in the settings dialog, not the header.
     await expect(page.locator('.header .theme-pill')).toHaveCount(0);

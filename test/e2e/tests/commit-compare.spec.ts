@@ -68,3 +68,27 @@ test('both commit pickers show full local timestamps for commits at least 24 hou
   await expect(headerCommit.locator('.commit-picker-item-msg')).toHaveText(commit.message);
   await expectMessageFits(headerCommit.locator('.commit-picker-item-msg'));
 });
+
+// Each commit reads like GitHub's list: the message first, then the hash and
+// time together on one muted line beneath it.
+async function expectMessageThenOneMetaLine(row: Locator) {
+  // Boxes are null while the picker is still opening; keep polling.
+  const box = (selector: string) => row.locator(selector).first().boundingBox();
+  await expect.poll(async () => {
+    const [msg, sha, time] = await Promise.all([box('.commit-picker-item-msg'), box('.commit-picker-item-sha'), box('time, .commit-picker-item-time')]);
+    if (!msg || !sha || !time) return false;
+    return msg.y < sha.y && Math.abs(sha.y + sha.height / 2 - (time.y + time.height / 2)) < 4;
+  }).toBe(true);
+}
+
+test('both commit pickers put the message above a single hash and time line', async ({ page, request }) => {
+  const commits = (await (await request.get('/api/commits')).json()).filter((c: { virtual?: boolean }) => !c.virtual);
+  const commit = commits[0];
+  await page.clock.setFixedTime(new Date(Date.now() + 2 * 86400000));
+  await loadPage(page);
+  await page.locator('#commitDropdownBtn').click();
+  await expectMessageThenOneMetaLine(page.locator(`.commit-picker-item[data-commit="${commit.sha}"]`));
+  await page.keyboard.press('Escape');
+  await openCompareCommits(page);
+  await expectMessageThenOneMetaLine(page.locator(`.compare-commit-item[data-branch="${commit.sha}"]`));
+});

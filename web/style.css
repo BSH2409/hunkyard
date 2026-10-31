@@ -2434,7 +2434,9 @@ textarea.drag-active {
   border-radius: 12px;
   max-width: 620px;
   width: 90vw;
-  max-height: 80vh;
+  /* One height for every tab; the content area scrolls instead of the
+     dialog resizing as tabs switch. */
+  height: min(720px, 80vh);
   display: flex;
   flex-direction: column;
   box-shadow: var(--hunkyard-shadow);
@@ -2847,7 +2849,7 @@ body.hide-resolved .comment-block:not(.panel-comment-block):has(.resolved-card) 
 }
 
 /* Updates tab — compact integration rows expand into the shared command
-   surface. The Hunkyard release card stays open because it has one clear action. */
+   surface. The Hunkyard card shows the running version and how to update. */
 .updates-list {
   border: 1px solid var(--hunkyard-border);
   border-radius: 8px;
@@ -2862,33 +2864,18 @@ body.hide-resolved .comment-block:not(.panel-comment-block):has(.resolved-card) 
 }
 .updates-section-head:first-child { margin-top: 0; }
 .updates-section-head .settings-section-label { margin: 0; }
-.updates-section-state {
-  margin-left: auto;
-  color: var(--hunkyard-editor-fg-muted);
-  font-size: 12px;
-}
 .updates-hunkyard-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 58px;
   padding: 10px 12px;
   border: 1px solid var(--hunkyard-border);
-  border-radius: 8px;
-}
-.updates-hunkyard-row--open {
-  border-bottom-left-radius: 0;
-  border-bottom-right-radius: 0;
-  border-bottom-color: transparent;
+  border-radius: 8px 8px 0 0;
 }
 .updates-version {
   color: var(--hunkyard-editor-fg-muted);
   font-family: var(--hunkyard-font-mono);
   font-size: 13px;
-}
-.updates-release-link {
-  margin-left: auto;
-  font-size: 12px;
 }
 .updates-release-notes {
   color: var(--hunkyard-brand);
@@ -2899,22 +2886,15 @@ body.hide-resolved .comment-block:not(.panel-comment-block):has(.resolved-card) 
   color: var(--hunkyard-editor-fg);
   text-decoration: none;
 }
-.updates-hunkyard-row .updates-status { margin-left: auto; }
-.updates-hunkyard-row .updates-release-link + .updates-status { margin-left: 4px; }
 .updates-hunkyard-detail {
-  padding: 9px 12px 9px 52px;
-  border: 1px solid var(--hunkyard-border);
-  border-top: 0;
-  color: var(--hunkyard-editor-fg-secondary);
-  font-size: 13px;
-}
-.updates-hunkyard-detail + .config-card-actions {
-  margin-top: 0;
-  padding: 9px 12px 11px 52px;
+  padding: 9px 12px;
   border: 1px solid var(--hunkyard-border);
   border-top: 0;
   border-radius: 0 0 8px 8px;
+  color: var(--hunkyard-editor-fg-secondary);
+  font-size: 13px;
 }
+.updates-hunkyard-detail .updates-release-notes { display: inline-block; margin-top: 6px; }
 .updates-status {
   display: inline-flex;
   flex: 0 0 auto;
@@ -2925,7 +2905,6 @@ body.hide-resolved .comment-block:not(.panel-comment-block):has(.resolved-card) 
   font-weight: 500;
   white-space: nowrap;
 }
-.updates-status--ok { background: var(--hunkyard-green-subtle); color: var(--hunkyard-green); }
 .updates-status--stale { background: var(--hunkyard-yellow-bg); color: var(--hunkyard-yellow); }
 .updates-status--missing { background: var(--hunkyard-brand-bg); color: var(--hunkyard-brand); }
 .updates-status--muted { background: var(--hunkyard-bg-elevated); color: var(--hunkyard-editor-fg-muted); }
@@ -2978,21 +2957,6 @@ body.hide-resolved .comment-block:not(.panel-comment-block):has(.resolved-card) 
   display: grid;
   place-items: center;
   flex: 0 0 auto;
-}
-.updates-hunkyard-row .updates-row-icon--status {
-  width: 28px;
-  height: 28px;
-  border-radius: 8px;
-  font-size: 14px;
-  font-weight: 700;
-}
-.updates-row-icon--ok {
-  background: var(--hunkyard-green-subtle);
-  color: var(--hunkyard-green);
-}
-.updates-row-icon--warning {
-  background: var(--hunkyard-yellow-bg);
-  color: var(--hunkyard-yellow);
 }
 .updates-agent-icon,
 .updates-agent-icon img,
@@ -6615,15 +6579,15 @@ body.pierre-review .file-header-icon { display: none; }
 #singleFileToggle[aria-pressed="true"] { background: var(--hunkyard-brand-subtle); border-color: var(--hunkyard-brand); color: var(--hunkyard-editor-fg); }
 body.hunkyard-story-active #reviewToolbar { display: none; }
 
-/* Commit metadata stays aligned while full subjects wrap below it. */
+/* Commit rows read like GitHub's list: the full subject wraps on top, with
+   the hash and time together on one muted line beneath it. */
 .commit-picker-commit,
-.compare-commit-item { display: flex; flex-direction: column; align-items: stretch; gap: 3px; white-space: normal; }
-.commit-picker-item-meta { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; }
+.compare-commit-item { display: flex; flex-direction: column; align-items: stretch; gap: 2px; white-space: normal; }
 .commit-picker-commit .commit-picker-item-msg,
-.compare-commit-item .commit-picker-item-msg { white-space: normal; overflow-wrap: anywhere; flex: initial; font-family: var(--hunkyard-font-body); line-height: 1.4; }
+.compare-commit-item .commit-picker-item-msg { white-space: normal; overflow-wrap: anywhere; flex: initial; font-family: var(--hunkyard-font-body); font-size: 12px; line-height: 1.4; }
+.commit-picker-item-meta { display: flex; align-items: baseline; gap: 8px; white-space: nowrap; min-width: 0; font-family: var(--hunkyard-font-body); }
+.commit-picker-item-meta .commit-picker-item-time { font-size: 11px; margin-left: 0; overflow: hidden; text-overflow: ellipsis; }
 .compare-commit-item.active { background: var(--hunkyard-brand-subtle); color: var(--hunkyard-editor-fg); }
-
-.commit-picker-item-meta .commit-picker-item-time { font-size: 11px; }
 
 /* ===== Preference Yard (settings Yard tab and /yard page) ===== */
 .settings-tab-badge {
@@ -6638,6 +6602,8 @@ body.hunkyard-story-active #reviewToolbar { display: none; }
   color: var(--hunkyard-editor-bg);
   background: var(--hunkyard-red);
 }
+/* display above overrides the hidden attribute; a hidden badge takes no room. */
+.settings-tab-badge[hidden] { display: none; }
 .yard { display: flex; flex-direction: column; gap: 12px; font-size: 13px; color: var(--hunkyard-editor-fg); }
 .yard--page { flex-direction: row; align-items: flex-start; }
 .yard-nav { display: flex; gap: 4px; flex-wrap: wrap; }

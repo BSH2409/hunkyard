@@ -1,7 +1,8 @@
 VERSION ?= dev
 COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 DATE ?= $(shell date -u +%Y-%m-%d)
-LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE)
+DISTRIBUTION ?=
+LDFLAGS := -s -w -X main.version=$(VERSION) -X main.commit=$(COMMIT) -X main.date=$(DATE) -X github.com/BSH2409/hunkyard/internal/server.buildDistribution=$(DISTRIBUTION)
 
 build: generate
 	go build -ldflags "$(LDFLAGS)" -o hunkyard ./cmd/hunkyard

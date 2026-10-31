@@ -371,20 +371,16 @@
   let waitingNotApproved = false;
   let hiddenUnresolved = 0;
   let pendingUpdates = [];
-  let pendingUpdatesVersion = '';
 
-  // Returns true if at least one pending update entry has not been dismissed.
-  // Hunkyard update dismiss is keyed by version; integration dismiss is keyed per-agent
-  // by content hash (so re-prompts when we ship a new template).
+  // Returns true if at least one pending integration update has not been
+  // dismissed. Dismissal is keyed per agent by content hash, so it re-prompts
+  // when a new template ships. Hunkyard never checks for new releases.
   function hasActivePendingUpdates() {
     if (!pendingUpdates.length) return false;
-    const hunkyardDismissed = getSetting('updatesDismissed', '');
     const intDismissed = getSetting('dismissedIntegrations', {}) || {};
     for (let i = 0; i < pendingUpdates.length; i++) {
       const u = pendingUpdates[i];
-      if (u.kind === 'hunkyard-update') {
-        if (hunkyardDismissed !== pendingUpdatesVersion) return true;
-      } else if (u.kind === 'integration') {
+      if (u.kind === 'integration') {
         if (!u.hash || intDismissed[u.agent] !== u.hash) return true;
       } else if (u.kind === 'missing-integration') {
         if (!intDismissed['missing:' + u.agent]) return true;
@@ -1058,18 +1054,8 @@
     };
     window.hunkyard.shared.applyProjectPromptTrustUI(promptTrustConfig, document.getElementById('finishBtn'));
 
-    // Update notifications (Hunkyard release + stale integrations)
+    // Update notifications for stale or missing integrations
     pendingUpdates = [];
-    const hasHunkyardUpdate = !configRes.no_update_check && configRes.latest_version && configRes.version && configRes.latest_version !== configRes.version;
-    if (hasHunkyardUpdate) {
-      pendingUpdates.push({
-        kind: 'hunkyard-update',
-        version: configRes.latest_version,
-        label: 'Hunkyard ' + configRes.latest_version + ' available',
-        labelUrl: 'https://github.com/BSH2409/hunkyard/releases/tag/v' + configRes.latest_version,
-        hint: 'Open Updates for release-specific update instructions'
-      });
-    }
     if (configRes.stale_integrations) {
       configRes.stale_integrations.forEach(function(si) {
         // Capitalize agent name for display
@@ -1095,7 +1081,6 @@
       });
     }
 
-    pendingUpdatesVersion = configRes.latest_version || configRes.version || '';
     syncPendingUpdateButtons();
 
     // Header context: branch name in git mode, filename in single-file file mode
@@ -8018,10 +8003,10 @@
       const throughPin = isThrough ? '<span class="commit-pin-through">through</span>' : '';
       const virtualPill = c.virtual ? '<span class="commit-picker-item-time">virtual</span>' : '';
       return '<div class="' + cls + '" data-commit="' + c.sha + '" role="button" tabindex="0" aria-pressed="' + !!(isFrom || isThrough || isVirtualActive) + '">'
+        + '<span class="commit-picker-item-msg">' + escapeHtml(c.message) + '</span>'
         + '<span class="commit-picker-item-meta">' + fromPin + throughPin
         + '<span class="commit-picker-item-sha">' + escapeHtml(c.short_sha) + '</span>'
         + virtualPill + time + '</span>'
-        + '<span class="commit-picker-item-msg">' + escapeHtml(c.message) + '</span>'
         + '</div>';
     }).join('');
   }
@@ -8207,9 +8192,9 @@
         list.innerHTML = commits.map(function(c) {
           const active = c.sha === currentCompareTarget || (looksLikeShaRef(currentCompareTarget) && c.sha === session.base_ref) ? ' active' : '';
           return '<div class="base-branch-item compare-commit-item' + active + '" data-branch="' + escapeHtml(c.sha) + '" aria-current="' + !!active + '">'
+            + '<span class="commit-picker-item-msg">' + escapeHtml(c.message) + '</span>'
             + '<span class="commit-picker-item-meta"><span class="commit-picker-item-sha">' + escapeHtml(c.short_sha) + '</span>'
             + commitTimeHTML(c.date) + '</span>'
-            + '<span class="commit-picker-item-msg">' + escapeHtml(c.message) + '</span>'
             + '</div>';
         }).join('');
       }
