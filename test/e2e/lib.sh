@@ -167,6 +167,7 @@ e2e_export_fake_home() {
   local fake_home="$1"
   export HOME="$fake_home"
   export CODEX_HOME="$fake_home/.codex"
+  export LEARN_PREFERENCES_HOME="$fake_home/.agents"
   export CLAUDE_CONFIG_DIR="$fake_home/.claude"
   export HUNKYARD_OWNER_ID="codex:e2e:$fake_home"
   if [ "$E2E_IS_WINDOWS" -eq 1 ]; then

@@ -27,6 +27,7 @@ func SetHome(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("HOME", dir)
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("LEARN_PREFERENCES_HOME", "")
 	if runtime.GOOS == "windows" {
 		t.Setenv("USERPROFILE", dir)
 		t.Setenv("HOMEDRIVE", "")
@@ -139,6 +140,7 @@ func RunWithTempHome(m *testing.M) int {
 	os.Setenv("HOME", home)
 	os.Setenv("USERPROFILE", home)
 	os.Setenv("CODEX_HOME", "")
+	os.Setenv("LEARN_PREFERENCES_HOME", "")
 	return m.Run()
 }
 

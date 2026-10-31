@@ -116,8 +116,11 @@ func (s *Store) transcriptContext(payload map[string]any) NeighboringContext {
 		return empty
 	}
 	roots := []string{s.config.Root, filepath.Join(cwd, ".codex"), filepath.Join(cwd, ".claude")}
-	if home := os.Getenv("HOME"); home != "" {
-		roots = append(roots, filepath.Join(home, ".claude", "projects"))
+	if codex, err := hostHome("CODEX_HOME", ".codex"); err == nil {
+		roots = append(roots, codex)
+	}
+	if claude, err := hostHome("CLAUDE_CONFIG_DIR", ".claude"); err == nil {
+		roots = append(roots, filepath.Join(claude, "projects"))
 	}
 	allowed := false
 	for _, root := range roots {

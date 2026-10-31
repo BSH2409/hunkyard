@@ -25,7 +25,7 @@ var sectionHeading = regexp.MustCompile(`^##\s+`)
 var referencesHeading = regexp.MustCompile(`^## References\s*$`)
 
 func (s *Store) sourcePackForGeneration(current *generation) (*sourceSnapshot, error) {
-	_, err := os.Lstat(filepath.Join(s.config.Root, "skills", "code-like-him"))
+	_, err := os.Lstat(s.dataPath("sources", "code-like-him"))
 	if os.IsNotExist(err) && (current == nil || current.SourcePacks["code-like-him"] == nil) {
 		return nil, nil
 	}
@@ -34,7 +34,7 @@ func (s *Store) sourcePackForGeneration(current *generation) (*sourceSnapshot, e
 
 //nolint:gocyclo // A snapshot accepts only confined files from the explicit References allowlist.
 func (s *Store) snapshotSourcePack() (*sourceSnapshot, error) {
-	root, err := filepath.EvalSymlinks(filepath.Join(s.config.Root, "skills", "code-like-him"))
+	root, err := filepath.EvalSymlinks(s.dataPath("sources", "code-like-him"))
 	if err != nil {
 		return nil, err
 	}

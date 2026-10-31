@@ -39,19 +39,35 @@ func (s *Store) hookCommand() (string, error) {
 func (s *Store) hookPath(host string) (string, error) {
 	switch host {
 	case "codex":
-		return filepath.Join(s.config.Root, "hooks.json"), nil
+		if s.config.explicitRoot {
+			return filepath.Join(s.config.Root, "hooks.json"), nil
+		}
+		root, err := hostHome("CODEX_HOME", ".codex")
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(root, "hooks.json"), nil
 	case "claude":
-		root := os.Getenv("CLAUDE_CONFIG_DIR")
-		if root == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return "", err
-			}
-			root = filepath.Join(home, ".claude")
+		root, err := hostHome("CLAUDE_CONFIG_DIR", ".claude")
+		if err != nil {
+			return "", err
 		}
 		return filepath.Join(root, "settings.json"), nil
 	}
 	return "", fmt.Errorf("hook host must be codex or claude")
+}
+
+// hostHome returns a host's configuration directory: the environment
+// override when set, otherwise the named directory under the user's home.
+func hostHome(env, fallback string) (string, error) {
+	if dir := os.Getenv(env); strings.TrimSpace(dir) != "" {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, fallback), nil
 }
 
 var trustedField = regexp.MustCompile(`"trusted"\s*:`)

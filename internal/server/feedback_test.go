@@ -159,7 +159,7 @@ func TestSkillManifestBoundary(t *testing.T) {
 func TestFeedbackLearnIsOwnerBoundAndRejectsRoot(t *testing.T) {
 	s, _ := newTestServer(t)
 	s.reviewPath = t.TempDir()
-	t.Setenv("CODEX_HOME", t.TempDir())
+	t.Setenv("LEARN_PREFERENCES_HOME", t.TempDir())
 	owner, err := feedback.OpenOwner(t.TempDir(), "abcd1234ef01", feedback.Identity{Key: "test", Kind: "claude"})
 	if err != nil {
 		t.Fatal(err)

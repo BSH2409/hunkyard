@@ -64,7 +64,7 @@ See the [complete local protocol](integrations/shared/review-workflow.md) for tr
 
 The review bridge classifies every human comment revision through the Go preference engine, including summaries and human replies. It excludes agent messages and keeps classification checkpoints separate from delivery acknowledgments. Replay does not add duplicate evidence.
 
-The canonical store remains `${CODEX_HOME:-$HOME/.codex}`, shared by both hosts. Clear durable instructions can become active preferences; uncertain reusable feedback stays pending. Task-specific edits are ignored. Generated personas preserve repository/global/source precedence and token budgets.
+The canonical store is `${LEARN_PREFERENCES_HOME:-$HOME/.agents}`, shared by both hosts. Clear durable instructions can become active preferences; uncertain reusable feedback stays pending. Task-specific edits are ignored. Generated personas preserve repository/global/source precedence and token budgets.
 
 A separate installation replaces the `learn-preferences` workflow with the Go-backed skill:
 

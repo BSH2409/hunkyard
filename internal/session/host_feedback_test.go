@@ -47,7 +47,7 @@ func TestHostRoundLoopProtocol(t *testing.T) {
 			manifest := filepath.Join(home, "skills.json")
 			data, _ := json.Marshal(map[string]any{"version": 1, "skills": []feedback.SkillRef{{ID: "naming", Name: "Naming", Path: skill, Source: kind}}})
 			writeFile(t, manifest, string(data))
-			env := append(clientFinishEnv(t, home), "HUNKYARD_OWNER_ID="+kind+":round-loop", "CODEX_HOME="+filepath.Join(home, "codex"))
+			env := append(clientFinishEnv(t, home), "HUNKYARD_OWNER_ID="+kind+":round-loop", "LEARN_PREFERENCES_HOME="+filepath.Join(home, "agents"))
 			start := exec.Command(binary, "_serve", "--no-open", "--port", "0", "--skills-file", manifest)
 			start.Dir = repo
 			start.Env = env
@@ -176,7 +176,7 @@ func TestHostRoundLoopProtocol(t *testing.T) {
 			data, _ = json.Marshal([]feedback.PreferenceDecision{{CommentID: comment.ID, Revision: 1, Kind: "directive", Directive: "Prefer names describing domain behavior.", Scope: "repository", Surfaces: []string{"naming"}}})
 			writeFile(t, decisions, string(data))
 			command("feedback", "learn", "--session", key, "--batch", batch.ID, "--decisions", decisions, "--json")
-			if _, err := os.Stat(filepath.Join(home, "codex", "learn-preferences", "current", "rules.yml")); err != nil {
+			if _, err := os.Stat(filepath.Join(home, "agents", "learn-preferences", "current", "rules.yml")); err != nil {
 				t.Fatal(err)
 			}
 			command("comment", "--session", key, "--reply-to", comment.ID, "--author", kind, "Applied the naming guidance.")

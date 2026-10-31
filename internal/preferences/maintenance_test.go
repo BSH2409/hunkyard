@@ -299,7 +299,7 @@ func TestMaintenanceWithoutAnOptionalSourcePack(t *testing.T) {
 
 func sourceFixture(t *testing.T, s *Store) {
 	t.Helper()
-	root := filepath.Join(s.config.Root, "skills", "code-like-him")
+	root := s.dataPath("sources", "code-like-him")
 	if err := os.MkdirAll(root, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -387,7 +387,7 @@ func TestMaintenanceLocalProposalAndRecovery(t *testing.T) {
 	if err != nil || current.ID != first["generation_id"] {
 		t.Fatal("recovery reapplied actions", err)
 	}
-	if err := os.RemoveAll(filepath.Join(s.config.Root, "skills", "code-like-him")); err != nil {
+	if err := os.RemoveAll(s.dataPath("sources", "code-like-him")); err != nil {
 		t.Fatal(err)
 	}
 	if _, _, err := s.buildMaintenanceBatch(false); err == nil {

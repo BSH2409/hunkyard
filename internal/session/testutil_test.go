@@ -63,6 +63,7 @@ func setHome(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("HOME", dir)
 	t.Setenv("CODEX_HOME", "")
+	t.Setenv("LEARN_PREFERENCES_HOME", "")
 	if runtime.GOOS == "windows" {
 		t.Setenv("USERPROFILE", dir)
 		// HOMEDRIVE/HOMEPATH together form a fallback used by os.UserHomeDir.

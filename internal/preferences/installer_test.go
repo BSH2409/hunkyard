@@ -194,3 +194,29 @@ func TestPreferenceCronRejectsSymlinkLog(t *testing.T) {
 		t.Fatal("cron followed log symlink", err)
 	}
 }
+
+func TestHookPathFollowsHostConfiguration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LEARN_PREFERENCES_HOME", "")
+	tests := []struct {
+		host, codexHome, claudeDir, want string
+	}{
+		{"codex", "", "", filepath.Join(home, ".codex", "hooks.json")},
+		{"codex", filepath.Join(home, "codex-custom"), "", filepath.Join(home, "codex-custom", "hooks.json")},
+		{"claude", "", "", filepath.Join(home, ".claude", "settings.json")},
+		{"claude", "", filepath.Join(home, ".claude-office"), filepath.Join(home, ".claude-office", "settings.json")},
+	}
+	for _, tt := range tests {
+		t.Setenv("CODEX_HOME", tt.codexHome)
+		t.Setenv("CLAUDE_CONFIG_DIR", tt.claudeDir)
+		s, err := Open(Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := s.hookPath(tt.host); err != nil || got != tt.want {
+			t.Errorf("hookPath(%s) with CODEX_HOME=%q CLAUDE_CONFIG_DIR=%q = %q, %v; want %q", tt.host, tt.codexHome, tt.claudeDir, got, err, tt.want)
+		}
+	}
+}

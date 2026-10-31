@@ -9,7 +9,7 @@ import (
 
 func sourcePackFixture(t *testing.T, s *Store) string {
 	t.Helper()
-	root := filepath.Join(s.config.Root, "skills", "code-like-him")
+	root := s.dataPath("sources", "code-like-him")
 	copyFixtureTree(t, "testdata/contracts/source-pack", root)
 	return root
 }
@@ -153,7 +153,7 @@ func TestSourcePackReferenceParity(t *testing.T) {
 
 func TestSourceSnapshotAllowlistAndConfinement(t *testing.T) {
 	s := testStore(t)
-	root := filepath.Join(s.config.Root, "skills", "code-like-him")
+	root := s.dataPath("sources", "code-like-him")
 	if err := os.MkdirAll(filepath.Join(root, "reference"), 0700); err != nil {
 		t.Fatal(err)
 	}

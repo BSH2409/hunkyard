@@ -5,7 +5,7 @@ description: Use when the user corrects coding behavior, states a reusable conve
 
 # Coding preferences
 
-Use `hunkyard preferences` to capture and apply reusable personal coding guidance. The canonical store is `${CODEX_HOME:-$HOME/.codex}`, shared by Codex and Claude. The engine runs locally and needs no Ruby runtime.
+Use `hunkyard preferences` to capture and apply reusable personal coding guidance. The canonical store is `${LEARN_PREFERENCES_HOME:-$HOME/.agents}`, shared by Codex and Claude. The engine runs locally and needs no Ruby runtime.
 
 Before coding, load relevant generated guidance with `hunkyard preferences select --query 'task description' --cwd "$PWD" --json`. Read the returned `text` as defaults: current user instructions and repository standards win, repository preferences override global preferences, and personal preferences override imported source defaults. Missing guidance is valid. Never read raw observations, lessons, or transcripts to load a persona.
 
