@@ -456,6 +456,36 @@ type Session struct {
 	// ingested one). Read/write under s.mu; surfaced via GetSessionInfo.
 	story *Story
 
+	// roundBusy is set while a round transition is applied (pause.go).
+	roundBusy atomic.Bool
+
+	// Activity that keeps the review from pausing (activity.go).
+	activityMu      sync.Mutex
+	lastActivity    time.Time
+	activityPath    string
+	activityWritten time.Time
+
+	// stale records that the working tree changed outside an agent round;
+	// the page offers Refresh instead of redrawing. Guarded by mu.
+	stale bool
+
+	// Working-tree snapshot shared by scope, commit and file requests
+	// (wt_snapshot.go); guarded by snapMu, not mu.
+	snapMu     sync.Mutex
+	snap       *wtSnapshot
+	snapStale  bool
+	snapFlight flightGroup
+	// slowWalkInterval and waitingWalkInterval override the git watcher's
+	// tree-walk intervals (tests); zero uses the defaults in watch.go.
+	slowWalkInterval    time.Duration
+	waitingWalkInterval time.Duration
+	// rangeCache holds change lists, counts and hunks for immutable commits
+	// and ranges (range_cache.go); created on first use under snapMu.
+	rangeCache *bytesLRU
+	// lastProbe caches the snapshot key for keyProbeReuse.
+	lastProbe   wtSnapshotKey
+	lastProbeAt time.Time
+
 	// RoundSnapshots is in-memory state populated from <folder>/snapshots.json
 	// at boot. Persisted via SaveSnapshotsFile; never written into review.json.
 	//
@@ -684,10 +714,33 @@ func populateLazyFile(fe *FileEntry, fc vcs.FileChange, numstats map[string]vcs.
 	}
 }
 
+// eagerBatchedHunks diffs the files a review loads eagerly (the first
+// lazyFileThreshold of a large change set) in one batched call. It returns
+// nil when the backend cannot batch or the batch fails (for example a
+// filtered path), and callers then diff file by file.
+func eagerBatchedHunks(v vcs.VCS, root, baseRef string, changes []vcs.FileChange) map[string][]vcs.DiffHunk {
+	bd, ok := v.(vcs.BatchDiffer)
+	if !ok || len(changes) == 0 {
+		return nil
+	}
+	if len(changes) > lazyFileThreshold {
+		changes = changes[:lazyFileThreshold]
+	}
+	base := baseRef
+	if base == "" {
+		base = "HEAD" // as the per-file diff does
+	}
+	hunks, err := bd.DiffAll(context.Background(), root, vcs.DiffSpec{Base: base, WholeAdded: true}, changes)
+	if err != nil {
+		return nil
+	}
+	return hunks
+}
+
 // populateEagerFile reads content and computes diffs for a file loaded at startup.
-// The vcs parameter is used for computing diffs; pass nil to fall back to
-// the git package-level functions.
-func populateEagerFile(fe *FileEntry, fc vcs.FileChange, baseRef, root string, vc vcs.VCS) bool {
+// batched holds hunks from eagerBatchedHunks; when it is nil the file is
+// diffed on its own through vc (nil falls back to the git package functions).
+func populateEagerFile(fe *FileEntry, fc vcs.FileChange, baseRef, root string, vc vcs.VCS, batched map[string][]vcs.DiffHunk) bool {
 	if fc.Status != "deleted" {
 		data, err := os.ReadFile(fe.AbsPath)
 		if err != nil {
@@ -700,9 +753,12 @@ func populateEagerFile(fe *FileEntry, fc vcs.FileChange, baseRef, root string, v
 	// A deleted file's diff is its removed lines, as the watcher and base
 	// changes compute it; without it the review shows only a placeholder.
 	if fe.FileType != "binary" {
-		if fc.Status == "added" || fc.Status == "untracked" {
+		switch {
+		case batched != nil:
+			fe.DiffHunks = batched[fc.Path]
+		case fc.Status == "added" || fc.Status == "untracked":
 			fe.DiffHunks = vcs.FileDiffUnifiedNewFile(fe.Content)
-		} else {
+		default:
 			populateEagerFileDiff(fe, fc, baseRef, root, vc)
 		}
 	}
@@ -889,6 +945,7 @@ func newGitSession(v vcs.VCS, ignorePatterns []string, requireChanges bool) (*Se
 		}
 	}
 
+	batched := eagerBatchedHunks(v, root, baseRef, changes)
 	for i, fc := range changes {
 		absPath := filepath.Join(root, fc.Path)
 		fe := &FileEntry{
@@ -902,13 +959,13 @@ func newGitSession(v vcs.VCS, ignorePatterns []string, requireChanges bool) (*Se
 
 		if len(changes) > lazyFileThreshold && i >= lazyFileThreshold {
 			populateLazyFile(fe, fc, numstats, true)
-		} else if !populateEagerFile(fe, fc, baseRef, root, v) {
+		} else if !populateEagerFile(fe, fc, baseRef, root, v, batched) {
 			continue
 		}
 		s.Files = append(s.Files, fe)
 	}
 	if len(initialScopes) > 0 {
-		seedAvailableScopes(baseRef, initialScopes)
+		s.seedSnapshotScopes(v, root, baseRef, initialScopes)
 	}
 
 	return s, nil
@@ -2280,9 +2337,28 @@ func (s *Session) ChangeBaseBranch(branch string) error { //nolint:gocyclo // in
 		}
 	}
 
+	// Large change sets load lazily past lazyFileThreshold, as a new session
+	// does: counts come from one numstat, eager hunks from one batched diff.
+	eagerCount := len(changes)
+	spec := vcs.DiffSpec{Base: mb, WholeAdded: true}
+	bd, canBatch := v.(vcs.BatchDiffer)
+	var numstats map[string]vcs.NumstatEntry
+	if len(changes) > lazyFileThreshold {
+		eagerCount = lazyFileThreshold
+		if canBatch {
+			numstats, _ = bd.NumstatAll(context.Background(), repoRoot, spec, changes[eagerCount:])
+		} else {
+			numstats, _ = v.DiffNumstat(mb, repoRoot)
+		}
+	}
+	var batched map[string][]vcs.DiffHunk
+	if canBatch {
+		batched, _ = bd.DiffAll(context.Background(), repoRoot, spec, changes[:eagerCount])
+	}
+
 	// Build new file entries, preserving comments
 	var newFiles []*FileEntry
-	for _, fc := range changes {
+	for i, fc := range changes {
 		absPath := filepath.Join(repoRoot, fc.Path)
 		fe := &FileEntry{
 			Path:      fc.Path,
@@ -2293,17 +2369,25 @@ func (s *Session) ChangeBaseBranch(branch string) error { //nolint:gocyclo // in
 			Comments:  []Comment{},
 			Generated: vcs.IsGenerated(fc.Path, generatedRules),
 		}
+		if i >= eagerCount {
+			populateLazyFile(fe, fc, numstats, true)
+			newFiles = append(newFiles, fe)
+			continue
+		}
 		if fc.Status != "deleted" {
 			if data, readErr := os.ReadFile(absPath); readErr == nil {
 				fe.Content = string(data)
 				fe.FileHash = fileHash(data)
 			}
 		}
-		if fc.Status != "added" && fc.Status != "untracked" {
+		switch {
+		case batched != nil:
+			fe.DiffHunks = batched[fc.Path]
+		case fc.Status != "added" && fc.Status != "untracked":
 			if hunks, diffErr := v.FileDiffUnified(fc.Path, mb, repoRoot, false); diffErr == nil {
 				fe.DiffHunks = hunks
 			}
-		} else {
+		default:
 			fe.DiffHunks = vcs.FileDiffUnifiedNewFile(fe.Content)
 		}
 		newFiles = append(newFiles, fe)
@@ -2351,8 +2435,41 @@ func (s *Session) ChangeBaseBranch(branch string) error { //nolint:gocyclo // in
 	// missing paths become orphaned phantom entries.
 	s.restoreOrphanedComments()
 
+	s.mu.Lock()
+	s.stale = false
+	s.mu.Unlock()
 	s.notify(SSEEvent{Type: "base-changed"})
 	return nil
+}
+
+// markStale records a working-tree change outside an agent round and tells
+// the page, which offers Refresh rather than redrawing.
+func (s *Session) markStale() {
+	s.mu.Lock()
+	s.stale = true
+	s.mu.Unlock()
+	s.notify(SSEEvent{Type: "review-stale"})
+}
+
+// RefreshWorkingTree brings changes made outside an agent round into the
+// review without starting a new round. In git mode it re-reads the working
+// tree against the current base, keeping comments, as an unchanged base
+// change would; files mode re-reads files as they change, so only the stale
+// mark clears.
+func (s *Session) RefreshWorkingTree() error {
+	s.mu.Lock()
+	mode, kind, base := s.Mode, s.Focus.Kind, s.BaseBranchName
+	if mode != "git" || kind != FocusWorkingTree {
+		s.stale = false
+		s.mu.Unlock()
+		return nil
+	}
+	s.mu.Unlock()
+	if base == "" {
+		return fmt.Errorf("no base branch to refresh against")
+	}
+	s.invalidateWorkingTreeSnapshot()
+	return s.ChangeBaseBranch(base)
 }
 
 // reportLoadHunkyardJSONLockViolation surfaces a post-SetSession loadHunkyardJSON
@@ -2900,6 +3017,7 @@ type SessionInfo struct {
 	BaseRef          string            `json:"base_ref"`
 	BaseBranchName   string            `json:"base_branch_name,omitempty"`
 	ReviewRound      int               `json:"review_round"`
+	Stale            bool              `json:"stale,omitempty"` // files changed outside a round; the page offers Refresh
 	AvailableScopes  []string          `json:"available_scopes"`
 	Files            []SessionFileInfo `json:"files"`
 	ReviewComments   []Comment         `json:"review_comments"`
@@ -2927,6 +3045,14 @@ type SessionFileInfo struct {
 
 // GetSessionInfo returns a snapshot of session metadata.
 func (s *Session) GetSessionInfo() SessionInfo {
+	// Read the scopes before taking the lock for the rest: the working-tree
+	// reading can take seconds, and a held RLock would queue every writer
+	// (adding a comment) and then every later reader behind it.
+	s.mu.RLock()
+	scopeVC, scopeRoot, scopeBase := s.VCS, s.RepoRoot, s.BaseRef
+	s.mu.RUnlock()
+	scopes := s.snapshotScopes(context.Background(), scopeVC, scopeRoot, scopeBase, false)
+
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -2944,8 +3070,6 @@ func (s *Session) GetSessionInfo() SessionInfo {
 		vcsName = s.VCS.Name()
 	}
 
-	vc := s.VCS
-
 	info := SessionInfo{
 		Mode:           s.Mode,
 		VCSName:        vcsName,
@@ -2959,9 +3083,10 @@ func (s *Session) GetSessionInfo() SessionInfo {
 		Focus:          s.Focus,
 		LastRangeFocus: s.LastRangeFocus,
 		Story:          s.story,
+		Stale:          s.stale,
 	}
 
-	info.AvailableScopes = cachedAvailableScopes(info.BaseRef, vc)
+	info.AvailableScopes = scopes
 
 	for _, f := range s.Files {
 		visibleCount := countVisibleComments(f.Comments, s.Focus)

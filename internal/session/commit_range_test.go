@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"reflect"
 	"sort"
 	"testing"
@@ -91,14 +92,14 @@ func TestGetSessionInfoScoped_CommitRange(t *testing.T) {
 	}
 	wantPaths := pathsOf(wantChanges)
 
-	rangeInfo := s.GetSessionInfoScoped("", c1+".."+c3)
+	rangeInfo := s.GetSessionInfoScoped(context.Background(), "", c1+".."+c3)
 	gotPaths := filePaths(rangeInfo.Files)
 	if !reflect.DeepEqual(gotPaths, wantPaths) {
 		t.Errorf("range C1..C3 files = %v, want %v", gotPaths, wantPaths)
 	}
 
 	// A single commit (C2) should return only C2's files.
-	singleInfo := s.GetSessionInfoScoped("", c2)
+	singleInfo := s.GetSessionInfoScoped(context.Background(), "", c2)
 	singleWant, err := vcs.ChangedFilesForCommit(c2, dir)
 	if err != nil {
 		t.Fatal(err)

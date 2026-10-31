@@ -65,6 +65,21 @@
     try { window.parent.postMessage(msg, expectedApiOrigin); } catch (_) { /* noop */ }
   }
 
+  // Interaction inside the app keeps the review from pausing. The parent
+  // throttles its reports too; this only keeps the message rate low.
+  (function forwardActivity() {
+    var last = -Infinity;
+    function onActivity() {
+      var t = Date.now();
+      if (t - last < 10000) return;
+      last = t;
+      postToParent({ type: A2C.ACTIVITY });
+    }
+    ['pointerdown', 'keydown', 'wheel', 'scroll', 'focusin'].forEach(function (type) {
+      document.addEventListener(type, onActivity, { capture: true, passive: true });
+    });
+  })();
+
   // ---------- Phase D: marker overlay + MutationObserver ----------
   function bootMarkers() {
     // Marker CSS: try the iframe document host first (relative), then the

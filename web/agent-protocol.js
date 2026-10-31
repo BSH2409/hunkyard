@@ -21,6 +21,7 @@
     VIEWPORT_APPLIED:   'viewport-applied',
     HOVERED_ANCESTOR_LEVEL: 'hovered-ancestor-level',
     SHORTCUT_KEY:       'shortcut-key',
+    ACTIVITY:           'activity',  // throttled interaction; keeps the review from pausing
   };
 
   // Chrome → Agent
@@ -50,6 +51,7 @@
     if (!isString(msg.type)) return { ok: false, reason: 'no-type' };
     switch (msg.type) {
       case A2C.AGENT_READY:
+      case A2C.ACTIVITY:
         return { ok: true };
       case A2C.AGENT_ERROR:
         if (!isString(msg.kind)) return { ok: false, reason: 'agent-error.kind' };

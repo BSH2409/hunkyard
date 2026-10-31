@@ -1,13 +1,12 @@
 package session
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/BSH2409/hunkyard/internal/config"
 	"github.com/BSH2409/hunkyard/internal/vcs"
@@ -601,6 +600,7 @@ func (s *Session) buildFilesForWorkingTree(v vcs.VCS, repoRoot string) ([]*FileE
 		}
 	}
 	out := make([]*FileEntry, 0, len(changes))
+	batched := eagerBatchedHunks(v, repoRoot, baseRef, changes)
 	for i, fc := range changes {
 		fe := &FileEntry{
 			Path:     fc.Path,
@@ -615,7 +615,7 @@ func (s *Session) buildFilesForWorkingTree(v vcs.VCS, repoRoot string) ([]*FileE
 			out = append(out, fe)
 			continue
 		}
-		if !populateEagerFile(fe, fc, baseRef, repoRoot, v) {
+		if !populateEagerFile(fe, fc, baseRef, repoRoot, v, batched) {
 			continue
 		}
 		out = append(out, fe)
@@ -623,84 +623,16 @@ func (s *Session) buildFilesForWorkingTree(v vcs.VCS, repoRoot string) ([]*FileE
 	return out, baseRef, nil
 }
 
-// scopeCache caches the result of availableScopes to avoid running multiple
-// git commands on every /api/session request. The cache has a short TTL (2s)
-// so scope changes are picked up quickly.
-var (
-	scopeCacheMu      sync.Mutex
-	scopeCacheBaseRef string
-	scopeCacheResult  []string
-	scopeCacheExpiry  time.Time
-)
-
-const scopeCacheTTL = 2 * time.Second
-
-func seedAvailableScopes(baseRef string, scopes []string) {
-	scopeCacheMu.Lock()
-	defer scopeCacheMu.Unlock()
-
-	scopeCacheBaseRef = baseRef
-	scopeCacheResult = append([]string(nil), scopes...)
-	scopeCacheExpiry = time.Now().Add(scopeCacheTTL)
-}
-
-// cachedAvailableScopes returns availableScopes results, using a 2-second cache
-// to avoid running VCS commands on every /api/session poll.
-func cachedAvailableScopes(baseRef string, v vcs.VCS) []string {
-	scopeCacheMu.Lock()
-	defer scopeCacheMu.Unlock()
-
-	now := time.Now()
-	if now.Before(scopeCacheExpiry) && scopeCacheBaseRef == baseRef {
-		result := make([]string, len(scopeCacheResult))
-		copy(result, scopeCacheResult)
-		return result
-	}
-
-	scopes := availableScopes(baseRef, v)
-	scopeCacheBaseRef = baseRef
-	scopeCacheResult = scopes
-	scopeCacheExpiry = now.Add(scopeCacheTTL)
-
-	result := make([]string, len(scopes))
-	copy(result, scopes)
-	return result
-}
-
-// availableScopes returns the list of scopes that have files.
-// Only includes a scope if the VCS reports changes for it.
-func availableScopes(baseRef string, v vcs.VCS) []string {
-	scopes := []string{"all"}
-	if v == nil {
-		return scopes
-	}
-	if baseRef != "" {
-		if files, err := v.ChangedFilesScoped("branch", baseRef); err == nil && len(files) > 0 {
-			scopes = append(scopes, "branch")
-		}
-	}
-	if v.HasStagingArea() {
-		if files, err := v.ChangedFilesScoped("staged", baseRef); err == nil && len(files) > 0 {
-			scopes = append(scopes, "staged")
-		}
-		if files, err := v.ChangedFilesScoped("unstaged", baseRef); err == nil && len(files) > 0 {
-			scopes = append(scopes, "unstaged")
-		}
-	}
-	return scopes
-}
-
 const virtualWorkingTreeCommitSHA = "__hunkyard_virtual_working_tree__"
 
-// hasWorkingTreeChanges reports whether there are uncommitted local changes.
-// Uses the repo-root-aware in-dir helper so tests and multi-repo daemon usage
-// do not accidentally inspect the process CWD.
-func hasWorkingTreeChanges(v vcs.VCS, repoRoot string) bool {
-	if v == nil {
+// hasWorkingTreeChanges reports whether there are uncommitted local changes,
+// from the shared snapshot.
+func (s *Session) hasWorkingTreeChanges(vc vcs.VCS, repoRoot, baseRef string) bool {
+	if vc == nil {
 		return false
 	}
-	files, err := v.ChangedFilesOnDefaultInDir(repoRoot)
-	return err == nil && len(files) > 0
+	changes, err := s.snapshotChanges(context.Background(), vc, repoRoot, baseRef, false)
+	return err == nil && len(changes) > 0
 }
 
 // GetCommits returns the list of commits between the base ref and the focus's
@@ -737,7 +669,7 @@ func (s *Session) getCommits(compare bool) []CommitInfo {
 	if err != nil {
 		return nil
 	}
-	if !compare && focus.Kind == FocusWorkingTree && hasWorkingTreeChanges(vc, repoRoot) {
+	if !compare && focus.Kind == FocusWorkingTree && s.hasWorkingTreeChanges(vc, repoRoot, baseRef) {
 		commits = append([]CommitInfo{{
 			SHA:      virtualWorkingTreeCommitSHA,
 			ShortSHA: "WT",
@@ -834,6 +766,13 @@ func scopedHunksForCommit(fc vcs.FileChange, commit, repoRoot string, v vcs.VCS,
 		return nil, false
 	}
 	if commit == virtualWorkingTreeCommitSHA {
+		// git diff HEAD says nothing about an untracked file; show it whole.
+		if fc.Status == "untracked" {
+			if data, err := os.ReadFile(filepath.Join(repoRoot, fc.Path)); err == nil {
+				return vcs.FileDiffUnifiedNewFile(string(data)), true
+			}
+			return nil, true
+		}
 		h, err := v.FileDiffUnified(fc.Path, "HEAD", repoRoot, ignoreWhitespace)
 		if err == nil {
 			return h, true
@@ -886,15 +825,20 @@ func scopedHunks(fc vcs.FileChange, scope, commit, baseRef, repoRoot string, v v
 	return nil
 }
 
-func changesForScopeSelection(v vcs.VCS, repoRoot, baseRef, scope, commit string) ([]vcs.FileChange, error) {
+// changesForScopeSelection lists a scope's or commit's files. The virtual
+// "Working changes" commit reads the shared snapshot; fresh is for
+// reviewer-initiated requests.
+func (s *Session) changesForScopeSelection(ctx context.Context, v vcs.VCS, repoRoot, baseRef, scope, commit string, fresh bool) ([]vcs.FileChange, error) {
 	if commit == virtualWorkingTreeCommitSHA {
-		return v.ChangedFilesOnDefaultInDir(repoRoot)
-	}
-	if base, head, ok := vcs.SplitCommitRange(commit); ok {
-		return v.ChangedFilesBetweenSHAs(base, head, repoRoot)
+		return s.snapshotChanges(ctx, v, repoRoot, baseRef, fresh)
 	}
 	if commit != "" {
-		return v.ChangedFilesForCommit(commit, repoRoot)
+		return rangeCached(s, commit, "changes", "", false, func() ([]vcs.FileChange, error) {
+			if base, head, ok := vcs.SplitCommitRange(commit); ok {
+				return v.ChangedFilesBetweenSHAs(base, head, repoRoot)
+			}
+			return v.ChangedFilesForCommit(commit, repoRoot)
+		})
 	}
 	return v.ChangedFilesScoped(scope, baseRef)
 }
@@ -917,7 +861,9 @@ func countHunkStats(hunks []vcs.DiffHunk) (additions, deletions int) {
 // When scope is "" or in file mode (scopes only apply to git), delegates to GetSessionInfo.
 // All other scopes (including "all") run fresh git queries to pick up files added after startup.
 // When commit is non-empty, files and diffs are scoped to that single commit.
-func (s *Session) GetSessionInfoScoped(scope, commit string) SessionInfo {
+// ctx ends the wait for the working-tree reading and the batched counts when
+// the browser has moved on; the shared reading itself keeps running.
+func (s *Session) GetSessionInfoScoped(ctx context.Context, scope, commit string) SessionInfo {
 	if commit == "" && (scope == "" || scope == "all" || s.Mode == "files" || s.Mode == "plan") {
 		return s.GetSessionInfo()
 	}
@@ -942,7 +888,7 @@ func (s *Session) GetSessionInfoScoped(scope, commit string) SessionInfo {
 		BaseRef:         snap.baseRef,
 		BaseBranchName:  snap.baseBranchName,
 		ReviewRound:     snap.reviewRound,
-		AvailableScopes: availableScopes(snap.baseRef, snap.vc),
+		AvailableScopes: s.snapshotScopes(ctx, snap.vc, snap.repoRoot, snap.baseRef, true),
 		ReviewComments:  snap.reviewComments,
 		Focus:           snap.focus,
 		LastRangeFocus:  snap.lastRangeFocus,
@@ -952,12 +898,15 @@ func (s *Session) GetSessionInfoScoped(scope, commit string) SessionInfo {
 		return info
 	}
 
-	changes, err := changesForScopeSelection(snap.vc, snap.repoRoot, snap.baseRef, scope, commit)
-	if err != nil || len(changes) == 0 {
+	changes, err := s.changesForScopeSelection(ctx, snap.vc, snap.repoRoot, snap.baseRef, scope, commit, true)
+	if err != nil || len(changes) == 0 || ctx.Err() != nil {
 		return info
 	}
 
 	changes = config.FilterIgnored(changes, snap.ignorePatterns)
+	stats, _ := rangeCached(s, commit, "numstat", "", false, func() (map[string]vcs.NumstatEntry, error) {
+		return scopedNumstat(ctx, snap.vc, snap.repoRoot, snap.baseRef, scope, commit, changes), nil
+	})
 
 	for _, fc := range changes {
 		fi := SessionFileInfo{
@@ -968,8 +917,16 @@ func (s *Session) GetSessionInfoScoped(scope, commit string) SessionInfo {
 			CommentCount: snap.commentCounts[fc.Path],
 		}
 
+		_, lazy := snap.lazyFiles[fc.Path]
+		fi.Lazy = lazy
+		if stats != nil {
+			// Counts for this scope, lazy files included: the session's
+			// lazy counts describe base..working tree, not this view.
+			fi.Additions, fi.Deletions = stats[fc.Path].Additions, stats[fc.Path].Deletions
+			info.Files = append(info.Files, fi)
+			continue
+		}
 		if lf, ok := snap.lazyFiles[fc.Path]; ok {
-			fi.Lazy = true
 			fi.Additions = lf.LazyAdditions
 			fi.Deletions = lf.LazyDeletions
 			info.Files = append(info.Files, fi)
@@ -1037,7 +994,7 @@ func (s *Session) loadScopedFileState(path, scope, commit string) (status, conte
 		if vc == nil {
 			return
 		}
-		changes, err := changesForScopeSelection(vc, repoRoot, baseRef, scope, commit)
+		changes, err := s.changesForScopeSelection(context.Background(), vc, repoRoot, baseRef, scope, commit, false)
 		if err == nil {
 			for _, fc := range changes {
 				if fc.Path == path {
@@ -1120,7 +1077,9 @@ func (s *Session) GetFileDiffSnapshotScoped(path, scope, commit string, ignoreWh
 	vc := s.VCS
 	s.mu.RUnlock()
 
-	hunks := computeScopedDiffHunks(path, scope, commit, status, oldPath, content, baseRef, repoRoot, vc, ignoreWhitespace)
+	hunks, _ := rangeCached(s, commit, "hunks", path, ignoreWhitespace, func() ([]vcs.DiffHunk, error) {
+		return computeScopedDiffHunks(path, scope, commit, status, oldPath, content, baseRef, repoRoot, vc, ignoreWhitespace), nil
+	})
 	if hunks == nil {
 		hunks = []vcs.DiffHunk{}
 	}
@@ -1132,4 +1091,41 @@ func (s *Session) GetFileDiffSnapshotScoped(path, scope, commit string, ignoreWh
 		}
 	}
 	return result, true
+}
+
+// scopedNumstat counts every file of a scope or commit view with one batched
+// numstat. It returns nil when the backend cannot batch or the comparison
+// fails (a root commit has no parent), and callers count file by file.
+func scopedNumstat(ctx context.Context, v vcs.VCS, repoRoot, baseRef, scope, commit string, changes []vcs.FileChange) map[string]vcs.NumstatEntry {
+	bd, ok := v.(vcs.BatchDiffer)
+	if !ok {
+		return nil
+	}
+	var spec vcs.DiffSpec
+	switch {
+	case commit == virtualWorkingTreeCommitSHA:
+		spec = vcs.DiffSpec{Base: "HEAD", WholeAdded: true}
+	case commit != "":
+		base, head, isRange := vcs.SplitCommitRange(commit)
+		if !isRange {
+			base, head = commit+"^", commit
+		}
+		spec = vcs.DiffSpec{Base: base, Head: head}
+	case scope == "staged":
+		spec = vcs.DiffSpec{Cached: true}
+	case scope == "unstaged":
+		spec = vcs.DiffSpec{}
+	case scope == "branch":
+		if baseRef == "" {
+			return nil
+		}
+		spec = vcs.DiffSpec{Base: baseRef, Head: "HEAD"}
+	default:
+		return nil
+	}
+	stats, err := bd.NumstatAll(ctx, repoRoot, spec, changes)
+	if err != nil {
+		return nil
+	}
+	return stats
 }

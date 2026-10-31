@@ -2,6 +2,7 @@ package session
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -4755,8 +4756,8 @@ func TestHandleHunkyardJSONDeleted_ResetsReviewRound(t *testing.T) {
 // --- availableScopes tests ---
 
 func TestAvailableScopes_NilVCS(t *testing.T) {
-	scopes := availableScopes("main", nil)
-	if len(scopes) != 1 || scopes[0] != "all" {
+	snap, _ := readWorkingTree(nil, "", "main", wtSnapshotKey{})
+	if scopes := snap.scopes; len(scopes) != 1 || scopes[0] != "all" {
 		t.Errorf("expected [all] for nil vcs.VCS, got %v", scopes)
 	}
 }
@@ -4923,30 +4924,13 @@ func TestDetectVCSChangesAndScopesReturnsNoChangedFiles(t *testing.T) {
 	}
 }
 
-func preserveScopeCache(t *testing.T) {
-	t.Helper()
-	scopeCacheMu.Lock()
-	previousBaseRef := scopeCacheBaseRef
-	previousResult := append([]string(nil), scopeCacheResult...)
-	previousExpiry := scopeCacheExpiry
-	scopeCacheMu.Unlock()
-	t.Cleanup(func() {
-		scopeCacheMu.Lock()
-		scopeCacheBaseRef = previousBaseRef
-		scopeCacheResult = previousResult
-		scopeCacheExpiry = previousExpiry
-		scopeCacheMu.Unlock()
-	})
-}
-
 func TestSeedAvailableScopes(t *testing.T) {
-	preserveScopeCache(t)
-
+	s := &Session{}
 	want := []string{"all", "branch", "unstaged"}
-	seedAvailableScopes("base", want)
+	s.seedSnapshotScopes(nil, "", "base", want)
 	want[1] = "mutated"
 
-	got := cachedAvailableScopes("base", nil)
+	got := s.snapshotScopes(context.Background(), nil, "", "base", false)
 	wantCached := []string{"all", "branch", "unstaged"}
 	if !reflect.DeepEqual(got, wantCached) {
 		t.Fatalf("cachedAvailableScopes() = %v, want %v", got, wantCached)
@@ -4954,7 +4938,6 @@ func TestSeedAvailableScopes(t *testing.T) {
 }
 
 func TestNewGitSessionReusesInitialScopesThenRefreshes(t *testing.T) {
-	preserveScopeCache(t)
 	dir := initTestRepo(t)
 	origDir, err := os.Getwd()
 	if err != nil {
@@ -4971,15 +4954,15 @@ func TestNewGitSessionReusesInitialScopesThenRefreshes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	gitT(t, dir, "commit", "-m", "commit staged file")
-
 	if scopes := s.GetSessionInfo().AvailableScopes; !slices.Contains(scopes, "staged") {
 		t.Fatalf("initial scopes = %v, want staged from startup snapshot", scopes)
 	}
 
-	scopeCacheMu.Lock()
-	scopeCacheExpiry = time.Time{}
-	scopeCacheMu.Unlock()
+	// A commit moves HEAD, which is part of the snapshot key.
+	previous := keyProbeReuse
+	keyProbeReuse = 0
+	t.Cleanup(func() { keyProbeReuse = previous })
+	gitT(t, dir, "commit", "-m", "commit staged file")
 	if scopes := s.GetSessionInfo().AvailableScopes; slices.Contains(scopes, "staged") {
 		t.Fatalf("refreshed scopes = %v, staged should reflect current Git state", scopes)
 	}
@@ -4997,8 +4980,11 @@ func TestAvailableScopes_EmptyBaseRef(t *testing.T) {
 	os.Chdir(dir)
 	defer os.Chdir(origDir)
 
-	gitInst := &vcs.GitVCS{}
-	scopes := availableScopes("", gitInst)
+	snap, err := readWorkingTree(&vcs.GitVCS{}, dir, "", wtSnapshotKey{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	scopes := snap.scopes
 	// With empty baseRef, "branch" scope should not be added.
 	for _, s := range scopes {
 		if s == "branch" {
@@ -5017,7 +5003,7 @@ func TestGetSessionInfoScoped_EmptyScope(t *testing.T) {
 	s := newTestSession(t)
 	s.Mode = "files"
 
-	info := s.GetSessionInfoScoped("", "")
+	info := s.GetSessionInfoScoped(context.Background(), "", "")
 	if info.Mode != "files" {
 		t.Errorf("mode = %q, want files", info.Mode)
 	}
@@ -5031,7 +5017,7 @@ func TestGetSessionInfoScoped_AllScope(t *testing.T) {
 	s := newTestSession(t)
 	s.Mode = "files"
 
-	info := s.GetSessionInfoScoped("all", "")
+	info := s.GetSessionInfoScoped(context.Background(), "all", "")
 	if info.Mode != "files" {
 		t.Errorf("mode = %q, want files", info.Mode)
 	}
@@ -5049,7 +5035,7 @@ func TestGetSessionInfoScoped_PlanMode(t *testing.T) {
 		},
 	}
 
-	info := s.GetSessionInfoScoped("branch", "")
+	info := s.GetSessionInfoScoped(context.Background(), "branch", "")
 	if info.Mode != "plan" {
 		t.Errorf("mode = %q, want plan", info.Mode)
 	}
@@ -5066,7 +5052,7 @@ func TestGetSessionInfoScoped_GitScopeNoVCS(t *testing.T) {
 		Files:       []*FileEntry{},
 	}
 
-	info := s.GetSessionInfoScoped("branch", "")
+	info := s.GetSessionInfoScoped(context.Background(), "branch", "")
 	// No vcs.VCS means no files can be resolved.
 	if len(info.Files) != 0 {
 		t.Errorf("expected 0 files without vcs.VCS, got %d", len(info.Files))
@@ -5556,7 +5542,7 @@ func TestGetSessionInfoScoped_GitBranchScope(t *testing.T) {
 		Files:       []*FileEntry{},
 	}
 
-	info := s.GetSessionInfoScoped("branch", "")
+	info := s.GetSessionInfoScoped(context.Background(), "branch", "")
 	if info.Mode != "git" {
 		t.Errorf("mode = %q, want git", info.Mode)
 	}
@@ -5602,7 +5588,7 @@ func TestGetSessionInfoScoped_CommitScope(t *testing.T) {
 		Files:       []*FileEntry{},
 	}
 
-	info := s.GetSessionInfoScoped("", sha)
+	info := s.GetSessionInfoScoped(context.Background(), "", sha)
 	if len(info.Files) == 0 {
 		t.Error("expected files when scoped to specific commit")
 	}
@@ -5775,7 +5761,7 @@ func TestSession_GetSessionInfoScoped_VirtualWorkingCommitOnlyShowsUncommitted(t
 		Focus:          Focus{Kind: FocusWorkingTree, BaseRef: baseRef},
 	}
 
-	info := s.GetSessionInfoScoped("", virtualWorkingTreeCommitSHA)
+	info := s.GetSessionInfoScoped(context.Background(), "", virtualWorkingTreeCommitSHA)
 	paths := map[string]bool{}
 	for _, f := range info.Files {
 		paths[f.Path] = true

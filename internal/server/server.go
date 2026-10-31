@@ -80,8 +80,11 @@ type Server struct {
 	cfg                 Config
 	configConfigured    bool
 	reviewPath          string
-	cliArgs             []string     // positional file args; flags (--pr, --range, etc.) are not preserved
-	prList              *PRListCache // 60s cache for picker "Other PRs"
+	// inFlight counts requests being served, excluding long-lived streams
+	// and waits; a review never pauses with one in flight.
+	inFlight atomic.Int32
+	cliArgs  []string     // positional file args; flags (--pr, --range, etc.) are not preserved
+	prList   *PRListCache // 60s cache for picker "Other PRs"
 
 	// listenHost is the host the server is bound to (e.g. "127.0.0.1" or
 	// "0.0.0.0"). Set via SetListenHost after construction. When set to a
@@ -190,6 +193,8 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 	mux.HandleFunc("/api/agent/request", s.withReady(s.handleAgentRequest))
 	mux.HandleFunc("/api/branches", s.withReady(s.handleBranches))
 	mux.HandleFunc("/api/base-branch", s.withReady(s.handleBaseBranch))
+	mux.HandleFunc("/api/refresh", s.withReady(s.handleRefresh))
+	mux.HandleFunc("/api/activity", s.withReady(s.handleActivity))
 	mux.HandleFunc("/api/commits", s.withReady(s.handleCommits))
 	mux.HandleFunc("/api/comments", s.withReady(s.handleReviewComments))
 	mux.HandleFunc("/api/review-comment/", s.withReady(s.handleReviewCommentByID))
@@ -298,7 +303,34 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "review owner verification failed", http.StatusForbidden)
 		return
 	}
+	s.markRequestActivity(r)
+	if !longLivedRequest(r.URL.Path) {
+		s.inFlight.Add(1)
+		defer s.inFlight.Add(-1)
+	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// longLivedRequest names requests that stay open by design (the event
+// stream and the waits for feedback); they do not hold off a pause.
+func longLivedRequest(path string) bool {
+	switch path {
+	case "/api/events", "/api/wait-for-event", "/api/feedback/await":
+		return true
+	}
+	return false
+}
+
+// markRequestActivity keeps the review awake for anything that changes it:
+// comments, replies, learn/ack, round-complete, publishing. Reads (including
+// the agent's await polling) and shutdown do not count.
+func (s *Server) markRequestActivity(r *http.Request) {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/shutdown" {
+		return
+	}
+	if sess := s.session.Load(); sess != nil {
+		sess.MarkActivity(r.URL.Path)
+	}
 }
 
 // hostForbiddenMessage explains a checkHost rejection so a reverse-proxy /
@@ -633,7 +665,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	scope := r.URL.Query().Get("scope")
 	commit := r.URL.Query().Get("commit")
 	session := s.session.Load()
-	info := session.GetSessionInfoScoped(scope, commit)
+	info := session.GetSessionInfoScoped(r.Context(), scope, commit)
 
 	if hasRound && session != nil && session.Mode == "files" {
 		info.Files = filterFilesAtRound(session, info.Files, round)
@@ -2607,4 +2639,29 @@ func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	writeJSON(w, v)
+}
+
+// handleRefresh brings working-tree changes made outside an agent round into
+// the review (the page's Refresh banner) without starting a new round.
+func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.session.Load().RefreshWorkingTree(); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "refreshed"})
+}
+
+// handleActivity records an interaction in a review tab (throttled by the
+// page) so the review does not pause while someone is using it. The
+// recording itself happens in markRequestActivity.
+func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

@@ -560,10 +560,10 @@ func (c *countingVCS) WorkingTreeFingerprint() string {
 	return fp
 }
 
-// TestWatchGit_SkipsGitStatusWhenNotWaiting verifies that watchGit does not
-// detect edits when waitingForAgent is false, and does detect them once
-// waitingForAgent is set to true.
-func TestWatchGit_SkipsGitStatusWhenNotWaiting(t *testing.T) {
+// TestWatchGit_WalksTreeRarelyWhenNotWaiting verifies that while the reviewer
+// reads, watchGit walks the tree only for its baseline (cheap probes
+// otherwise) and counts no edits, and that it counts edits once waiting.
+func TestWatchGit_WalksTreeRarelyWhenNotWaiting(t *testing.T) {
 	dir := initTestRepo(t)
 
 	// Create a feature branch so we have a known base
@@ -577,13 +577,14 @@ func TestWatchGit_SkipsGitStatusWhenNotWaiting(t *testing.T) {
 	t.Chdir(dir)
 	vc := &countingVCS{VCS: &vcs.GitVCS{}}
 	s := &Session{
-		VCS:          vc,
-		Mode:         "git",
-		RepoRoot:     dir,
-		Branch:       "feat",
-		BaseRef:      "main",
-		ReviewRound:  1,
-		pollInterval: testPollInterval,
+		VCS:                 vc,
+		Mode:                "git",
+		RepoRoot:            dir,
+		Branch:              "feat",
+		BaseRef:             "main",
+		ReviewRound:         1,
+		pollInterval:        testPollInterval,
+		waitingWalkInterval: testPollInterval,
 		Files: []*FileEntry{
 			{
 				Path:     "file.go",
@@ -601,13 +602,13 @@ func TestWatchGit_SkipsGitStatusWhenNotWaiting(t *testing.T) {
 	stopWatcher := startWatcher(t, s.watchGit)
 	defer stopWatcher()
 
-	// An untracked file changes `git status --porcelain`, but while not
-	// waiting for the agent the watcher must not poll git at all. A negative
-	// can only be observed over time: give it many ticks.
+	// While the reviewer reads, the full fingerprint (a tree walk) runs once
+	// for a baseline and then only every slowFingerprintInterval; each tick
+	// costs just a HEAD/index probe. Give it many ticks.
 	writeFile(t, filepath.Join(dir, "untracked1.txt"), "hello\n")
 	time.Sleep(20 * testPollInterval)
-	if n := vc.calls.Load(); n != 0 {
-		t.Errorf("watcher polled git %d times while not waiting for agent", n)
+	if n := vc.calls.Load(); n > 1 {
+		t.Errorf("watcher walked the tree %d times while not waiting for agent, want at most the baseline", n)
 	}
 	if edits := s.GetPendingEdits(); edits != 0 {
 		t.Errorf("expected 0 edits while not waiting for agent, got %d", edits)
@@ -615,8 +616,9 @@ func TestWatchGit_SkipsGitStatusWhenNotWaiting(t *testing.T) {
 
 	// Once waiting, the first poll records a baseline; wait for it so the
 	// next write is guaranteed to differ from the baseline.
+	baseline := vc.calls.Load()
 	s.setWaitingForAgent(true)
-	waitUntil(t, "baseline fingerprint", func() bool { return vc.calls.Load() >= 1 })
+	waitUntil(t, "baseline fingerprint", func() bool { return vc.calls.Load() > baseline })
 	if edits := s.GetPendingEdits(); edits != 0 {
 		t.Errorf("baseline poll counted %d edits, want 0", edits)
 	}

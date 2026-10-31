@@ -577,6 +577,9 @@ func runCheck() {
 
 	fmt.Fprintln(os.Stderr)
 	printForgeCLIHints(forgeCLIs)
+	if hint := untrackedCacheHint(cwd); hint != "" {
+		fmt.Fprint(os.Stderr, "\n"+hint)
+	}
 }
 
 type forgeCLIStatus struct {

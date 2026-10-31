@@ -42,6 +42,7 @@ type resumableReview struct {
 	unresolved int
 	updatedAt  time.Time
 	running    bool
+	paused     bool // the daemon paused after idle_pause_minutes (paused.json)
 }
 
 // RunResume lists stored reviews and hands the chosen one to RunReview, which
@@ -137,6 +138,7 @@ func listResumableReviews() ([]resumableReview, error) {
 			continue
 		}
 		review.running = running[key]
+		_, review.paused = ReadPausedMarker(filepath.Join(dir, entry.Name()))
 		reviews = append(reviews, review)
 	}
 	sort.Slice(reviews, func(i, j int) bool {
@@ -215,6 +217,8 @@ func (r resumableReview) detail() string {
 	}
 	if r.running {
 		parts = append(parts, "running")
+	} else if r.paused {
+		parts = append(parts, "paused")
 	}
 	return strings.Join(parts, " · ")
 }

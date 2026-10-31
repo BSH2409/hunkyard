@@ -1,4 +1,4 @@
-// hunkyard-yard.js — the Preference Yard: what learn-preferences loads,
+// hunkyard-yard.js — the Preference Yard: what hunkyard-preferences loads,
 // learns and blocks. Rendered into the settings overlay's Yard tab and into
 // the standalone /yard page (yard.html).
 //

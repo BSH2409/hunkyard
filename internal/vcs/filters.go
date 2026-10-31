@@ -42,6 +42,11 @@ func CheckWorkingTreeFilters(dir string, paths ...string) error {
 			input = append(input, 0)
 		}
 	}
+	return checkFilterAttributes(dir, input)
+}
+
+// checkFilterAttributes runs one check-attr over NUL-separated paths.
+func checkFilterAttributes(dir string, input []byte) error {
 	if len(input) == 0 {
 		return nil
 	}
@@ -59,4 +64,39 @@ func CheckWorkingTreeFilters(dir string, paths ...string) error {
 		}
 	}
 	return nil
+}
+
+// workingTreeListing lists tracked and untracked paths once (ls-files -t),
+// checks all of them for filter attributes, and returns the untracked ones.
+// It replaces a separate filter listing plus a second untracked scan.
+func workingTreeListing(dir string, paths []string) ([]FileChange, error) {
+	args := []string{"ls-files", "-t", "-z", "--cached", "--others", "--exclude-standard"}
+	if len(paths) > 0 {
+		args = append(append([]string{"--literal-pathspecs"}, args...), "--")
+		args = append(args, paths...)
+	}
+	out, err := runGit(context.Background(), dir, args...)
+	if err != nil {
+		return nil, fmt.Errorf("ls-files failed: %w", err)
+	}
+	var input []byte
+	var untracked []FileChange
+	seen := map[string]bool{}
+	for _, entry := range bytes.Split(out, []byte{0}) {
+		if len(entry) < 3 || entry[1] != ' ' {
+			continue
+		}
+		path := string(entry[2:])
+		if entry[0] == '?' {
+			untracked = append(untracked, FileChange{Path: path, Status: "untracked"})
+		}
+		if !seen[path] {
+			seen[path] = true
+			input = append(append(input, path...), 0)
+		}
+	}
+	if err := checkFilterAttributes(dir, input); err != nil {
+		return nil, err
+	}
+	return untracked, nil
 }

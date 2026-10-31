@@ -44,6 +44,12 @@ func RunStop(args []string) error {
 				return err
 			}
 		}
+		if stopped, err := stopPausedReview(sessionID); err != nil || stopped {
+			if err == nil {
+				fmt.Println("Paused review stopped.")
+			}
+			return err
+		}
 		if err := stopDaemonByKey(sessionID); err != nil {
 			return err
 		}
@@ -116,4 +122,20 @@ func stopAllDaemons(cwd string) error {
 		}
 	}
 	return errors.Join(stopErrs...)
+}
+
+// stopPausedReview stops a paused review: there is no daemon, so only its
+// paused marker goes; the review itself is kept, as stopping always does.
+func stopPausedReview(key string) (bool, error) {
+	if _, alive := daemon.FindAliveSession(key); alive {
+		return false, nil
+	}
+	dir, err := daemon.ReviewFilePath(key)
+	if err != nil {
+		return false, err
+	}
+	if _, paused := ReadPausedMarker(dir); !paused {
+		return false, nil
+	}
+	return true, RemovePausedMarker(dir)
 }

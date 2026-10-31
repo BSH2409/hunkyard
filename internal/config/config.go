@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,6 +51,11 @@ type Config struct {
 	// StaleReviewDays is global-only because the background sweep deletes
 	// reviews from every project, not just the current one.
 	StaleReviewDays *int `json:"stale_review_days,omitempty"`
+	// IdlePauseMinutes is how long a review may sit with no activity before
+	// its daemon pauses (frees its port and exits, resumable). Global-only so
+	// a project repo cannot pause every review early; zero or negative
+	// disables pausing.
+	IdlePauseMinutes *int `json:"idle_pause_minutes,omitempty"`
 	// CloseOnApproveAfterMs, when set, auto-closes the review tab this many
 	// milliseconds after an Approve. Global-only (like open_cmd/agent_cmd) so
 	// a project repo cannot force tabs to close. Nil means disabled; the CLI
@@ -123,6 +129,26 @@ func (c Config) CloseOnApproveAfterMsEnabled() (ms int, enabled bool) {
 		return 0, false
 	}
 	return *c.CloseOnApproveAfterMs, true
+}
+
+// DefaultIdlePauseMinutes is the idle time before a review pauses when
+// idle_pause_minutes is unset.
+const DefaultIdlePauseMinutes = 30
+
+// IdlePauseMinutesOrDefault resolves the idle time before a review pauses:
+// HUNKYARD_IDLE_PAUSE_MINUTES (tests, one-off runs), then the global config,
+// then DefaultIdlePauseMinutes. Zero means pausing is disabled.
+func (c Config) IdlePauseMinutesOrDefault() int {
+	minutes := DefaultIdlePauseMinutes
+	if c.IdlePauseMinutes != nil {
+		minutes = *c.IdlePauseMinutes
+	}
+	if env := os.Getenv("HUNKYARD_IDLE_PAUSE_MINUTES"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil {
+			minutes = n
+		}
+	}
+	return max(minutes, 0)
 }
 
 // DefaultStaleReviewDays is the background sweep age when stale_review_days is unset.

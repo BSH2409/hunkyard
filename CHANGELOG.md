@@ -1,5 +1,35 @@
 # Changelog
 
+## v1.0.3 — unreleased
+
+### Speed on large repositories
+
+- Opening a review, picking a commit, picking **Working changes** and changing the base share one cached reading of the working tree. It is keyed on HEAD, the index and the base, and concurrent requests wait for one reading instead of each running git.
+- Diffs and line counts for many files come from one `git diff` (and one `--numstat`) instead of one call per file.
+- Commits and commit ranges are cached by SHA, so returning to a commit reuses its diff.
+- Untracked and filtered files are listed in one pass; remote branches are listed without a per-ref ambiguity check.
+- File names with spaces, quotes or non-ASCII characters are parsed correctly (`-z` output throughout).
+- A base or commit change reloads the review once, without blanking the file list, and a quick second pick wins over the first.
+- `hunkyard check` suggests `git config core.untrackedCache true` when `git status` takes more than 500 ms.
+
+### Idle pause
+
+- A review with no activity for 30 minutes pauses: the daemon exits and frees its port, and open tabs show **Review paused**. Page interaction, review API calls and agent turns (through the preference hooks) count as activity.
+- `hunkyard --session REVIEW_ID` resumes on the same port when it is free, and the open tab reconnects by itself. Reviews with no comments resume too.
+- `feedback await --follow` waits through a pause; a one-shot await reports `{"status":"paused"}`. `hunkyard status` and `hunkyard resume --list` show paused reviews, and `hunkyard stop` clears them.
+- Global config `idle_pause_minutes` (or `HUNKYARD_IDLE_PAUSE_MINUTES`) sets the idle time; `0` disables it.
+
+### Refresh banner
+
+- The page no longer redraws when files change underneath it. A **This review has updates** banner offers **Refresh** instead. Base and commit changes always load the latest state, and agent rounds stay automatic.
+
+### Preferences
+
+- The `learn-preferences` skill is now `hunkyard-preferences`. `hunkyard install preferences` removes the old copy when it is unmodified.
+- The preference store folder is now `hunkyard-preferences/` (under `${HUNKYARD_PREFERENCES_HOME:-~/.agents}`). The first Hunkyard command moves an existing `learn-preferences/` folder there, keeping every rule, observation and generation. `LEARN_PREFERENCES_HOME` still works as a fallback, and generated files with the old header stay replaceable. `hunkyard preferences doctor` warns if an older Hunkyard still running writes to the old folder after the move.
+- Hook notes name Hunkyard as the one doing the work, for example "Hunkyard took the hunk hint…".
+- The status line reads `◆ Hunkyard: …` instead of `◆ yard: …`.
+
 ## v1.0.2 — 2026-10-31
 
 ### Preference Yard

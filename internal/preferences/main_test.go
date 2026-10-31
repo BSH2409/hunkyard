@@ -20,6 +20,7 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv("HOME", home)
 	os.Setenv("USERPROFILE", home)
+	os.Unsetenv("HUNKYARD_PREFERENCES_HOME")
 	os.Unsetenv("LEARN_PREFERENCES_HOME")
 	code := m.Run()
 	os.RemoveAll(home)

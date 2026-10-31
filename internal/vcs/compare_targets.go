@@ -80,7 +80,7 @@ func jjCompareTargets(v VCS, dir string) (CompareTargets, error) {
 
 // LocalBranches returns local branch short names (git refs/heads).
 func LocalBranches(dir string) ([]string, error) {
-	cmd := exec.Command("git", "for-each-ref", "--format=%(refname:short)", "refs/heads/")
+	cmd := exec.Command("git", "for-each-ref", "--format=%(refname:lstrip=2)", "refs/heads/")
 	if dir != "" {
 		cmd.Dir = dir
 	}

@@ -117,13 +117,7 @@ func printStatusJSON(vcsName, branch, revPath string, revExists bool, selected *
 		result["review_file"] = ReviewPathsFor(revPath).Review
 		result["review_file_exists"] = revExists
 	}
-	daemonInfo := map[string]interface{}{"running": false}
-	if selected != nil {
-		daemonInfo["running"] = true
-		daemonInfo["pid"] = selected.PID
-		daemonInfo["port"] = selected.Port
-	}
-	result["daemon"] = daemonInfo
+	result["daemon"] = daemonStatusInfo(selected, revPath)
 	result["sessions"] = statusSessionsJSON(sessions, sessionKeys)
 
 	if !ambiguous && revExists {
@@ -187,11 +181,7 @@ func printStatusHuman(vcsName, branch, revPath string, revExists bool, selected 
 		fmt.Println("Daemon:      ambiguous (see Active reviews)")
 	} else {
 		fmt.Printf("Review file: %s\n", ReviewPathsFor(revPath).Review)
-		if selected != nil {
-			fmt.Printf("Daemon:      running (PID %d, port %d)\n", selected.PID, selected.Port)
-		} else {
-			fmt.Println("Daemon:      not running")
-		}
+		fmt.Printf("Daemon:      %s\n", daemonStatusLine(selected, revPath))
 	}
 	printActiveStatusSessions(sessions, sessionKeys)
 	if ambiguous || !revExists {
@@ -252,4 +242,33 @@ func countComments(cj HunkyardJSON) (unresolved, resolved int) {
 		}
 	}
 	return
+}
+
+// daemonStatusInfo describes the review's daemon for `status --json`:
+// running, paused (with when and its port), or stopped.
+func daemonStatusInfo(selected *daemon.SessionEntry, revPath string) map[string]interface{} {
+	info := map[string]interface{}{"running": false}
+	if selected != nil {
+		info["running"] = true
+		info["pid"] = selected.PID
+		info["port"] = selected.Port
+		return info
+	}
+	if marker, paused := ReadPausedMarker(revPath); paused {
+		info["paused"] = true
+		info["paused_at"] = marker.PausedAt
+		info["port"] = marker.Port
+	}
+	return info
+}
+
+// daemonStatusLine is daemonStatusInfo for people.
+func daemonStatusLine(selected *daemon.SessionEntry, revPath string) string {
+	if selected != nil {
+		return fmt.Sprintf("running (PID %d, port %d)", selected.PID, selected.Port)
+	}
+	if marker, paused := ReadPausedMarker(revPath); paused {
+		return fmt.Sprintf("paused since %s (port %d)", marker.PausedAt.UTC().Format("2006-01-02 15:04 MST"), marker.Port)
+	}
+	return "not running"
 }

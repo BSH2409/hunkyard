@@ -590,13 +590,13 @@
     return !!fi.orphaned || (!fi.lazy && index < EAGER_FILE_LIMIT);
   }
 
-  async function loadAllFileData(fileInfos, scope) {
+  async function loadAllFileData(fileInfos, scope, signal) {
     const hasLazy = fileInfos.some(function(fi, i) { return !loadsEagerly(fi, i); });
 
     if (!hasLazy) {
       const [loaded, byPath] = await Promise.all([
-        Promise.all(fileInfos.map(function(fi) { return loadSingleFile(fi, scope); })),
-        fetchAllFileComments(),
+        Promise.all(fileInfos.map(function(fi) { return loadSingleFile(fi, scope, signal); })),
+        fetchAllFileComments(signal),
       ]);
       loaded.forEach(function(f) { setCommentsFrom(f, byPath); });
       return loaded;
@@ -617,8 +617,8 @@
     // request, so lazy files' comments count in the header, tree badges and
     // comments panel before their diffs load.
     const [eagerFiles, commentsByPath] = await Promise.all([
-      Promise.all(eager.map(function(fi) { return loadSingleFile(fi, scope); })),
-      fetchAllFileComments(),
+      Promise.all(eager.map(function(fi) { return loadSingleFile(fi, scope, signal); })),
+      fetchAllFileComments(signal),
     ]);
     eagerFiles.forEach(function(f) { setCommentsFrom(f, commentsByPath); });
 
@@ -651,9 +651,9 @@
 
   // Every file's comments in one request, keyed by path (files with none
   // are absent). Returns null on failure so callers keep what they have.
-  async function fetchAllFileComments() {
+  async function fetchAllFileComments(signal) {
     try {
-      const res = await fetch('/api/files/comments');
+      const res = await fetch('/api/files/comments', signal ? { signal: signal } : undefined);
       if (!res.ok) return null;
       const byPath = await res.json();
       return byPath && typeof byPath === 'object' ? byPath : null;
@@ -941,7 +941,7 @@
   // server-disconnected message on network failure, and a body.message
   // surfacing on HTTP 500. Returns the parsed JSON payload (matches
   // the previous .then(r => r.json()) call sites at the seam).
-  async function fetchWhenReady(url) {
+  async function fetchWhenReady(url, signal) {
     function renderLoading(text) {
       const el = document.getElementById('filesContainer');
       if (el) {
@@ -953,6 +953,7 @@
     try {
       return await window.hunkyard.shared.waitForSession({
         url: url,
+        signal: signal,
         intervalMs: 500,
         maxWaitMs: 5 * 60 * 1000,
         onProgress: function (elapsedMs) {
@@ -1189,6 +1190,7 @@
       updateCompareAndCommitChrome();
     }
 
+    setUpdatesBanner(!!session.stale);
     updateHeaderRound();
     setDocumentTitle(session.mode === 'git'
       ? 'Hunkyard — ' + (session.branch || 'review')
@@ -1717,7 +1719,7 @@
     // The tree remains available while a scope/view reload rebuilds the list.
     // Preserve a click made during that reload instead of dropping it when
     // the old viewer has already been disposed.
-    while (reloadInFlight) await reloadInFlight;
+    await scopeReloader.whenIdle();
     if (!pierreView || !pierreViewActive()) return;
     const file = getFileByPath(filePath);
     if (file && file.collapsed) pierreView.setCollapsed(file, false);
@@ -7161,6 +7163,7 @@
       },
       'file-changed': async function() {
       try {
+        setUpdatesBanner(false);
         // Reset action tracking for new round
         userActedThisRound = false;
         publishedThisRound = false;
@@ -7415,6 +7418,16 @@
       'server-shutdown': function() {
       conn.close();
       showDisconnected();
+      },
+      // The review paused after idle_pause_minutes; the server stops next.
+      'paused': function(data) {
+      let info = {};
+      try { info = data && data.content ? JSON.parse(data.content) : {}; } catch {}
+      window.hunkyard.shared.showPaused(info);
+      },
+      // Files changed outside an agent round: offer Refresh, never redraw.
+      'review-stale': function() {
+      if (uiState !== 'waiting') setUpdatesBanner(true);
       },
     }, {
       onError: function() {
@@ -7914,7 +7927,17 @@
     }
   }
 
-  async function fetchCommits() {
+  // One /api/commits request at a time: a base change asks from both its
+  // POST and the server's base-changed event.
+  let commitsInFlight = null;
+  function fetchCommits() {
+    if (!commitsInFlight) {
+      commitsInFlight = loadCommits().finally(function() { commitsInFlight = null; });
+    }
+    return commitsInFlight;
+  }
+
+  async function loadCommits() {
     if (!commitRangeChromeVisible()) {
       if (commitDropdownEl) commitDropdownEl.style.display = 'none';
       return;
@@ -8264,6 +8287,9 @@
     const previousLabel = document.getElementById('baseBranchLabel').textContent;
     currentCompareTarget = ref;
     document.getElementById('baseBranchLabel').textContent = compareTargetChipLabel(ref);
+    // Before the POST: the server's base-changed event reloads with the same
+    // inputs, so both requests share one reload.
+    clearCommitPins();
     try {
       const res = await fetch('/api/base-branch', {
         method: 'POST',
@@ -8277,9 +8303,10 @@
         document.getElementById('baseBranchLabel').textContent = previousLabel;
         return;
       }
-      clearCommitPins();
-      await reloadForScope();
+      // Join the reload and commit fetch the base-changed event may have
+      // started already; both deduplicate while in flight.
       fetchCommits();
+      await reloadForScope();
     } catch (err) {
       console.error('Error changing compare target:', err);
       currentCompareTarget = previous;
@@ -8428,85 +8455,98 @@
     await reloadForScope();
   });
 
-  let reloadInFlight = null;
-  // Tracks the (scope, commit) the in-flight reload was started for. If a new
-  // reloadForScope() call happens with different inputs while the previous one
-  // is still running, we chain a follow-up rather than collapsing onto the
-  // stale promise — otherwise the caller awaits a fetch for the OLD scope and
-  // the new scope is never requested. Surfaced as a Windows-only e2e flake:
-  // slower file I/O made loadAllFileData() outlast the next click handler, so
-  // clicks that swapped scope returned the previous scope's in-flight promise.
-  // Story/Diff also changes the effective fetch/file-data scopes without
-  // changing diffScope itself, so include those derived scopes in the key.
-  let reloadInFlightKey = null;
-  async function reloadForScope() {
+  // One scope reload at a time (hunkyard-reload.js): a reload with new inputs
+  // aborts the one in flight, and every caller waits for the latest, so code
+  // awaiting an earlier click still sees the final state (the Windows e2e
+  // flake this guards against: a slow load outliving the next click). The
+  // current list stays on screen, marked busy, until the new one is ready.
+  const scopeReloader = window.hunkyard.reload.createReloader(runScopeReload);
+
+  // The "This review has updates" banner: shown when the server reports
+  // changes made outside an agent round, hidden once the review reloads.
+  function setUpdatesBanner(show) {
+    const banner = document.getElementById('reviewUpdatesBanner');
+    if (banner) banner.hidden = !show;
+  }
+
+  document.getElementById('reviewUpdatesRefresh').addEventListener('click', async function() {
+    setUpdatesBanner(false);
+    try {
+      const res = await fetch('/api/refresh', { method: 'POST' });
+      if (!res.ok) throw new Error(await res.text());
+    } catch (err) {
+      console.error('Refresh failed:', err);
+      window.hunkyard.shared.showToast('Could not refresh the review: ' + (err.message || err));
+      setUpdatesBanner(true);
+      return;
+    }
+    await reloadForScope();
+  });
+
+  function reloadForScope() {
     const diffFetchMode = ignoreWhitespace && !storyNeedsRawDiff() ? 'filtered' : 'raw';
     const key = currentSessionFetchScope() + '\0' + currentFileDataScope() + '\0' + diffCommit + '\0' + diffFetchMode + '\0' + sinceReview;
-    if (reloadInFlight && reloadInFlightKey === key) return reloadInFlight;
-    if (reloadInFlight) {
-      // Different inputs — chain after the in-flight reload finishes so we
-      // don't tear down filesContainer mid-render. The previous reload's
-      // finally clears reloadInFlight; we then re-enter reloadForScope().
-      const prev = reloadInFlight;
-      const chained = prev.then(function() { return reloadForScope(); }, function() { return reloadForScope(); });
-      return chained;
-    }
-    reloadInFlightKey = key;
-    reloadInFlight = (async function() {
-      try {
-        activeReplyForms.clear();
-        // Scope/base/commit changes can replace diff hunks without changing
-        // the final file content hash. Cached Story clones are keyed by that
-        // hash, so invalidate them before loading the new scoped file data.
-        storyExpandedFileCache.clear();
-        showFilesMessage('Loading...');
+    return scopeReloader.start(key);
+  }
 
-        let sessionUrl = '/api/session?scope=' + enc(currentSessionFetchScope());
-        if (diffCommit) sessionUrl += '&commit=' + enc(diffCommit);
-        let sessionRes = await fetchWhenReady(sessionUrl);
-        if (!storyHasContent(sessionRes.story) && storyHasContent(session && session.story)) {
-          sessionRes.story = session.story;
-        } else {
-          sessionRes = await hydrateStoryIfMissing(sessionRes);
-        }
-        sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
-        session = sessionRes;
-        reviewComments = sessionRes.review_comments || [];
+  async function runScopeReload(signal) {
+    const container = document.getElementById('filesContainer');
+    container.setAttribute('aria-busy', 'true');
+    try {
+      let sessionUrl = '/api/session?scope=' + enc(currentSessionFetchScope());
+      if (diffCommit) sessionUrl += '&commit=' + enc(diffCommit);
+      let sessionRes = await fetchWhenReady(sessionUrl, signal);
+      if (signal.aborted) return;
+      if (!storyHasContent(sessionRes.story) && storyHasContent(session && session.story)) {
+        sessionRes.story = session.story;
+      } else {
+        sessionRes = await hydrateStoryIfMissing(sessionRes);
+      }
+      sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
+      if (signal.aborted) return;
+      activeReplyForms.clear();
+      // Scope/base/commit changes can replace diff hunks without changing
+      // the final file content hash. Cached Story clones are keyed by that
+      // hash, so invalidate them before loading the new scoped file data.
+      storyExpandedFileCache.clear();
+      session = sessionRes;
+      reviewComments = sessionRes.review_comments || [];
+      setUpdatesBanner(!!session.stale);
 
-        // Update base branch label if it changed
-        if (session.base_branch_name) {
-          currentCompareTarget = session.base_branch_name;
-          document.getElementById('baseBranchLabel').textContent = compareTargetChipLabel(currentCompareTarget);
-        }
+      // Update base branch label if it changed
+      if (session.base_branch_name) {
+        currentCompareTarget = session.base_branch_name;
+        document.getElementById('baseBranchLabel').textContent = compareTargetChipLabel(currentCompareTarget);
+      }
 
-        if (!session.files || session.files.length === 0) {
-          showFilesMessage('No ' + diffScope + ' changes');
-          files = [];
-          renderFileTree();
-          updateCommentCount();
-          updateViewedCount();
-          if (storyCleared && session) delete session.story;
-          applyStoryPresence();
-          return;
-        }
-
-        files = await loadAllFileData(session.files, currentFileDataScope());
-        hiddenUnresolved = session.hidden_unresolved || 0;
-        files.sort(fileSortComparator);
-        restoreViewedState();
+      if (!session.files || session.files.length === 0) {
+        showFilesMessage('No ' + diffScope + ' changes');
+        files = [];
         renderFileTree();
-        renderAllFiles();
-        buildToc();
         updateCommentCount();
         updateViewedCount();
         if (storyCleared && session) delete session.story;
         applyStoryPresence();
-      } finally {
-        reloadInFlight = null;
-        reloadInFlightKey = null;
+        return;
       }
-    })();
-    return reloadInFlight;
+
+      const loaded = await loadAllFileData(session.files, currentFileDataScope(), signal);
+      if (signal.aborted) return;
+      files = loaded;
+      hiddenUnresolved = session.hidden_unresolved || 0;
+      files.sort(fileSortComparator);
+      restoreViewedState();
+      renderFileTree();
+      renderAllFiles();
+      buildToc();
+      updateCommentCount();
+      updateViewedCount();
+      if (storyCleared && session) delete session.story;
+      applyStoryPresence();
+    } finally {
+      // A newer reload owns the busy state once this one is aborted.
+      if (!signal.aborted) container.removeAttribute('aria-busy');
+    }
   }
 
   // ===== Sidebar Toggle (file tree in diff mode, chapter rail in story) =====
@@ -8977,7 +9017,7 @@
   }
   window.hunkyardOpenBlockingComments = countOpenBlockingComments;
 
-  // The Yard tab shows learn-preferences activity since this page opened.
+  // The Yard tab shows hunkyard-preferences activity since this page opened.
   const yardSince = new Date().toISOString();
   function renderYardPane() {
     const yard = window.hunkyard && window.hunkyard.yard;
@@ -11119,6 +11159,10 @@
       }
     })
     .then(connectSSE)
+    .then(function() {
+      // Interaction keeps the review from pausing (idle_pause_minutes).
+      if (window.hunkyard.activity) window.hunkyard.activity.start();
+    })
     .then(function() {
       // Register as InlineContentRenderer
       if (window.hunkyard && window.hunkyard.renderer) {

@@ -1292,3 +1292,32 @@ test('stale review publication asks the reviewer to reload', async () => {
   assert.equal(result, null);
   assert.match(message, /reload before publishing/i);
 });
+
+test('pausedOverlayHTML explains the pause and escapes the review id', () => {
+  const { shared: s } = makeFinishSandbox(unusedFetch, {});
+  const html = s.pausedOverlayHTML({ review_id: 'ab<i>cd', command: 'hunkyard --session ab<i>cd' });
+  assert.match(html, />Review paused</);
+  assert.match(html, /Ask your agent to resume this review\./);
+  assert.match(html, /ab&lt;i&gt;cd/);
+  assert.match(html, /hunkyard --session ab&lt;i&gt;cd/);
+  assert.match(html, /aria-label="Copy resume command"/);
+  assert.doesNotMatch(html, /<i>/);
+});
+
+test('a paused review is not shown as Session complete when the server stops', () => {
+  const { shared: s, els } = makeFinishSandbox(unusedFetch, {});
+  s.showPaused({ review_id: 'abc', command: 'hunkyard --session abc' });
+  s.showDisconnected();
+  assert.equal(els.finishBtn.textContent, 'Approve');
+  assert.equal(s.isPaused(), true);
+});
+
+test('a paused tab resumes only when its own review is serving the port', async () => {
+  const serving = (status, body) => async () => ({ ok: status === 200, status, json: async () => body });
+  assert.equal(await shared.isOwnReviewServing('abc123', serving(200, { session_key: 'abc123' })), true);
+  assert.equal(await shared.isOwnReviewServing('abc123', serving(200, { session_key: 'other9' })), false);
+  assert.equal(await shared.isOwnReviewServing('abc123', serving(503, {})), false);
+  assert.equal(await shared.isOwnReviewServing('abc123', async () => { throw new Error('refused'); }), false);
+  // A pause notice without an id (older server) keeps the old behaviour.
+  assert.equal(await shared.isOwnReviewServing('', serving(200, { session_key: 'any' })), true);
+});

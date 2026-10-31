@@ -13,7 +13,7 @@ import (
 func yardServer(t *testing.T) (*Server, string) {
 	t.Helper()
 	root := t.TempDir()
-	t.Setenv("LEARN_PREFERENCES_HOME", root)
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", root)
 	srv, err := NewServer(nil, FrontendFS, "", "test", 0, "")
 	if err != nil {
 		t.Fatal(err)

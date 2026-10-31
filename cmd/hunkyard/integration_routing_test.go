@@ -93,9 +93,9 @@ func TestIntegrationMap_SnapshotGlobalRouting(t *testing.T) {
 			{".codex/plugins/hunkyard/skills/hunkyard-story/SKILL.md", globalDestRelHome},
 			{".codex/plugins/hunkyard/hooks/hooks.json", globalDestRelHome},
 			{".codex/plugins/hunkyard/skills/hunkyard/references/review-workflow.md", globalDestRelHome},
-			{".codex/plugins/hunkyard/skills/learn-preferences/SKILL.md", globalDestRelHome},
-			{".codex/plugins/hunkyard/skills/learn-preferences/references/local-maintenance.md", globalDestRelHome},
-			{".codex/plugins/hunkyard/skills/learn-preferences/schemas/maintenance-proposal.json", globalDestRelHome},
+			{".codex/plugins/hunkyard/skills/hunkyard-preferences/SKILL.md", globalDestRelHome},
+			{".codex/plugins/hunkyard/skills/hunkyard-preferences/references/local-maintenance.md", globalDestRelHome},
+			{".codex/plugins/hunkyard/skills/hunkyard-preferences/schemas/maintenance-proposal.json", globalDestRelHome},
 		},
 	}
 	for tool, files := range expected {
@@ -153,26 +153,26 @@ func TestCleanupLegacyIntegrationFiles_RemovesOnlyKnownContent(t *testing.T) {
 	t.Cleanup(func() { legacyIntegrationFiles = old })
 	legacyIntegrationFiles = map[string][]legacyIntegrationFile{
 		"test-known": {
-			{dest: "old/hunkyard.md", hash: computeFileHash(known)},
+			{dest: "old/hunkyard.md", hashes: []string{computeFileHash(known)}},
 		},
 		"test-modified": {
-			{dest: "modified/hunkyard.md", hash: computeFileHash(known)},
+			{dest: "modified/hunkyard.md", hashes: []string{computeFileHash(known)}},
 		},
 		"test-missing": {
-			{dest: "missing/hunkyard.md", hash: computeFileHash(known)},
+			{dest: "missing/hunkyard.md", hashes: []string{computeFileHash(known)}},
 		},
 		"test-global": {
 			{
 				dest:           "project/hunkyard.md",
 				globalDest:     ".agents/legacy/hunkyard.md",
 				globalDestKind: globalDestRelHome,
-				hash:           computeFileHash(known),
+				hashes:         []string{computeFileHash(known)},
 			},
 		},
 		"test-global-empty": {
 			{
-				dest: "project-only/hunkyard.md",
-				hash: computeFileHash(known),
+				dest:   "project-only/hunkyard.md",
+				hashes: []string{computeFileHash(known)},
 			},
 		},
 	}
@@ -882,9 +882,9 @@ func TestInstallOneFile_NeverWritesThroughSymlinkedSkillFolder(t *testing.T) {
 		t.Skip("symlinks need extra privileges on Windows")
 	}
 	dir := t.TempDir()
-	shared := filepath.Join(dir, "agents", "skills", "learn-preferences")
+	shared := filepath.Join(dir, "agents", "skills", "hunkyard-preferences")
 	testutil.WriteFile(t, filepath.Join(shared, "SKILL.md"), "other tool's skill")
-	link := filepath.Join(dir, "claude", "skills", "learn-preferences")
+	link := filepath.Join(dir, "claude", "skills", "hunkyard-preferences")
 	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -908,5 +908,54 @@ func TestInstallOneFile_NeverWritesThroughSymlinkedSkillFolder(t *testing.T) {
 	}
 	if data, _ := os.ReadFile(dest); !strings.Contains(string(data), "hunkyard preferences") {
 		t.Fatal("installed copy missing")
+	}
+}
+
+func TestInstallPreferences_ReplacesLearnPreferencesSkill(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need extra privileges on Windows")
+	}
+	fixtures, err := filepath.Abs(filepath.Join("testdata", "legacy-learn-preferences"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(home, ".claude-office"))
+	t.Chdir(home)
+	copyLegacy := func(version, skillDir string) {
+		for _, name := range []string{"SKILL.md", "references/local-maintenance.md", "schemas/maintenance-proposal.json"} {
+			data, err := os.ReadFile(filepath.Join(fixtures, version, filepath.FromSlash(name)))
+			if err != nil {
+				t.Fatal(err)
+			}
+			testutil.WriteFile(t, filepath.Join(skillDir, filepath.FromSlash(name)), string(data))
+		}
+	}
+	agents := filepath.Join(home, ".agents", "skills", "learn-preferences")
+	office := filepath.Join(home, ".claude-office", "skills", "learn-preferences")
+	linked := filepath.Join(home, ".claude", "skills", "learn-preferences")
+	copyLegacy("v1.0.2", agents)
+	copyLegacy("v1.0.1", office)
+	if err := os.MkdirAll(filepath.Dir(linked), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(agents, linked); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := installIntegration("preferences", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, old := range []string{agents, office, linked} {
+		if _, err := os.Lstat(old); !errors.Is(err, os.ErrNotExist) {
+			t.Errorf("old skill %s still present (err %v)", old, err)
+		}
+	}
+	for _, dir := range []string{filepath.Join(home, ".agents", "skills"), filepath.Join(home, ".claude-office", "skills")} {
+		data, err := os.ReadFile(filepath.Join(dir, "hunkyard-preferences", "SKILL.md"))
+		if err != nil || !strings.Contains(string(data), "name: hunkyard-preferences") {
+			t.Errorf("hunkyard-preferences not installed in %s: %v", dir, err)
+		}
 	}
 }

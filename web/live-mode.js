@@ -53,6 +53,7 @@
     if (state[k] === undefined) state[k] = stateDefaults[k];
   });
   var shared = window.hunkyard.shared;
+  var activityTracker = null; // set in boot(); the iframe agent reports through it
   var utils = window.hunkyard.liveUtils;
   var inflightAPI = (window.hunkyard && window.hunkyard.live && window.hunkyard.live.inflight) || null;
 
@@ -345,6 +346,8 @@
   }
 
   async function boot() {
+    // Interaction keeps the review from pausing (idle_pause_minutes).
+    if (window.hunkyard.activity) activityTracker = window.hunkyard.activity.start();
     if (shared && shared.applyThemeFromCookie) shared.applyThemeFromCookie();
     state.session = await waitForSession();
     if (state.session.review_type !== 'live' && state.session.review_type !== 'preview') {
@@ -2332,6 +2335,9 @@
     });
 
     var dispatch = dispatchMod.makeMessageDispatcher({
+      // The reviewer mostly works inside the app iframe, whose events never
+      // reach this page; the agent forwards them.
+      onActivity: function () { if (activityTracker) activityTracker.mark(); },
       onAgentReady: handleAgentReady,
       onAgentError: handleAgentError,
       onSelection: handleSelection,

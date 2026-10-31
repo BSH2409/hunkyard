@@ -190,3 +190,12 @@ test('clear-highlight validates without payload', () => {
   assert.equal(C2A.CLEAR_HIGHLIGHT, 'clear-highlight');
   assert.deepEqual(validateMessage({ type: 'clear-highlight' }), { ok: true });
 });
+
+test('activity from the app iframe is a valid agent message and reaches its handler', () => {
+  assert.equal(A2C.ACTIVITY, 'activity');
+  assert.deepEqual(validateMessage({ type: A2C.ACTIVITY }), { ok: true });
+  const { makeMessageDispatcher } = require('../live-mode.dispatch.js');
+  let seen = 0;
+  makeMessageDispatcher({ onActivity: () => { seen++; } })({ type: 'activity' });
+  assert.equal(seen, 1);
+});

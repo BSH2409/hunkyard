@@ -650,6 +650,8 @@ func (s *Session) mergeExternalHunkyardJSON() bool {
 	s.mu.Unlock()
 
 	if changed {
+		// `hunkyard comment` writes here without the server: agent activity.
+		s.MarkActivity("review-file")
 		s.notify(SSEEvent{Type: "comments-changed"})
 	}
 

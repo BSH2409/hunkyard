@@ -132,6 +132,13 @@
           conn.close();
           showLiveDisconnected();
         },
+        // The review paused after idle_pause_minutes; the server stops next.
+        'paused': function (data) {
+          var info = {};
+          try { info = data && data.content ? JSON.parse(data.content) : {}; } catch (e) { info = {}; }
+          var shared = window.hunkyard && window.hunkyard.shared;
+          if (shared && typeof shared.showPaused === 'function') shared.showPaused(info);
+        },
       });
       state.liveSSE = conn;
       return conn;

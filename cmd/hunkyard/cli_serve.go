@@ -331,6 +331,17 @@ func runServe(args []string) {
 	}
 	srv.SetSession(sess)
 
+	// Idle reviews pause (free the port and exit) and resume later through
+	// `hunkyard --session`. Starting counts as activity; a stale marker from
+	// an earlier pause no longer applies.
+	sess.SetActivityFile(filepath.Join(sc.ReviewPath, "activity"))
+	sess.MarkActivity("start")
+	if err := session.RemovePausedMarker(sc.ReviewPath); err != nil {
+		log.Printf("Warning: could not clear the paused marker: %v", err)
+	}
+	idle, every := idlePauseTiming(sc.Cfg.IdlePauseMinutesOrDefault())
+	go srv.RunIdleMonitor(ctx, idle, every)
+
 	watchStop := make(chan struct{})
 	go sess.Watch(watchStop)
 
@@ -374,4 +385,17 @@ func runServe(args []string) {
 	if sess.ReviewFilePath != "" {
 		fmt.Fprintf(os.Stderr, "Review file: %s\n", reviewPathsFor(sess.ReviewFilePath).Review)
 	}
+}
+
+// idlePauseTiming turns idle_pause_minutes into the monitor's idle time and
+// check interval. HUNKYARD_IDLE_PAUSE_SECONDS, honoured only with
+// HUNKYARD_TEST_MODE=1, lets E2E tests pause within seconds.
+func idlePauseTiming(minutes int) (idle, every time.Duration) {
+	idle, every = time.Duration(minutes)*time.Minute, 30*time.Second
+	if os.Getenv("HUNKYARD_TEST_MODE") == "1" {
+		if seconds, err := strconv.Atoi(os.Getenv("HUNKYARD_IDLE_PAUSE_SECONDS")); err == nil {
+			idle, every = time.Duration(seconds)*time.Second, time.Second
+		}
+	}
+	return idle, every
 }

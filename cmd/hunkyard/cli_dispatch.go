@@ -255,7 +255,7 @@ CLI feedback:
 Setup and management:
   hunkyard install --global codex      Install the Codex review skills
   hunkyard install --global claude     Install the Claude review skills
-  hunkyard install --global preferences  Install the Go-backed learn-preferences skill
+  hunkyard install --global preferences  Install the hunkyard-preferences skill
   hunkyard preferences COMMAND        Capture, select, audit, maintain, or migrate preferences
   hunkyard status --json              List local review sessions
   hunkyard stop --session ID          Stop an owned review daemon

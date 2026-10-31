@@ -6720,3 +6720,52 @@ body.hunkyard-story-active #reviewToolbar { display: none; }
 @media (pointer: coarse) {
   .comment-label-chip { min-height: 44px; min-width: 44px; }
 }
+
+/* A reload keeps the current list on screen, dimmed under a thin moving bar,
+   until the new list replaces it. */
+#filesContainer[aria-busy="true"] { opacity: 0.6; transition: opacity 0.15s ease; }
+#filesContainer[aria-busy="true"]::before {
+  content: "";
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: block;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--hunkyard-brand), transparent);
+  background-size: 200% 100%;
+  animation: files-loading-bar 1s linear infinite;
+}
+@keyframes files-loading-bar {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+/* "This review has updates": changes made outside an agent round wait for
+   the reviewer's Refresh instead of redrawing the list. */
+.review-updates-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 24px 0;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--hunkyard-brand) 35%, transparent);
+  border-radius: 8px;
+  background: var(--hunkyard-brand-subtle);
+  color: var(--hunkyard-editor-fg);
+  font-size: 13px;
+}
+.review-updates-banner[hidden] { display: none; }
+
+/* "Review paused": the daemon freed its port after idle_pause_minutes. */
+.paused-dialog .paused-id { color: var(--hunkyard-editor-fg-muted); font-size: 13px; }
+.paused-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  background: var(--hunkyard-bg-elevated);
+}
+.paused-command code { flex: 1; font-family: var(--hunkyard-font-mono); font-size: 12px; overflow-wrap: anywhere; }

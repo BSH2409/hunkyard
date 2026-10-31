@@ -12,6 +12,8 @@ const PERF_PORT = process.env.HUNKYARD_TEST_PERF_PORT || '3134';
 // Huge-review fixture (~2,500 files) whose flat document is taller than 2^22px.
 const HUGE_PORT = process.env.HUNKYARD_TEST_HUGE_PORT || '3136';
 const YARD_PORT = process.env.HUNKYARD_TEST_YARD_PORT || '3137';
+// Big working tree (5,000 tracked, 300 untracked, 30,000 ignored files) behind selected code paths.
+const BIGTREE_PORT = process.env.HUNKYARD_TEST_BIGTREE_PORT || '3138';
 // The local-only build omits executable-preview projects.
 // Mobile project re-uses the git-mode fixture — no separate server needed.
 const MOBILE_PORT = GIT_PORT;
@@ -102,6 +104,14 @@ const allFixtureServers: FixtureServer[] = [
     stdout: 'pipe',
   },
   {
+    key: 'bigtree',
+    command: `bash setup-fixtures-bigtree.sh ${BIGTREE_PORT}`,
+    url: `http://localhost:${BIGTREE_PORT}/api/session`,
+    reuseExistingServer: true,
+    timeout: 120_000,
+    stdout: 'pipe',
+  },
+  {
     key: 'yard',
     command: `bash setup-fixtures-yard.sh ${YARD_PORT}`,
     url: `http://localhost:${YARD_PORT}/api/yard/health`,
@@ -147,7 +157,7 @@ export default defineConfig({
   projects: [
     {
       name: 'git-mode',
-      testMatch: /^(?!.*\.(filemode|singlefile|multifile|rangemode|mobile|livemode|perf|huge|yard)\.).*\.spec\.ts$/,
+      testMatch: /^(?!.*\.(filemode|singlefile|multifile|rangemode|mobile|livemode|perf|huge|bigtree|yard)\.).*\.spec\.ts$/,
       use: {
         browserName: 'chromium',
         baseURL: `http://localhost:${GIT_PORT}`,
@@ -219,6 +229,14 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         baseURL: `http://localhost:${HUGE_PORT}`,
+      },
+    },
+    {
+      name: 'bigtree',
+      testMatch: /\.bigtree\.spec\.ts$/,
+      use: {
+        browserName: 'chromium',
+        baseURL: `http://localhost:${BIGTREE_PORT}`,
       },
     },
     {

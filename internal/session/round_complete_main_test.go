@@ -1,6 +1,7 @@
 package session
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,7 +36,7 @@ func TestRoundCompleteOnMainAfterCommit_KeepsFiles(t *testing.T) {
 		t.Fatal("after round-complete on committed main, expected files to remain visible")
 	}
 
-	info := sess.GetSessionInfoScoped("all", "")
+	info := sess.GetSessionInfoScoped(context.Background(), "all", "")
 	if len(info.Files) == 0 {
 		t.Fatalf("GetSessionInfoScoped(all) returned no files after commit on main")
 	}

@@ -66,6 +66,19 @@ Keep the same owner on every command. `--follow` waits until publication, cancel
 - **Claimed fixed, code unchanged.** When the agent replies to a comment but leaves the commented lines identical, the next round reopens the comment and badges it, and the published batch sets `claim_unchanged`.
 - **Your own edits.** Lines you edit on disk during a review are published as `edit` comments (your version against the agent's), so the agent keeps them and can learn from them.
 
+### Idle pause and updates
+
+- **Idle pause.** A review with no activity for 30 minutes pauses: the daemon exits and frees its port, and the open tab shows **Review paused**. Clicking, typing or scrolling in the page counts as activity, and so does an agent turn while the preference hooks are installed. Ask your agent to resume (it runs `hunkyard --session REVIEW_ID`); the review comes back on the same port and the tab reconnects by itself. Comments survive the pause. Set the global config `idle_pause_minutes` (or `HUNKYARD_IDLE_PAUSE_MINUTES`) to change the time; `0` turns pausing off.
+- **Refresh.** The page does not redraw when files change underneath it. When the working tree, index, HEAD or refs move, a **This review has updates** banner offers **Refresh**. Changing the base or picking a commit always loads the latest state. Agent review rounds still update automatically.
+
+### Large repositories
+
+Opening a review and switching the base or a commit share one cached reading of the working tree, and diffs for many files come from one `git diff` call. If `hunkyard check` reports that `git status` is slow, enable Git's untracked cache:
+
+```sh
+git config core.untrackedCache true
+```
+
 See the [complete local protocol](integrations/shared/review-workflow.md) for trusted skill catalogs, human comment revisions, preference classification, replies, acknowledgments, and repeated review rounds. It is CLI/JSON and does not depend on a host SDK.
 
 ## Go-backed coding preferences
@@ -74,9 +87,9 @@ The review bridge classifies every human comment revision through the Go prefere
 
 Learned preferences and the Preference Yard run on macOS and Linux (including WSL). On native Windows, reviews work but `hunkyard preferences` reports that learning is unsupported, installed hooks stay silent, and review feedback is acknowledged without learning.
 
-The canonical store is `${LEARN_PREFERENCES_HOME:-$HOME/.agents}`, shared by both hosts. Clear durable instructions can become active preferences; uncertain reusable feedback stays pending. Task-specific edits are ignored. Generated personas preserve repository/global/source precedence and token budgets.
+The canonical store is `${HUNKYARD_PREFERENCES_HOME:-$HOME/.agents}`, shared by both hosts. Clear durable instructions can become active preferences; uncertain reusable feedback stays pending. Task-specific edits are ignored. Generated personas preserve repository/global/source precedence and token budgets.
 
-A separate installation replaces the `learn-preferences` workflow with the Go-backed skill:
+Install the `hunkyard-preferences` skill separately (it replaces an older `learn-preferences` skill that Hunkyard installed):
 
 ```sh
 hunkyard install --global preferences

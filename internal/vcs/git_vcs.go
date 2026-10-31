@@ -97,22 +97,31 @@ func (g *GitVCS) CommitLog(baseRef, headRef, dir string) ([]CommitInfo, error) {
 
 func (g *GitVCS) WorkingTreeFingerprint() string {
 	if len(g.paths) > 0 {
-		out, _ := g.runSelectedGit("", true, "status", "--porcelain", "--untracked-files=all")
-		return string(out)
+		root, err := g.RepoRoot()
+		if err != nil {
+			return ""
+		}
+		out, _ := g.runSelectedGit(root, true, "--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=all")
+		return fingerprintWithStats(root, out)
 	}
 	return WorkingTreeFingerprint()
 }
 
 func (g *GitVCS) UntrackedFiles(dir string) ([]FileChange, error) {
 	if len(g.paths) > 0 {
-		out, err := g.runSelectedGit(dir, false, "ls-files", "--others", "--exclude-standard", "-z")
-		return selectedUntrackedFiles(out), err
+		if dir == "" {
+			var err error
+			if dir, err = g.RepoRoot(); err != nil {
+				return nil, err
+			}
+		}
+		return workingTreeListing(dir, g.paths)
 	}
 	return untrackedFilesInDir(dir)
 }
 
 func (g *GitVCS) AllTrackedFiles(dir string) ([]string, error) {
-	return AllTrackedFiles(dir)
+	return AllTrackedFiles(dir, g.paths...)
 }
 
 func (g *GitVCS) RemoteBranches(dir string) ([]string, error) {

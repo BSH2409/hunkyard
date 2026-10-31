@@ -92,3 +92,32 @@ func waitForPublication(stateRoot, reviewID string, timeout, interval time.Durat
 		time.Sleep(interval)
 	}
 }
+
+// TouchOwnedReviewActivity writes state ("turn" or "idle") into the activity
+// file of every review the host session owns, live or not. Hooks call it on
+// each prompt and tool call, so it reads only owner records: no daemon or
+// feedback lookups.
+func TouchOwnedReviewActivity(stateRoot, hostKind, hostSessionID, state string) {
+	if hostKind == "" || hostSessionID == "" {
+		return
+	}
+	entries, err := os.ReadDir(filepath.Join(stateRoot, "owners"))
+	if err != nil {
+		return
+	}
+	identity := feedback.IdentityForSeed(hostKind + ":" + hostSessionID)
+	for _, entry := range entries {
+		reviewID, isRecord := strings.CutSuffix(entry.Name(), ".json")
+		if !isRecord {
+			continue
+		}
+		reviewDir := filepath.Join(stateRoot, "reviews", reviewID)
+		if _, err := os.Stat(reviewDir); err != nil {
+			continue
+		}
+		if _, err := feedback.LoadOwner(stateRoot, reviewID, identity); err != nil {
+			continue
+		}
+		_ = os.WriteFile(filepath.Join(reviewDir, "activity"), []byte(state+"\n"), 0o600)
+	}
+}

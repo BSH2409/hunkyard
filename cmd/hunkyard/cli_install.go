@@ -7,6 +7,7 @@ import (
 	"github.com/BSH2409/hunkyard/internal/localonly"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
@@ -163,12 +164,12 @@ type integration struct {
 
 var integrationMap = map[string][]integration{
 	"preferences": {
-		{source: "integrations/preferences/SKILL.md", dest: ".agents/skills/learn-preferences/SKILL.md", hint: "The Go-backed learn-preferences skill is available in Codex and Claude"},
-		{source: "integrations/preferences/references/local-maintenance.md", dest: ".agents/skills/learn-preferences/references/local-maintenance.md"},
-		{source: "integrations/preferences/schemas/maintenance-proposal.json", dest: ".agents/skills/learn-preferences/schemas/maintenance-proposal.json"},
-		{source: "integrations/preferences/SKILL.md", dest: ".claude/skills/learn-preferences/SKILL.md"},
-		{source: "integrations/preferences/references/local-maintenance.md", dest: ".claude/skills/learn-preferences/references/local-maintenance.md"},
-		{source: "integrations/preferences/schemas/maintenance-proposal.json", dest: ".claude/skills/learn-preferences/schemas/maintenance-proposal.json"},
+		{source: "integrations/preferences/SKILL.md", dest: ".agents/skills/hunkyard-preferences/SKILL.md", hint: "The hunkyard-preferences skill is available in Codex and Claude"},
+		{source: "integrations/preferences/references/local-maintenance.md", dest: ".agents/skills/hunkyard-preferences/references/local-maintenance.md"},
+		{source: "integrations/preferences/schemas/maintenance-proposal.json", dest: ".agents/skills/hunkyard-preferences/schemas/maintenance-proposal.json"},
+		{source: "integrations/preferences/SKILL.md", dest: ".claude/skills/hunkyard-preferences/SKILL.md"},
+		{source: "integrations/preferences/references/local-maintenance.md", dest: ".claude/skills/hunkyard-preferences/references/local-maintenance.md"},
+		{source: "integrations/preferences/schemas/maintenance-proposal.json", dest: ".claude/skills/hunkyard-preferences/schemas/maintenance-proposal.json"},
 	},
 	"claude-code": {
 		{source: "integrations/claude-code/skills/hunkyard/SKILL.md", dest: ".claude/skills/hunkyard/SKILL.md", hint: "Run /hunkyard in Claude Code to start a review loop"},
@@ -189,9 +190,9 @@ var integrationMap = map[string][]integration{
 		{source: "integrations/codex/plugin/hunkyard/skills/hunkyard-story/SKILL.md", dest: "plugins/hunkyard/skills/hunkyard-story/SKILL.md", globalDest: ".codex/plugins/hunkyard/skills/hunkyard-story/SKILL.md", globalDestKind: globalDestRelHome, hint: "The plugin-packaged hunkyard-story skill is available to Codex as $hunkyard-story"},
 		{source: "integrations/codex/plugin/hunkyard/hooks/hooks.json", dest: "plugins/hunkyard/hooks/hooks.json", globalDest: ".codex/plugins/hunkyard/hooks/hooks.json", globalDestKind: globalDestRelHome, hint: "The Hunkyard plugin uses explicit review commands; automatic plan hooks are disabled"},
 		{source: "integrations/codex/plugin/hunkyard/skills/hunkyard/references/review-workflow.md", dest: "plugins/hunkyard/skills/hunkyard/references/review-workflow.md", globalDest: ".codex/plugins/hunkyard/skills/hunkyard/references/review-workflow.md", globalDestKind: globalDestRelHome},
-		{source: "integrations/codex/plugin/hunkyard/skills/learn-preferences/SKILL.md", dest: "plugins/hunkyard/skills/learn-preferences/SKILL.md", globalDest: ".codex/plugins/hunkyard/skills/learn-preferences/SKILL.md", globalDestKind: globalDestRelHome},
-		{source: "integrations/codex/plugin/hunkyard/skills/learn-preferences/references/local-maintenance.md", dest: "plugins/hunkyard/skills/learn-preferences/references/local-maintenance.md", globalDest: ".codex/plugins/hunkyard/skills/learn-preferences/references/local-maintenance.md", globalDestKind: globalDestRelHome},
-		{source: "integrations/codex/plugin/hunkyard/skills/learn-preferences/schemas/maintenance-proposal.json", dest: "plugins/hunkyard/skills/learn-preferences/schemas/maintenance-proposal.json", globalDest: ".codex/plugins/hunkyard/skills/learn-preferences/schemas/maintenance-proposal.json", globalDestKind: globalDestRelHome},
+		{source: "integrations/codex/plugin/hunkyard/skills/hunkyard-preferences/SKILL.md", dest: "plugins/hunkyard/skills/hunkyard-preferences/SKILL.md", globalDest: ".codex/plugins/hunkyard/skills/hunkyard-preferences/SKILL.md", globalDestKind: globalDestRelHome},
+		{source: "integrations/codex/plugin/hunkyard/skills/hunkyard-preferences/references/local-maintenance.md", dest: "plugins/hunkyard/skills/hunkyard-preferences/references/local-maintenance.md", globalDest: ".codex/plugins/hunkyard/skills/hunkyard-preferences/references/local-maintenance.md", globalDestKind: globalDestRelHome},
+		{source: "integrations/codex/plugin/hunkyard/skills/hunkyard-preferences/schemas/maintenance-proposal.json", dest: "plugins/hunkyard/skills/hunkyard-preferences/schemas/maintenance-proposal.json", globalDest: ".codex/plugins/hunkyard/skills/hunkyard-preferences/schemas/maintenance-proposal.json", globalDestKind: globalDestRelHome},
 	},
 }
 
@@ -202,17 +203,38 @@ type legacyIntegrationFile struct {
 	dest           string
 	globalDest     string
 	globalDestKind globalDestKind
-	hash           string
+	hashes         []string // every released version of the file
+}
+
+// learnPreferencesSkill lists the files of the skill v1.0.1 and v1.0.2
+// installed as learn-preferences, now hunkyard-preferences.
+func learnPreferencesSkill(base string, kind globalDestKind) []legacyIntegrationFile {
+	files := []struct {
+		name   string
+		hashes []string
+	}{
+		{"SKILL.md", []string{"681cd868623a068cdf776ea6327d4e87222ed790d8c7819789e802334adba6bf", "a2189c112d8d4d66aff3ae9bbac615e389b647d94b3ddea1f5ecc4ac3b71f717"}},
+		{"references/local-maintenance.md", []string{"0967e0f7cb0e95092958994b1964094b25ed43c9ba1f4a48dde7824bac1ed5ec", "a4c55dc94c1b1e0132fb96c638c05282980c28ea6b176133fa9917c27dfb24bf"}},
+		{"schemas/maintenance-proposal.json", []string{"0132f0cbf020a4cf0fc7919b594a9d0b04d4e23ed89dd7bdc63774bbf559b8a1"}},
+	}
+	legacy := make([]legacyIntegrationFile, 0, len(files))
+	for _, f := range files {
+		dest := base + "/learn-preferences/" + f.name
+		legacy = append(legacy, legacyIntegrationFile{dest: dest, globalDest: dest, globalDestKind: kind, hashes: f.hashes})
+	}
+	return legacy
 }
 
 var legacyIntegrationFiles = map[string][]legacyIntegrationFile{
+	// .agents first: a .claude skill folder may be a symlink to it.
+	"preferences": append(learnPreferencesSkill(".agents/skills", globalDestRelHome), learnPreferencesSkill(".claude/skills", globalDestRelHome)...),
 	"codex": {
 		{
 			// Hard allow_implicit_invocation:false gate — replaced by skill wording.
 			dest:           ".agents/skills/hunkyard/agents/openai.yaml",
 			globalDest:     ".agents/skills/hunkyard/agents/openai.yaml",
 			globalDestKind: globalDestRelHome,
-			hash:           "a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94",
+			hashes:         []string{"a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94"},
 		},
 	},
 	"codex-plugin": {
@@ -220,16 +242,24 @@ var legacyIntegrationFiles = map[string][]legacyIntegrationFile{
 			dest:           "plugins/hunkyard/skills/hunkyard/agents/openai.yaml",
 			globalDest:     ".codex/plugins/hunkyard/skills/hunkyard/agents/openai.yaml",
 			globalDestKind: globalDestRelHome,
-			hash:           "a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94",
+			hashes:         []string{"a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94"},
 		},
 		{
 			// Loose skills installed alongside the plugin (project and ~/.agents).
 			dest:           ".agents/skills/hunkyard/agents/openai.yaml",
 			globalDest:     ".agents/skills/hunkyard/agents/openai.yaml",
 			globalDestKind: globalDestRelHome,
-			hash:           "a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94",
+			hashes:         []string{"a1499d95abd8447558c535fe5554adcc3c9b988a0a39264a6283d430effe1e94"},
 		},
 	},
+}
+
+func init() {
+	plugin := learnPreferencesSkill("plugins/hunkyard/skills", globalDestRelHome)
+	for i := range plugin {
+		plugin[i].globalDest = ".codex/" + plugin[i].dest
+	}
+	legacyIntegrationFiles["codex-plugin"] = append(legacyIntegrationFiles["codex-plugin"], plugin...)
 }
 
 // availableIntegrations returns the sorted list of integration names that
@@ -327,37 +357,86 @@ func installIntegration(name string, force bool) error {
 }
 
 func cleanupLegacyIntegrationFiles(name string, global bool, home string) {
+	var touched []string
 	for _, legacy := range legacyIntegrationFiles[name] {
-		dest := legacy.dest
-		if global {
-			if legacy.globalDest == "" {
-				continue
-			}
-			var err error
-			dest, err = resolveGlobalDest(legacy.globalDestKind, legacy.globalDest, home)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "Warning: could not resolve obsolete %s integration path: %v\n", name, err)
-				continue
+		for _, dest := range legacyDests(legacy, global, home, name) {
+			if removeLegacyFile(dest, legacy.hashes) {
+				touched = append(touched, dest)
 			}
 		}
+	}
+	for _, dest := range touched {
+		pruneLegacySkillDir(dest)
+	}
+}
 
-		data, err := os.ReadFile(dest)
-		if errors.Is(err, os.ErrNotExist) {
-			continue
+// legacyDests resolves where an obsolete file may live. A global .claude
+// path is checked in both CLAUDE_CONFIG_DIR and ~/.claude.
+func legacyDests(legacy legacyIntegrationFile, global bool, home, name string) []string {
+	if !global {
+		return []string{legacy.dest}
+	}
+	if legacy.globalDest == "" {
+		return nil
+	}
+	var dests []string
+	if dest, ok := claudeConfigDirPath(legacy.globalDest); ok {
+		dests = append(dests, dest)
+	}
+	dest, err := resolveGlobalDest(legacy.globalDestKind, legacy.globalDest, home)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not resolve obsolete %s integration path: %v\n", name, err)
+		return dests
+	}
+	if !slices.Contains(dests, dest) {
+		dests = append(dests, dest)
+	}
+	return dests
+}
+
+// removeLegacyFile removes dest when it holds a known Hunkyard version and
+// reports whether its skill folder may now need pruning. It never deletes
+// through a symlinked skill folder: that copy belongs to its target.
+func removeLegacyFile(dest string, hashes []string) bool {
+	if symlinkedSkillDir(dest) != "" {
+		return true
+	}
+	data, err := os.ReadFile(dest)
+	if errors.Is(err, os.ErrNotExist) {
+		return false
+	}
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not inspect obsolete Hunkyard integration %s: %v\n", dest, err)
+		return false
+	}
+	if !slices.Contains(hashes, computeFileHash(data)) {
+		fmt.Fprintf(os.Stderr, "Warning: preserving modified obsolete Hunkyard integration %s; remove it manually to prevent automatic invocation\n", dest)
+		return false
+	}
+	if err := os.Remove(dest); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: could not remove obsolete Hunkyard integration %s: %v\n", dest, err)
+		return false
+	}
+	fmt.Printf("  Removed:   %s (obsolete integration)\n", dest)
+	return true
+}
+
+// pruneLegacySkillDir removes the folders a legacy removal emptied, up to the
+// skill folder under "skills", and a skill symlink whose target is gone.
+func pruneLegacySkillDir(dest string) {
+	if link := symlinkedSkillDir(dest); link != "" {
+		if _, err := os.Stat(link); errors.Is(err, os.ErrNotExist) {
+			_ = os.Remove(link)
 		}
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not inspect obsolete Hunkyard integration %s: %v\n", dest, err)
-			continue
+		return
+	}
+	for dir := filepath.Dir(dest); dir != filepath.Dir(dir); dir = filepath.Dir(dir) {
+		if filepath.Base(dir) == "skills" || os.Remove(dir) != nil { // Remove fails on a non-empty folder
+			return
 		}
-		if computeFileHash(data) != legacy.hash {
-			fmt.Fprintf(os.Stderr, "Warning: preserving modified obsolete Hunkyard integration %s; remove it manually to prevent automatic invocation\n", dest)
-			continue
+		if filepath.Base(filepath.Dir(dir)) == "skills" {
+			return
 		}
-		if err := os.Remove(dest); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: could not remove obsolete Hunkyard integration %s: %v\n", dest, err)
-			continue
-		}
-		fmt.Printf("  Removed:   %s (obsolete auto-invoked integration)\n", dest)
 	}
 }
 

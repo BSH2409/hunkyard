@@ -19,7 +19,7 @@ if [ -z "${HUNKYARD_BIN:-}" ]; then
 fi
 
 # Isolate from the user's config and preference store; the fake home also
-# sets LEARN_PREFERENCES_HOME, so the Yard reads only this seeded store.
+# sets HUNKYARD_PREFERENCES_HOME, so the Yard reads only this seeded store.
 e2e_export_fake_home "$DIR"
 
 echo "we dont use single line method definitions" | "$HUNKYARD_BIN" preferences capture --explicit \

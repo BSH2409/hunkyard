@@ -2,6 +2,8 @@ package preferences
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/BSH2409/hunkyard/internal/config"
@@ -18,6 +20,12 @@ func (s *Store) doctor() map[string]any {
 		add("store", "ok", "audit passed")
 	} else {
 		add("store", "fail", "audit errors: "+strings.Join(audit.Errors, ", "))
+	}
+	// Open moves the old folder, so one beside the store was written after
+	// the move — by an older Hunkyard still running — and is invisible here.
+	legacy := filepath.Join(s.config.Root, legacyStoreDirName)
+	if _, err := os.Lstat(legacy); err == nil {
+		add("legacy_store", "warn", fmt.Sprintf("%s was written after the store moved to %s (an older Hunkyard still running?); stop old daemons, copy anything you need, then remove it", legacy, s.dataPath()))
 	}
 	for _, host := range []string{"claude", "codex"} {
 		missing := s.missingHookEvents(host)

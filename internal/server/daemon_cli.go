@@ -24,6 +24,8 @@ var PrintVersionFn func()
 type DaemonCLIConfig struct {
 	Port                        int
 	Host                        string
+	PortExplicit                bool // --port flag or HUNKYARD_PORT
+	HostExplicit                bool // --host flag or HUNKYARD_HOST
 	PublicURL                   string
 	AllowUnauthenticatedNetwork bool
 	NoOpen                      bool
@@ -55,6 +57,7 @@ type DaemonCLIConfig struct {
 
 type daemonFlagSet struct {
 	portSet                     bool
+	hostSet                     bool
 	port                        int
 	host                        string
 	publicURL                   string
@@ -131,15 +134,19 @@ func parseDaemonFlags(args []string) daemonFlagSet {
 		"json":                                 true,
 	})
 	fs.Parse(args)
-	portSet := false
+	portSet, hostSet := false, false
 	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "port" || f.Name == "p" {
+		switch f.Name {
+		case "port", "p":
 			portSet = true
+		case "host":
+			hostSet = true
 		}
 	})
 
 	return daemonFlagSet{
 		portSet:                     portSet,
+		hostSet:                     hostSet,
 		port:                        *port,
 		host:                        *host,
 		publicURL:                   *publicURL,
@@ -267,6 +274,8 @@ func ResolveDaemonCLIConfig(args []string) (*DaemonCLIConfig, error) { //nolint:
 	return &DaemonCLIConfig{
 		Port:                        sf.port,
 		Host:                        sf.host,
+		PortExplicit:                sf.portSet || os.Getenv("HUNKYARD_PORT") != "",
+		HostExplicit:                sf.hostSet || os.Getenv("HUNKYARD_HOST") != "",
 		PublicURL:                   sf.publicURL,
 		AllowUnauthenticatedNetwork: allowUnauthNet && config.NeedsUnauthenticatedNetworkAck(sf.host, sf.publicURL),
 		NoOpen:                      sf.noOpen,

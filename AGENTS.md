@@ -104,13 +104,14 @@ Two-level JSON config files, merged (project overrides global):
 - **Global**: `~/.hunkyard.config.json` — user-wide defaults
 - **Project**: `.hunkyard.config.json` in repo root — per-project overrides
 
-Config keys: `port`, `host`, `no_open`, `quiet`, `output`, `author`, `base_branch`, `ignore_patterns`, `auto_viewed_patterns`, `default_markdown_view`, `agent_cmd`, `plan_approve_mode`, `cleanup_on_approve`, `notify_on_round_ready`, `disable_stats`, `no_integration_check`, `vcs`, `live_cookie`, `live_cookie_file`, `live_cdp_url`, `close_on_approve_after_ms`, `stale_review_days`.
+Config keys: `port`, `host`, `no_open`, `quiet`, `output`, `author`, `base_branch`, `ignore_patterns`, `auto_viewed_patterns`, `default_markdown_view`, `agent_cmd`, `plan_approve_mode`, `cleanup_on_approve`, `notify_on_round_ready`, `disable_stats`, `no_integration_check`, `vcs`, `live_cookie`, `live_cookie_file`, `live_cdp_url`, `close_on_approve_after_ms`, `stale_review_days`, `idle_pause_minutes`.
 
 - `base_branch` overrides auto-detected default branch (used as diff base in git mode, and by `hunkyard pull`/`hunkyard push`/`hunkyard comment`)
 - `author` falls back to the configured VCS user name if not set
-- `agent_cmd`, `plan_approve_mode`, `close_on_approve_after_ms`, and `stale_review_days` are **global config only**; project-level config cannot override (security — prevents malicious repos from hijacking the agent command, weakening Claude Code permissions, or forcing a reviewer's tab to auto-close, or shortening review retention for every project)
+- `agent_cmd`, `plan_approve_mode`, `close_on_approve_after_ms`, `stale_review_days`, and `idle_pause_minutes` are **global config only**; project-level config cannot override (security — prevents malicious repos from hijacking the agent command, weakening Claude Code permissions, or forcing a reviewer's tab to auto-close, or shortening review retention for every project)
 - `close_on_approve_after_ms` (default: unset/disabled) — auto-close the review tab N ms after Approve with no unresolved comments; negative values are treated as unset. Not included in `hunkyard config --generate` scaffolding.
 - `cleanup_on_approve` (default: `true`) — auto-delete review file when reviewer approves with no unresolved comments
+- `idle_pause_minutes` (default: `30`) — minutes without review activity before the daemon pauses and frees its port; `0` disables pausing. `HUNKYARD_IDLE_PAUSE_MINUTES` overrides it. Not included in `hunkyard config --generate` scaffolding.
 - `stale_review_days` (default: `14`) — age in days after which the background sweep started by `hunkyard review` / `hunkyard plan` deletes an untouched review; unset or non-positive values use the default. Not included in `hunkyard config --generate` scaffolding.
 - `notify_on_round_ready` (default: `false`) — opt in to a desktop notification when a review round becomes ready for the human. On macOS, install `terminal-notifier` so the notification's click action opens the review URL; without it, clicking falls back to AppleScript `display notification`, which macOS attributes to Script Editor instead of the browser
 - `no_update_check` is still accepted for older configs but has no effect: Hunkyard never checks for updates
@@ -153,7 +154,7 @@ make e2e-report                                       # View HTML report with sc
 
 ### Projects
 
-Nine Playwright projects. Test naming convention determines which project runs which file:
+Ten Playwright projects. Test naming convention determines which project runs which file:
 
 | Project | Port | Fixture | Test glob |
 | --- | --- | --- | --- |
@@ -166,10 +167,11 @@ Nine Playwright projects. Test naming convention determines which project runs w
 | `live-mode` | 3129 | `setup-fixtures-livemode.sh` (Go upstream + hunkyard live) | `*.livemode.spec.ts` |
 | `perf` | 3134 | `setup-fixtures-perf.sh` (300 files + large markdown) | `*.perf.spec.ts` |
 | `huge` | 3136 | `setup-fixtures-huge.sh` (~2,500 files; document taller than 2^22px) | `*.huge.spec.ts` |
+| `bigtree` | 3138 | `setup-fixtures-bigtree.sh` (5,000 tracked, 300 untracked and 30,000 ignored files; 200 remote refs; served with code paths `src newpkg`) | `*.bigtree.spec.ts` |
 
 The `mobile` project shares a git-mode fixture. `run.sh` runs git-mode as two shards on two fixtures (3123, 3131) and starts mobile on the 3131 fixture only after git shard 2/2 finishes, so the two never race on shared comment state (both `DELETE /api/comments` in `beforeEach`).
 
-`run.sh` starts each project as soon as its own fixture answers `/api/session` (it fails fast if a fixture exits or isn't ready within `E2E_READY_TIMEOUT`, default 300s). Fixture scripts must use the `lib.sh` lifecycle helpers — `e2e_cleanup_install`, `e2e_cleanup_add <tmp dirs>`, `e2e_spawn` for helper servers, `e2e_serve "$HUNKYARD_BIN" _serve …` instead of `exec` — so a SIGTERM from `run.sh`/Playwright stops hunkyard and deletes the temp dirs. `e2e_export_fake_home` also sets `HUNKYARD_NO_INTEGRATION_CHECK=1` and `HUNKYARD_NO_UPDATE_CHECK=1`. Each `run.sh` project writes its screenshots and traces to `test-results/<name>/` (`git-1`, `mobile`, …), and `run.sh` merges their `.last-run.json` files so `make e2e-failed` reruns every failure. Generate fixture files with shell builtins or one `awk`, never a process per file (Git Bash on Windows makes each spawn ~20-50x slower). `perf` and `huge` fail on CI when a test only passes on retry (`failOnFlakyTests`).
+`run.sh` starts each project as soon as its own fixture answers `/api/session` (it fails fast if a fixture exits or isn't ready within `E2E_READY_TIMEOUT`, default 300s). Fixture scripts must use the `lib.sh` lifecycle helpers — `e2e_cleanup_install`, `e2e_cleanup_add <tmp dirs>`, `e2e_spawn` for helper servers, `e2e_serve "$HUNKYARD_BIN" _serve …` instead of `exec` — so a SIGTERM from `run.sh`/Playwright stops hunkyard and deletes the temp dirs. `e2e_export_fake_home` also sets `HUNKYARD_NO_INTEGRATION_CHECK=1` and `HUNKYARD_NO_UPDATE_CHECK=1`. Each `run.sh` project writes its screenshots and traces to `test-results/<name>/` (`git-1`, `mobile`, …), and `run.sh` merges their `.last-run.json` files so `make e2e-failed` reruns every failure. Generate fixture files with shell builtins or one `awk`, never a process per file (Git Bash on Windows makes each spawn ~20-50x slower). `perf` and `huge` fail on CI when a test only passes on retry (`failOnFlakyTests`). `auto-pause.spec.ts` (git-mode project) starts its own daemon with a 3-second idle time (`HUNKYARD_TEST_MODE=1` + `HUNKYARD_IDLE_PAUSE_SECONDS`), so the shared fixtures never pause.
 
 CI runs E2E on PRs via `.github/workflows/test.yml`; a separate `coverage.yml` uploads unit coverage on push to `main`. Failed test artifacts are uploaded.
 
@@ -208,9 +210,11 @@ Session-scoped:
 - `GET  /api/config` — `{version, installation_source, ...}`
 - `GET  /api/review-cycle` — review-cycle metadata (round number, edits-since-last)
 - `POST /api/finish` — write review file, return prompt for agent
-- `GET  /api/events` — SSE stream (file-changed, edit-detected, server-shutdown)
+- `GET  /api/events` — SSE stream (file-changed, edit-detected, review-stale, paused, server-shutdown)
 - `GET  /api/wait-for-event` — long-poll until finish (used by `hunkyard` daemon mode)
 - `POST /api/round-complete` — agent signals all edits done; triggers new round
+- `POST /api/activity` — the page reports reviewer activity (throttled), which postpones the idle pause
+- `POST /api/refresh` — reload the working tree against the current base after `review-stale` (the Refresh banner)
 - `…/api/focus` — set/clear focus (file or range scope)
 - `…/api/picker` — file-picker UI backend
 - `POST /api/agent/request` — send comment to configured `agent_cmd`
@@ -314,7 +318,7 @@ When the agent runs `hunkyard` again (or calls `POST /api/round-complete`):
 4. **Ctrl+C**: kills the daemon the client started
 5. **`hunkyard stop`**: stops daemon for current cwd; `hunkyard stop --all` stops every daemon. Both ask for a graceful stop via `POST /api/shutdown` first and fall back to signals
 6. **Approve**: the approving client asks for `POST /api/shutdown`, waits for the daemon to exit, and only then applies `cleanup_on_approve`, under the session lock and only if no other daemon took the key over. A stopping daemon can still write the review, so never remove it earlier
-7. **Lifetime**: daemon runs until approved or killed (Ctrl+C, `hunkyard stop`, or SIGINT/SIGTERM/SIGHUP). No idle timeout — walking away from a review session is fine.
+7. **Lifetime**: daemon runs until approved, killed (Ctrl+C, `hunkyard stop`, or SIGINT/SIGTERM/SIGHUP), or paused. After `idle_pause_minutes` (default 30) with no activity it pauses: it sends SSE `paused` to open tabs, writes `paused.json` (port, host, cwd, CLI args) in the review folder, and exits, freeing the port. Activity is any non-GET API request, `POST /api/activity` from the page, an external write to the review file, or an agent turn reported by the preference hooks; nothing pauses mid-request or mid-round, or during an agent turn. `hunkyard --session <id>` resumes on the recorded port when it is free (an explicit `--port`/`--host` or `HUNKYARD_PORT`/`HUNKYARD_HOST` wins), and the open tab reconnects by itself. `feedback await --follow` waits through a pause; a one-shot await prints `{"status":"paused"}`. `hunkyard status` and `hunkyard resume --list` show paused reviews, and `hunkyard stop` clears the marker.
 
 ### Deferred initialization & readiness
 

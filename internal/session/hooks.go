@@ -6,6 +6,8 @@ import "fmt"
 type CLIReviewConfig struct {
 	Port               int
 	Host               string
+	PortExplicit       bool // --port flag or HUNKYARD_PORT, not a config default
+	HostExplicit       bool // --host flag or HUNKYARD_HOST, not a config default
 	Files              []string
 	Focus              *Focus
 	OutputDir          string
