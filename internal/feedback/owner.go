@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strings"
 
 	"github.com/BSH2409/hunkyard/internal/strictjson"
@@ -126,7 +127,7 @@ func LoadOwner(stateRoot, reviewID string, identity Identity) (*Owner, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !info.Mode().IsRegular() || info.Size() > 16*1024 || info.Mode().Perm()&0077 != 0 {
+	if !info.Mode().IsRegular() || info.Size() > 16*1024 || !privateRecordMode(info.Mode(), runtime.GOOS) {
 		return nil, fmt.Errorf("invalid private owner record")
 	}
 	encoded, err := os.ReadFile(path)
@@ -172,4 +173,11 @@ func (o *Owner) VerifyProof(nonce, reviewID, generation, proof string) error {
 		return ErrUnauthorized
 	}
 	return nil
+}
+
+// privateRecordMode reports whether a credential file is private to its
+// owner. Windows reports 0666 for every file and protects the user profile
+// with ACLs instead, so permission bits are only checked elsewhere.
+func privateRecordMode(mode os.FileMode, goos string) bool {
+	return goos == "windows" || mode.Perm()&0o077 == 0
 }

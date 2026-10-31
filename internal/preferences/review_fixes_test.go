@@ -153,3 +153,19 @@ func TestGuardOnlyAppliesInItsRulesRepository(t *testing.T) {
 		t.Fatal("another repository's rule blocked this commit")
 	}
 }
+
+func TestStopChecksNewUntrackedFiles(t *testing.T) {
+	s, repo := stopRepo(t)
+	payload, _ := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "session_id": "s1", "cwd": repo, "prompt": "add the new service file please"})
+	s.hook("UserPromptSubmit", bytes.NewReader(payload), &bytes.Buffer{}, &bytes.Buffer{})
+	if err := os.MkdirAll(filepath.Join(repo, "lib"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "lib", "service.rb"), []byte("class Service\n  def call; run; end\nend\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	response := stopResponse(t, s, repo, false)
+	if response["decision"] != "block" || !strings.Contains(textField(response["reason"]), "lib/service.rb:2") {
+		t.Fatalf("new untracked file not checked: %v", response["reason"])
+	}
+}

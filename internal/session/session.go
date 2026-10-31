@@ -914,11 +914,24 @@ func canonicalAbsPath(p string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	resolved, err := filepath.EvalSymlinks(abs)
-	if err != nil {
-		return abs, nil //nolint:nilerr // best-effort: path may not exist yet
+	if resolved, err := filepath.EvalSymlinks(abs); err == nil {
+		return resolved, nil
 	}
-	return resolved, nil
+	// A missing path (a deleted file) resolves through its deepest existing
+	// ancestor, so it canonicalizes like the repository root does: through
+	// symlinks and, on Windows, 8.3 short names.
+	dir, rest := abs, ""
+	for {
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return abs, nil
+		}
+		rest = filepath.Join(filepath.Base(dir), rest)
+		dir = parent
+		if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+			return filepath.Join(resolved, rest), nil
+		}
+	}
 }
 
 // canonicalRepoRoot evaluates symlinks on a VCS repo root so it matches

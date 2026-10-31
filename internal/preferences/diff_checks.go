@@ -2,6 +2,7 @@ package preferences
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -72,7 +73,20 @@ func gitOutput(dir string, args ...string) string {
 // workingDiffDigest fingerprints uncommitted changes so a turn that changed
 // nothing, or that was already reviewed, is not reviewed again.
 func workingDiffDigest(dir string) string {
-	return digest(gitOutput(dir, "diff", "HEAD"))
+	var state strings.Builder
+	state.WriteString(gitOutput(dir, "diff", "HEAD"))
+	for _, name := range untrackedFiles(dir) {
+		if info, err := os.Stat(filepath.Join(dir, name)); err == nil {
+			fmt.Fprintf(&state, "\x00%s %d %d", name, info.Size(), info.ModTime().UnixNano())
+		}
+	}
+	return digest(state.String())
+}
+
+const untrackedFileLimit = 256 * 1024
+
+func untrackedFiles(dir string) []string {
+	return strings.Split(strings.TrimSpace(gitOutput(dir, "ls-files", "--others", "--exclude-standard", "-z")), "\x00")
 }
 
 type addedLine struct {
@@ -105,6 +119,21 @@ func addedLines(dir string) []addedLine {
 		case strings.HasPrefix(line, "+"):
 			lines = append(lines, addedLine{path: path, number: number, text: line[1:]})
 			number++
+		}
+	}
+	// New files the agent has not staged are not in `git diff HEAD`; every
+	// line of a small untracked text file counts as added.
+	for _, name := range untrackedFiles(dir) {
+		info, err := os.Stat(filepath.Join(dir, name))
+		if name == "" || err != nil || !info.Mode().IsRegular() || info.Size() > untrackedFileLimit {
+			continue
+		}
+		data, err := os.ReadFile(filepath.Join(dir, name))
+		if err != nil || bytes.IndexByte(data, 0) >= 0 {
+			continue
+		}
+		for i, text := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
+			lines = append(lines, addedLine{path: filepath.ToSlash(name), number: i + 1, text: text})
 		}
 	}
 	return lines
