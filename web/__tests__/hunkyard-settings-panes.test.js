@@ -612,3 +612,12 @@ test('shortcuts group into General and Review sections', () => {
   assert.ok(html.indexOf('>Comments<') > review);
   assert.ok(html.indexOf('>View<') > general && html.indexOf('>View<') < review, 'View stays under General');
 });
+
+test('renderUpdatesPane: an unrecognised install points at the release page and a rebuild', () => {
+  const sp = loadShared();
+  const pane = makePane();
+  sp.renderUpdatesPane(pane, { version: '1.0.2', installation_source: 'unknown' }, {});
+  assert.match(pane.innerHTML, /release page/);
+  assert.match(pane.innerHTML, /go build -o &quot;\$\(command -v hunkyard\)&quot; \.\/cmd\/hunkyard|go build -o "\$\(command -v hunkyard\)" \.\/cmd\/hunkyard/);
+  assert.doesNotMatch(pane.innerHTML, /from the release notes/);
+});

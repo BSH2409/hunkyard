@@ -399,7 +399,9 @@
     if (source === 'nix') {
       return '<div class="updates-row-note">Update the Nix profile or flake that provides Hunkyard.</div>';
     }
-    return '<div class="updates-row-note">Download the latest binary for your platform from the release notes.</div>';
+    // A binary built from a checkout (the README's install) or downloaded by hand.
+    return '<div class="updates-row-note">Download your platform\'s binary from the release page, or pull your checkout and rebuild:</div>'
+      + updateCommandHTML('go build -o "$(command -v hunkyard)" ./cmd/hunkyard', '');
   }
 
   function renderUpdatesPane(pane, cfg, hooks) {
