@@ -1189,8 +1189,12 @@ func (s *Session) carryForwardFileComments(f *FileEntry) {
 		prevIDs[c.ID] = struct{}{}
 	}
 	preserved := make([]Comment, 0, len(f.Comments))
+	// The snapshot is taken at the round's first edit; replies and
+	// resolutions posted after it live on the current copy of the comment.
+	latest := map[string]Comment{}
 	for _, c := range f.Comments {
 		if _, isPrev := prevIDs[c.ID]; isPrev {
+			latest[c.ID] = c
 			continue
 		}
 		preserved = append(preserved, c)
@@ -1198,6 +1202,9 @@ func (s *Session) carryForwardFileComments(f *FileEntry) {
 	f.Comments = preserved
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, c := range prevComments {
+		if current, ok := latest[c.ID]; ok {
+			c.Replies, c.Resolved, c.ResolvedRound = current.Replies, current.Resolved, current.ResolvedRound
+		}
 		// Live pins use DOMAnchor for positioning; skip line remapping.
 		if c.DOMAnchor != nil {
 			carried := carryForwardComment(c, now)

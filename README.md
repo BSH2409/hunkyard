@@ -116,7 +116,7 @@ hunkyard preferences doctor --json          # hooks, trust, store, maintenance a
 
 ### Preference Yard
 
-`hunkyard yard` opens the Preference Yard on `127.0.0.1` (`--port`, `--host`, `--no-open`). It is also the **Yard** tab in a review's Settings. It shows:
+`hunkyard yard` opens the Preference Yard on `127.0.0.1`, or on `--host`, `HUNKYARD_HOST` or the global config `host` when set (also `--port`, `--no-open`); it warns when that address is not loopback. It is also the **Yard** tab in a review's Settings. It shows:
 
 - **Rules** with evidence and violation counts. You can retire a rule, promote a repository rule to global, or add a rule.
 - **Pipeline**: captured observations waiting for maintenance.

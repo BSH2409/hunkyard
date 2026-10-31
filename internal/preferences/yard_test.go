@@ -83,3 +83,15 @@ func TestYardPromoteAndRetire(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestYardPromoteRejectsGlobalRule(t *testing.T) {
+	s := testStore(t)
+	captureRule(t, s, "Prefer CSS variables for colours.", "frontend")
+	if err := s.YardPromote(ruleIDFor(t, s, "CSS variables")); err == nil {
+		t.Fatal("promoting a global rule should fail")
+	}
+	rules, _ := s.YardRules()
+	if len(rules) != 1 {
+		t.Fatalf("promotion duplicated the rule: %d rules", len(rules))
+	}
+}

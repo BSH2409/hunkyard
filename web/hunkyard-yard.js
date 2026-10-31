@@ -253,6 +253,10 @@
         .then(function () { return show(state.view); })
         .catch(function (err) { body.insertAdjacentHTML('afterbegin', empty('Could not add the rule: ' + err.message)); });
     });
+    // The tab badge counts failing checks, so load Health once up front.
+    if (opts.onAttention && state.view !== 'health') {
+      fetchJSON('/api/yard/health').then(function (h) { opts.onAttention(attentionCount(h)); }).catch(function () {});
+    }
     return show(state.view);
   }
 

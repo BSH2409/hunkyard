@@ -57,3 +57,14 @@ func TestAgentReplyWithoutFixClaimIsNotFlagged(t *testing.T) {
 		})
 	}
 }
+
+func TestClaimSeesRepliesPostedAfterTheRoundSnapshot(t *testing.T) {
+	s, f := claimFixture("a\ndef x; 1; end\nc\n", nil)
+	current := f.PreviousComments[0]
+	current.Replies = []Reply{{ID: "r1", AuthorKind: "agent", Body: "Fixed.", ReviewRound: 1}}
+	f.Comments = []Comment{current}
+	s.carryForwardFileComments(f)
+	if len(f.Comments) != 1 || f.Comments[0].ClaimUnchangedRound != 1 || len(f.Comments[0].Replies) != 1 {
+		t.Fatalf("reply after the snapshot lost: %+v", f.Comments)
+	}
+}

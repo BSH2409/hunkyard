@@ -59,7 +59,9 @@ func editRuns(path, before, after string) []ReviewerEdit {
 			run = nil
 		}
 	}
-	for _, e := range diff.ComputeLineDiff(strings.TrimSuffix(before, "\n"), strings.TrimSuffix(after, "\n")) {
+	// Line-ending conversions by an editor are not edits.
+	normalize := func(text string) string { return strings.TrimSuffix(strings.ReplaceAll(text, "\r\n", "\n"), "\n") }
+	for _, e := range diff.ComputeLineDiff(normalize(before), normalize(after)) {
 		if e.Type == "unchanged" {
 			flush()
 			lastOld = e.OldLine

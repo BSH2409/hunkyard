@@ -85,3 +85,16 @@ test('re-rendering into the same pane does not stack listeners', async () => {
   assert.equal(roots.length, 2);
   assert.ok(roots[1].listeners > 0);
 });
+
+test('the attention badge is set without visiting Health', async () => {
+  let attention = null;
+  const container = {
+    querySelectorAll() { return []; },
+    querySelector() { return { innerHTML: '', addEventListener() {} }; },
+    set innerHTML(_html) {},
+  };
+  const fetchJSON = (url) => Promise.resolve(url === '/api/yard/health' ? { checks: [{ status: 'fail', name: 'x', detail: '' }] } : []);
+  await yard.render(container, { fetchJSON, onAttention: (n) => { attention = n; } });
+  await new Promise((r) => setImmediate(r));
+  assert.equal(attention, 1);
+});

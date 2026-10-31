@@ -10,9 +10,10 @@ import (
 )
 
 // handleYard serves the Preference Yard API. It needs no review session, so
-// it works inside a review and under `hunkyard yard`. Changes require a
-// same-origin browser request, so a CLI client cannot retire rules or create
-// them behind the user's back.
+// it works inside a review and under `hunkyard yard`. Changes require
+// Sec-Fetch-Site: same-origin, which stops a page on another site from
+// changing rules through the reviewer's browser. It does not authenticate:
+// any local client can send that header.
 //
 //nolint:gocyclo // One case per Yard endpoint keeps the small API in one place.
 func (s *Server) handleYard(w http.ResponseWriter, r *http.Request) {

@@ -132,6 +132,9 @@ func (s *Store) YardPromote(id string) error {
 	}
 	for _, r := range current.Rules.rules {
 		if r["id"] == id {
+			if record(r["scope"])["kind"] == "global" {
+				return fmt.Errorf("rule is already global")
+			}
 			_, err := s.YardCreateRule(textField(r["directive"]), "global", "", stringValues(r["surfaces"]), "Promoted to global in the Preference Yard")
 			return err
 		}

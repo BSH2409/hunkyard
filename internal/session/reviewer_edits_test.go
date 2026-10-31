@@ -63,3 +63,9 @@ func TestReviewerEditsSkippedWhenDiskIsNotTheReviewedSource(t *testing.T) {
 		t.Fatalf("plain reviewer edit lost: %+v", edits)
 	}
 }
+
+func TestLineEndingConversionIsNotAnEdit(t *testing.T) {
+	if edits := editRuns("a.go", "one\ntwo\n", "one\r\ntwo\r\n"); len(edits) != 0 {
+		t.Fatalf("CRLF conversion reported as edits: %+v", edits)
+	}
+}
