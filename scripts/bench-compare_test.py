@@ -4,7 +4,8 @@
 The gate cannot detect its own parser regressions, so checked-in benchstat
 samples lock the parsing contract: significant time slowdowns fail, noise
 (~), geomean summaries, and high-variance time rows pass, ANY allocs
-increase on a real bench (including 0 -> N rendered as +Inf%) fails, B/op
+increase above 0.1% on a real bench (including 0 -> N rendered as +Inf%)
+fails, B/op
 only warns, and malformed input exits 2.
 
 Run: python3 scripts/bench-compare_test.py
@@ -102,6 +103,17 @@ class GateTest(unittest.TestCase):
         r = run_gate(content)
         self.assertEqual(r.returncode, 1)
         self.assertIn("allocs/op regression", r.stdout)
+
+    def test_alloc_noise_within_allowance_passes(self):
+        # Real CI failure: ~10 extra allocs on a 13k-alloc bench (+0.08%) from
+        # runtime noise, reproduced as identical counts locally.
+        content = (
+            "                               │   allocs/op   │  allocs/op   vs base                │\n"
+            "ReviewSaveLoad/50x50-4             13.24k ± 0%   13.25k ± 0%  +0.08% (p=0.004 n=6)\n"
+        )
+        r = run_gate(content)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("bench check passed", r.stdout)
 
     def test_geomean_alloc_noise_is_ignored(self):
         # Real CI failure mode: every named bench is "~" but geomean still
