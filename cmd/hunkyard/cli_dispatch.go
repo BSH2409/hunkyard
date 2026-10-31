@@ -22,7 +22,7 @@ type commandDescriptor struct {
 // commandRegistry is the single source of truth for command dispatch, help,
 // ordering, and public visibility.
 var commandRegistry = []commandDescriptor{
-	{name: "preferences", handler: func(args []string) { os.Exit(preferences.Run(args, os.Stdin, os.Stdout, os.Stderr)) }, help: "Usage: hunkyard preferences <capture|search|select|build|audit|retire|maintain|migrate|install-hook|install-cron|status|hook> [options]\n\nLocal Go preference engine. Maintenance accepts --proposal FILE; it never starts a model process."},
+	{name: "preferences", handler: func(args []string) { os.Exit(preferences.Run(args, os.Stdin, os.Stdout, os.Stderr)) }, help: "Usage: hunkyard preferences <capture|search|select|build|audit|retire|maintain|migrate|install-hook|install-cron|status|hook|guard|allow|doctor|statusline> [options]\n\nLocal Go preference engine. Maintenance accepts --proposal FILE, or --auto to use the Claude or Codex CLI set in preferences_maintenance (global config)."},
 	{name: "feedback", handler: runFeedback, help: "Usage: hunkyard feedback <await|learn|ack> --session ID [--timeout 45s] [--follow] [--batch ID] [--decisions FILE] [--json]\n\nReceive or acknowledge locally published feedback in the launching CLI session.\nFor await, --follow silently renews pending waits until feedback is published; --timeout bounds each request."},
 	{name: "install", handler: runInstall, helpFn: printInstallUsage},
 	{name: "config", handler: runConfig, bareHelp: true, helpFn: config.PrintConfigHelp},

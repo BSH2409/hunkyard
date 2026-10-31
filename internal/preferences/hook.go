@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -17,7 +18,84 @@ import (
 )
 
 //nolint:gocyclo // Transcript confinement and advisory failure handling share one bounded input boundary.
-func (s *Store) hook(input io.Reader, output, errorOutput io.Writer) {
+func (s *Store) hook(event string, input io.Reader, output, errorOutput io.Writer) {
+	switch event {
+	case "UserPromptSubmit":
+		s.promptSubmitHook(input, output, errorOutput)
+	case "SessionStart":
+		s.sessionStartHook(input, output)
+	case "PreToolUse":
+		s.preToolUseHook(input, output)
+	case "Stop":
+		s.stopHook(input, output)
+	default:
+		_ = json.NewEncoder(output).Encode(map[string]any{"continue": true})
+	}
+}
+
+func readHookPayload(input io.Reader) map[string]any {
+	data, err := io.ReadAll(io.LimitReader(input, 1024*1024+1))
+	if err != nil || len(data) > 1024*1024 {
+		return nil
+	}
+	var payload map[string]any
+	if strictjson.Decode(data, &payload) != nil {
+		return nil
+	}
+	return payload
+}
+
+func (s *Store) sessionStartHook(input io.Reader, output io.Writer) {
+	response := map[string]any{"continue": true}
+	defer func() { _ = json.NewEncoder(output).Encode(response) }()
+	payload := readHookPayload(input)
+	if payload == nil || os.Getenv("LEARN_PREFERENCES_MAINTENANCE") == "1" {
+		return
+	}
+	cwd, session := textField(payload["cwd"]), textField(payload["session_id"])
+	repo, err := repositoryKey(cwd)
+	if err != nil {
+		return
+	}
+	current, err := s.loadCurrent()
+	if err != nil {
+		return
+	}
+	var rules []rule
+	if current != nil {
+		rules = current.Rules.rules
+	}
+	s.startMaintenanceIfDue(current)
+	selection := selectCore(rules, repo)
+	text := selection.Text
+	if health := s.healthLine(current); health != "" {
+		text = strings.TrimSpace(text + "\n" + health)
+	}
+	if text == "" {
+		return
+	}
+	response["hookSpecificOutput"] = map[string]any{"hookEventName": "SessionStart", "additionalContext": text}
+	if session != "" && len(selection.RuleIDs) > 0 {
+		_ = s.updateSession(session, func(state *sessionState) {
+			state.InjectedRuleIDs = append(state.InjectedRuleIDs, selection.RuleIDs...)
+		})
+	}
+}
+
+// healthLine tells the agent when preference work needs attention.
+func (s *Store) healthLine(current *generation) string {
+	pending := s.unprocessedCount(current)
+	run := s.lastMaintenanceRun()
+	maintenance := "maintenance due"
+	if run.Outcome == "failed" {
+		maintenance = "maintenance failed (" + run.ErrorClass + ")"
+	} else if pending == 0 {
+		return ""
+	}
+	return fmt.Sprintf("Hunkyard preferences: %d observations pending; %s.", pending, maintenance)
+}
+
+func (s *Store) promptSubmitHook(input io.Reader, output, errorOutput io.Writer) {
 	response := map[string]any{"continue": true}
 	health := map[string]any{"capture_action": "not_attempted", "context_emitted": false, "payload_fields": []string{}}
 	defer func() {
@@ -82,26 +160,83 @@ func (s *Store) hook(input io.Reader, output, errorOutput io.Writer) {
 		diagnose("internal_error")
 		return
 	}
+	authored := userAuthoredText(prompt)
 	context := NeighboringContext{}
-	_, _, capture := analyzeSignals(prompt)
+	_, _, capture := analyzeSignals(authored)
 	if capture {
 		context = s.transcriptContext(payload)
 	}
-	selection, err := s.SelectPersona(prompt+" "+context.PreviousUserRequest, cwd, repo)
-	if err != nil {
-		diagnose("selection_failed")
-	} else if len(selection.RuleIDs) > 0 && selection.Text != "" {
-		response["hookSpecificOutput"] = map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": selection.Text}
-		health["context_emitted"] = true
-		health["selected_rule_count"] = len(selection.RuleIDs)
-		health["omitted_rule_count"] = selection.OmittedCount
+	session := textField(payload["session_id"])
+	state := s.loadSession(session)
+	commitRequested := requestsCommit(authored)
+	if !isTrivialPrompt(authored) {
+		selection, err := s.promptSelection(authored+" "+context.PreviousUserRequest, repo, state.InjectedRuleIDs)
+		if err != nil {
+			diagnose("selection_failed")
+		} else if len(selection.RuleIDs) > 0 && selection.Text != "" {
+			response["hookSpecificOutput"] = map[string]any{"hookEventName": "UserPromptSubmit", "additionalContext": selection.Text}
+			response["systemMessage"] = fillCount(pickMessage(afterHookNotes, session+prompt), len(selection.RuleIDs))
+			health["context_emitted"] = true
+			health["selected_rule_count"] = len(selection.RuleIDs)
+			health["omitted_rule_count"] = selection.OmittedCount
+			state.InjectedRuleIDs = append(state.InjectedRuleIDs, selection.RuleIDs...)
+		}
 	}
-	result, err := s.capture(CaptureInput{Feedback: prompt, Source: "hook", CWD: cwd, RepoKey: repo, SessionID: textField(payload["session_id"]), TurnID: textField(payload["turn_id"]), Context: context}, true)
+	if session != "" {
+		injected := state.InjectedRuleIDs
+		turnDigest := ""
+		var baseline []string
+		for _, g := range s.loadGuards() {
+			if g.Kind == "diff_check" {
+				turnDigest = workingDiffDigest(cwd)
+				for _, line := range addedLines(cwd) {
+					baseline = append(baseline, line.key())
+				}
+				break
+			}
+		}
+		_ = s.updateSession(session, func(stored *sessionState) {
+			stored.InjectedRuleIDs = append(stored.InjectedRuleIDs, injected...)
+			stored.CommitRequested = stored.CommitRequested || commitRequested
+			stored.TurnDiffDigest = turnDigest
+			stored.TurnAddedLines = baseline
+		})
+	}
+	if authored == "" {
+		health["capture_action"] = "ignored"
+		return
+	}
+	result, err := s.capture(CaptureInput{Feedback: authored, Source: "hook", CWD: cwd, RepoKey: repo, SessionID: textField(payload["session_id"]), TurnID: textField(payload["turn_id"]), Context: context}, true)
 	if err != nil {
 		diagnose("capture_failed")
 	} else {
 		health["capture_action"] = result.Action
+		if result.Action == "created" {
+			response["systemMessage"] = pickMessage(capturingMessages, session+prompt)
+		}
 	}
+}
+
+// hostInsertedBlocks match text the host adds to a prompt on the user's
+// behalf (background task results, slash-command expansions, reminders,
+// pasted documents). Their wording is not the user's, so it must not count
+// as correction or durable-preference evidence.
+var hostInsertedBlocks = func() []*regexp.Regexp {
+	tags := strings.Fields("task-notification system-reminder command-message command-name command-args local-command-stdout local-command-stderr local-command-caveat bash-input bash-stdout bash-stderr pasted_content environment_context user_instructions")
+	blocks := make([]*regexp.Regexp, 0, len(tags))
+	for _, tag := range tags {
+		blocks = append(blocks, regexp.MustCompile(`(?s)<`+tag+`(?:\s[^>]*)?>.*?</`+tag+`(?:\s[^>]*)?>`))
+	}
+	return blocks
+}()
+
+// userAuthoredText returns the prompt with host-inserted blocks removed, or
+// "" when nothing the user typed remains.
+func userAuthoredText(prompt string) string {
+	for _, block := range hostInsertedBlocks {
+		prompt = block.ReplaceAllString(prompt, " ")
+	}
+	return strings.TrimSpace(prompt)
 }
 
 var harnessMessage = regexp.MustCompile(`^(?:<environment_context>|<user_instructions>|<local-command-|<command-name>|<system-reminder>|# AGENTS\.md instructions)`)
@@ -214,6 +349,9 @@ func (s *Store) transcriptContext(payload map[string]any) NeighboringContext {
 			}
 			text = strings.Join(parts, "\n")
 		}
+		if textField(content["role"]) == "user" {
+			text = userAuthoredText(text)
+		}
 		if text != "" && !harnessMessage.MatchString(strings.TrimLeft(text, " \t\r\n")) {
 			messages = append(messages, message{textField(content["role"]), text})
 		}
@@ -221,7 +359,7 @@ func (s *Store) transcriptContext(payload map[string]any) NeighboringContext {
 	if len(messages) > 40 {
 		messages = messages[len(messages)-40:]
 	}
-	for len(messages) > 0 && messages[len(messages)-1].role == "user" && normalize(messages[len(messages)-1].text) == normalize(textField(payload["prompt"])) {
+	for len(messages) > 0 && messages[len(messages)-1].role == "user" && normalize(messages[len(messages)-1].text) == normalize(userAuthoredText(textField(payload["prompt"]))) {
 		messages = messages[:len(messages)-1]
 	}
 	for i := len(messages) - 1; i >= 0; i-- {
@@ -246,4 +384,96 @@ func (s *Store) transcriptContext(payload map[string]any) NeighboringContext {
 		return empty
 	}
 	return empty
+}
+
+func (s *Store) unprocessedCount(current *generation) int {
+	data, err := regularFile(s.dataPath("observations", "pending.jsonl"))
+	if err != nil {
+		return 0
+	}
+	processed := map[string]bool{}
+	if current != nil {
+		for _, id := range current.ProcessedIDs {
+			processed[id] = true
+		}
+	}
+	count := 0
+	for _, line := range bytes.Split(data, []byte("\n")) {
+		var entry struct {
+			ID string `json:"id"`
+		}
+		if json.Unmarshal(line, &entry) == nil && entry.ID != "" && !processed[entry.ID] {
+			count++
+		}
+	}
+	return count
+}
+
+var commitIntent = regexp.MustCompile(`(?i)\b(?:commit|push)\b`)
+var negatedCommit = regexp.MustCompile(`(?i)\b(?:don'?t|do\s+not|never|no|not|without|stop|avoid)\b(?:\W+\w+){0,2}?\W+(?:commit|push)\w*`)
+var commitNoun = regexp.MustCompile(`(?i)\b(?:the|a|an|this|that|last|previous|latest|each|every|my|your|its|initial|first)\s+(?:commit|push)(?:es|s)?\b`)
+
+// requestsCommit reports whether the user asked for a commit or push, as
+// opposed to forbidding one ("don't commit yet") or mentioning one ("the
+// last commit broke tests").
+func requestsCommit(authored string) bool {
+	text := negatedCommit.ReplaceAllString(authored, " ")
+	text = commitNoun.ReplaceAllString(text, " ")
+	return commitIntent.MatchString(text)
+}
+
+// isTrivialPrompt reports short acknowledgements ("next", "status?") that
+// carry no topic, so no preferences need loading for them.
+func isTrivialPrompt(authored string) bool {
+	if len(strings.Fields(authored)) >= 4 {
+		return false
+	}
+	if _, _, correction := analyzeSignals(authored); correction {
+		return false
+	}
+	for _, pattern := range personaSurfacePatterns {
+		if pattern.MatchString(authored) {
+			return false
+		}
+	}
+	return true
+}
+
+// promptSelection selects rules for this prompt and keeps every non-core
+// rule injected earlier in the session, so a rule never drops out mid-task.
+// Core rules were loaded at SessionStart and stay in the conversation.
+func (s *Store) promptSelection(query, repo string, injected []string) (Selection, error) {
+	current, err := s.loadCurrent()
+	if err != nil || current == nil {
+		return Selection{}, err
+	}
+	rules := current.Rules.rules
+	selection := selectPersona(rules, query, repo)
+	chosen := map[string]bool{}
+	for _, id := range selection.RuleIDs {
+		chosen[id] = true
+	}
+	sticky := map[string]bool{}
+	for _, id := range injected {
+		sticky[id] = true
+	}
+	var selected []rule
+	for _, r := range rules {
+		id := textField(r["id"])
+		if isCoreRule(r) && sticky[id] {
+			continue
+		}
+		if chosen[id] || sticky[id] && (r["status"] == "active" || r["status"] == "core") {
+			selected = append(selected, r)
+		}
+	}
+	ids := []string{}
+	for _, r := range selected {
+		ids = append(ids, textField(r["id"]))
+	}
+	if len(selected) == 0 {
+		return Selection{RuleIDs: ids, OmittedCount: selection.OmittedCount}, nil
+	}
+	text := selectionText(selected)
+	return Selection{Text: text, RuleIDs: ids, OmittedCount: selection.OmittedCount, EstimatedTokens: estimatedTokens(text)}, nil
 }

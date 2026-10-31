@@ -68,10 +68,16 @@ func TestPreferencesBinaryWithoutRubyOrProviderCLI(t *testing.T) {
 			t.Fatal("hook not written to host configuration", err)
 		}
 	}
-	payload, _ := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "session_id": "fixture-host", "cwd": home, "prompt": "continue"})
+	payload, _ := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "session_id": "fixture-host", "cwd": home, "prompt": "continue with the naming changes"})
 	result := run(string(payload), "preferences", "hook")
 	if result["continue"] != true || result["hookSpecificOutput"] == nil {
 		t.Fatal("compiled hook did not deliver persona")
+	}
+	for _, event := range []string{"SessionStart", "PreToolUse", "Stop"} {
+		eventPayload, _ := json.Marshal(map[string]any{"hook_event_name": event, "session_id": "fixture-host", "cwd": home, "tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+		if result := run(string(eventPayload), "preferences", "hook", "--event", event); result["continue"] != true {
+			t.Fatalf("%s hook did not continue: %v", event, result)
+		}
 	}
 	source := filepath.Join(root, "learn-preferences", "sources", "code-like-him")
 	if err := os.MkdirAll(source, 0700); err != nil {

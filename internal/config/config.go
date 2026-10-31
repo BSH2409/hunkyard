@@ -34,6 +34,10 @@ type Config struct {
 	NoIntegrationCheck  bool   `json:"no_integration_check,omitempty"`
 	NoUpdateCheck       bool   `json:"no_update_check,omitempty"`
 	AgentCmd            string `json:"agent_cmd,omitempty"`
+	// PreferencesMaintenance chooses the model CLI that consolidates learned
+	// preferences. Global-only: a repository must not choose which model
+	// runs, or at what cost.
+	PreferencesMaintenance PreferencesMaintenance `json:"preferences_maintenance,omitempty"`
 	// PlanApproveMode selects the Claude Code permission mode after a plan-hook
 	// approval. Global-only so a repository cannot weaken a user's permission
 	// policy. Empty leaves Claude Code's current behavior unchanged.
@@ -67,6 +71,40 @@ type Config struct {
 
 // CleanupOnApproveEnabled returns whether review files should be cleaned up
 // when a review is approved. Defaults to true if not explicitly set.
+// PreferencesMaintenance selects the host, model and effort for automatic
+// preference maintenance. An empty Host disables it.
+type PreferencesMaintenance struct {
+	Host   string `json:"host,omitempty"`
+	Model  string `json:"model,omitempty"`
+	Effort string `json:"effort,omitempty"`
+}
+
+var preferencesMaintenanceDefaults = map[string]PreferencesMaintenance{
+	"claude": {Model: "claude-opus-5-5", Effort: "high"},
+	"codex":  {Model: "gpt-6.1-sol", Effort: "high"},
+}
+
+// Supported reports whether Host names a CLI Hunkyard knows how to run.
+func (p PreferencesMaintenance) Supported() bool {
+	_, ok := preferencesMaintenanceDefaults[p.Host]
+	return ok
+}
+
+// Resolved fills the per-host default model and effort.
+func (p PreferencesMaintenance) Resolved() PreferencesMaintenance {
+	defaults, ok := preferencesMaintenanceDefaults[p.Host]
+	if !ok {
+		return p
+	}
+	if p.Model == "" {
+		p.Model = defaults.Model
+	}
+	if p.Effort == "" {
+		p.Effort = defaults.Effort
+	}
+	return p
+}
+
 func (c Config) CleanupOnApproveEnabled() bool {
 	if c.CleanupOnApprove != nil {
 		return *c.CleanupOnApprove

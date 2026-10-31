@@ -173,3 +173,48 @@ func TestReviewPreferencePartialFailureResumes(t *testing.T) {
 		t.Fatalf("retry: %#v %v", report, err)
 	}
 }
+
+func TestLearnReportsFailedWhenCaptureErrors(t *testing.T) {
+	store, _, batch, repo, root := preferenceFixture(t)
+	blocked := filepath.Join(filepath.Dir(root), "not-a-directory")
+	if err := os.WriteFile(blocked, []byte("x"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	prefs, err := preferences.Open(preferences.Config{Root: blocked})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions := []PreferenceDecision{{CommentID: batch.Comments[0].ID, Revision: 1, Kind: "candidate"}}
+	report, _ := store.Learn(prefs, batch.ID, decisions, "owner", repo)
+	if len(report.Outcomes) != 1 || report.Outcomes[0].Status != "failed" {
+		t.Fatalf("unwritable store must report failed, not captured: %#v", report)
+	}
+}
+
+func TestLearnPassesCodeContext(t *testing.T) {
+	store, prefs, _, repo, root := preferenceFixture(t)
+	input := sampleBatch()
+	input.Comments[0].Body = "remove these comments"
+	input.Comments[0].Quote = "# explain the obvious"
+	input.Comments[0].StartLine, input.Comments[0].EndLine = 4, 5
+	batch, err := store.Publish("code-context", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions := []PreferenceDecision{{CommentID: batch.Comments[0].ID, Revision: batch.Comments[0].Revision, Kind: "candidate"}}
+	if _, err := store.Learn(prefs, batch.ID, decisions, "owner", repo); err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(filepath.Join(root, "learn-preferences", "observations", "pending.jsonl"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var observation map[string]any
+	if err := json.Unmarshal(data, &observation); err != nil {
+		t.Fatal(err)
+	}
+	code, _ := observation["code_context"].(map[string]any)
+	if code["path"] != "main.go" || code["start_line"] != float64(4) || code["excerpt"] != "# explain the obvious" {
+		t.Fatalf("code context not passed: %v", observation["code_context"])
+	}
+}

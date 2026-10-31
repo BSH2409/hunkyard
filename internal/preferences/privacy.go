@@ -3,6 +3,7 @@ package preferences
 import (
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 type privacyResult struct {
@@ -57,7 +58,7 @@ func sanitize(text string) privacyResult {
 	excerpt = ordinaryURL.ReplaceAllString(excerpt, "[URL]")
 	excerpt = emailAddress.ReplaceAllString(excerpt, "[EMAIL]")
 	result.Accepted = true
-	result.Excerpt = truncate(excerpt, 1000)
+	result.Excerpt = strings.TrimRightFunc(truncate(excerpt, 1000), unicode.IsSpace)
 	return result
 }
 

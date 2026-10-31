@@ -110,7 +110,7 @@ func (s *Store) Learn(prefs *preferences.Store, batchID string, decisions []Pref
 			if decision.Kind != "ignore" {
 				// The identity excludes batch/round so publishing an unchanged revision cannot inflate evidence.
 				turn := digest([]string{batch.ReviewID, c.ID, strconv.Itoa(c.Revision), revisionHash(c)})
-				result, err := prefs.Capture(preferences.CaptureInput{Feedback: c.Body, Directive: decision.Directive, Scope: decision.Scope, Surfaces: decision.Surfaces, CWD: repoRoot, Source: "review", SessionID: owner, TurnID: turn, Explicit: decision.Kind == "directive"})
+				result, err := prefs.Capture(preferences.CaptureInput{Feedback: c.Body, Directive: decision.Directive, Scope: decision.Scope, Surfaces: decision.Surfaces, CWD: repoRoot, Source: "review", SessionID: owner, TurnID: turn, Explicit: decision.Kind == "directive", CodeContext: &preferences.CodeContext{Path: c.Path, StartLine: c.StartLine, EndLine: c.EndLine, Excerpt: c.Quote}})
 				switch {
 				case err != nil:
 					outcome.Status = "failed"

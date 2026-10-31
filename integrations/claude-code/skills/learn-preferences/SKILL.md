@@ -22,6 +22,8 @@ Explicit capture: `hunkyard preferences capture --explicit --directive 'Prefer n
 
 For browser review batches, follow Hunkyard's review workflow and classify **every human revision** through `hunkyard feedback learn`. That command preserves the publication identity, prevents duplicate evidence, and validates completion before acknowledgment. Do not also capture the same batch through this CLI. Agent replies never count as human evidence.
 
+Some preferences are enforced at action time by guards. When a `git commit` or `git push` is blocked, read the reason, change the action as it says, and if the user still wants it, ask them to run `! hunkyard preferences allow RULE_ID --once` themselves. Never run `preferences allow` yourself. When the user asks to enforce a rule, add a guard with `guard add --kind KIND --rule RULE_ID [--pattern P]... --json` (kinds: staged_paths, no_coauthor_trailer, commit_message_format, no_unrequested_commit, diff_check). Use `doctor --json` to check hooks and maintenance.
+
 Use `search --query TEXT --surface NAME --json` to inspect safe rule summaries, `retire RULE_ID --json` to stop applying a personal rule, `build --json` to regenerate personas, and `audit --duplicates --json` to check integrity. Retiring preserves evidence. Do not hand-edit generated files or canonical records.
 
-Read [local maintenance and installation](references/local-maintenance.md) when installing hooks, consolidating candidates, importing source defaults, or migrating legacy lessons. Maintenance proposals come from this existing host session; Hunkyard never starts a provider process.
+Read [local maintenance and installation](references/local-maintenance.md) when installing hooks, consolidating candidates, importing source defaults, or migrating legacy lessons. Maintenance proposals come from this host session, or from the Claude or Codex CLI the user configured for automatic maintenance.

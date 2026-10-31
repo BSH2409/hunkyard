@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"sort"
 	"time"
 
 	"github.com/BSH2409/hunkyard/internal/strictjson"
@@ -16,7 +17,32 @@ func (b maintenanceBatch) document() map[string]any {
 	if b.sourceDigest != "" {
 		sourceDigest = b.sourceDigest
 	}
-	return map[string]any{"schema_version": schemaVersion, "local_date": b.localDate, "generation_id": b.generationID, "observations": b.observations, "rules": b.rules, "source_pack_digest": sourceDigest, "input_digest": b.digest}
+	document := map[string]any{"schema_version": schemaVersion, "local_date": b.localDate, "generation_id": b.generationID, "observations": b.observations, "rules": b.rules, "source_pack_digest": sourceDigest, "input_digest": b.digest}
+	if len(b.candidateReview) > 0 {
+		document["candidate_review"] = b.candidateReview
+	}
+	return document
+}
+
+const candidateReviewLimit = 10
+
+// oldestCandidates returns up to candidateReviewLimit candidate rule IDs,
+// least recently updated first.
+func oldestCandidates(rules []rule) []string {
+	candidates := []rule{}
+	for _, r := range rules {
+		if r["status"] == "candidate" {
+			candidates = append(candidates, r)
+		}
+	}
+	sort.SliceStable(candidates, func(i, j int) bool {
+		return textField(candidates[i]["updated_at"]) < textField(candidates[j]["updated_at"])
+	})
+	ids := []string{}
+	for _, r := range candidates[:min(len(candidates), candidateReviewLimit)] {
+		ids = append(ids, textField(r["id"]))
+	}
+	return ids
 }
 
 //nolint:gocyclo // Maintenance phases preserve the shared lock and publication recovery boundary.
@@ -100,6 +126,7 @@ func (s *Store) buildMaintenanceBatch(repair bool) (maintenanceBatch, *generatio
 	}
 	batch.catalog = catalog
 	batch.rules = cloneRules(catalog.rules)
+	batch.candidateReview = oldestCandidates(catalog.rules)
 	read := func() error {
 		entries, err := s.pending(repair)
 		if err != nil {
@@ -247,6 +274,12 @@ func (s *Store) maintain(mode string, proposal []byte) (map[string]any, error) {
 		}
 		result["status"] = "success"
 		result["generation_id"] = id
+		actions, _ := validated.document["actions"].([]any)
+		for _, event := range proposalActivity(actions, batch.observations) {
+			if err := s.recordActivity(event); err != nil {
+				fmt.Fprintf(os.Stderr, "preferences: activity not recorded: %v\n", err)
+			}
+		}
 		return nil
 	}
 	if mode == "dry_run" {
@@ -355,7 +388,10 @@ func (s *Store) compactPending(ids []string, localDate string) error {
 
 //nolint:gocyclo // Maintenance phases preserve the shared lock and publication recovery boundary.
 func (s *Store) pruneRetention(currentID string) error {
-	for _, dir := range []string{"logs", "runs", "generations"} {
+	if err := s.pruneActivity(); err != nil {
+		return err
+	}
+	for _, dir := range []string{"logs", "runs", "generations", "sessions"} {
 		root := s.dataPath(dir)
 		if err := checkDirectoryChain(s.config.Root, root); err != nil {
 			if os.IsNotExist(err) {
@@ -371,8 +407,11 @@ func (s *Store) pruneRetention(currentID string) error {
 			return err
 		}
 		days := 30
-		if dir == "generations" {
+		switch dir {
+		case "generations":
 			days = 14
+		case "sessions":
+			days = 7
 		}
 		prior := ""
 		var priorTime time.Time

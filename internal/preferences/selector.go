@@ -237,3 +237,33 @@ func (s *Store) SelectPersona(prompt, cwd, repoKey string) (Selection, error) {
 	}
 	return selectPersona(rules, prompt, repoKey), nil
 }
+
+// selectCore picks the always-on rules loaded once per session: in-scope
+// rules marked core, grouped like the per-prompt persona.
+func selectCore(rules []rule, repoKey string) Selection {
+	selected := []rule{}
+	for _, r := range rules {
+		scope := record(r["scope"])
+		if scope["kind"] != "global" && (scope["kind"] != "repository" || scope["repo_key"] != repoKey) {
+			continue
+		}
+		if isCoreRule(r) {
+			selected = append(selected, r)
+		}
+	}
+	sort.SliceStable(selected, func(i, j int) bool {
+		if x, y := selectionGroup(selected[i]), selectionGroup(selected[j]); x != y {
+			return x < y
+		}
+		return textField(selected[i]["directive"]) < textField(selected[j]["directive"])
+	})
+	ids := []string{}
+	for _, r := range selected {
+		ids = append(ids, textField(r["id"]))
+	}
+	if len(selected) == 0 {
+		return Selection{RuleIDs: ids}
+	}
+	text := selectionText(selected)
+	return Selection{Text: text, RuleIDs: ids, EstimatedTokens: estimatedTokens(text)}
+}

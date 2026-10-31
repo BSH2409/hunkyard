@@ -83,7 +83,20 @@ hunkyard preferences install-hook --host claude --json
 hunkyard preferences install-cron --json
 ```
 
-Inspect and trust a hook through the host's normal `/hooks` UI. Installers preserve unrelated settings, back up changed configuration, and roll back failed writes. Hook failures are advisory and do not block the host.
+`install-hook` registers one command per host event: `SessionStart` loads your core preferences once (with a health line when maintenance is due or failed), `UserPromptSubmit` adds rules relevant to what you typed and keeps them for the rest of the session, `PreToolUse` checks `git commit` and `git push` against your guards, and `Stop` runs mechanical checks on the changes before the agent finishes. Inspect and trust the commands through the host's normal `/hooks` UI. Installers replace earlier Hunkyard hooks, preserve unrelated settings, back up changed configuration, and roll back failed writes. Infrastructure failures in a hook are advisory and never block the host. On Claude, install also adds Hunkyard spinner verbs and tips to your own and offers `hunkyard preferences statusline` as the status line when none is set.
+
+Guards turn a preference into a block at action time. The agent is told which rule blocked it and why; only you can let one action through:
+
+```sh
+hunkyard preferences guard add --kind staged_paths --rule RULE_ID --pattern 'docs/superpowers/**' --pattern '*-plan.md' --json
+hunkyard preferences guard add --kind no_coauthor_trailer --rule RULE_ID --json
+hunkyard preferences guard add --kind commit_message_format --rule RULE_ID --pattern '^Refs #\d+: ' --json
+hunkyard preferences guard add --kind no_unrequested_commit --rule RULE_ID --json
+hunkyard preferences guard add --kind diff_check --rule RULE_ID --pattern ruby_single_line_def --json
+hunkyard preferences guard list --json
+hunkyard preferences allow RULE_ID --once    # run it yourself, e.g. with ! in the CLI
+hunkyard preferences doctor --json          # hooks, trust, store, maintenance and cron
+```
 
 Maintenance uses a **local proposal file** prepared by the launching host:
 
@@ -93,11 +106,17 @@ hunkyard preferences maintain --dry-run --proposal /path/to/proposal.json --json
 hunkyard preferences maintain --due --proposal /path/to/proposal.json --json
 ```
 
-Without a proposal, maintenance returns a digest-bound batch for the host to review. An hourly cron job only saves local requests; it does not call a model. The Go engine validates evidence, scope, citations, action counters, and rule relationships before atomic publication. See [maintenance, migration, and recovery](integrations/preferences/references/local-maintenance.md).
+Without a proposal, maintenance returns a digest-bound batch for the host to review. Automatic maintenance hands that batch to a model CLI you choose in `~/.hunkyard.config.json` (global config only):
+
+```json
+{"preferences_maintenance": {"host": "claude", "model": "claude-opus-5-5", "effort": "high"}}
+```
+
+`host` is `claude` or `codex`; `model` and `effort` default to `claude-opus-5-5`/`high` for Claude and `gpt-6.1-sol`/`high` for Codex. When it is set, the hourly cron job and session start run `hunkyard preferences maintain --auto` whenever observations are pending and today's maintenance has not succeeded. A rejected proposal is retried once with the validation error; every outcome is recorded and shown at session start, in `doctor`, and in the status line. Without the setting, the cron job only saves local requests and an agent session prepares the proposal. The Go engine validates evidence, scope, citations, action counters, and rule relationships before atomic publication. See [maintenance, migration, and recovery](integrations/preferences/references/local-maintenance.md).
 
 ## Local-only behavior
 
-Hunkyard performs no telemetry, analytics, update checks, remote sharing, forge requests, provider requests, or automatic downloads. Browser libraries and fonts ship inside the binary. The supported runtime uses Git; automatic Sapling/Jujutsu selection and their command overrides are disabled. The process HTTP transport rejects external destinations before DNS/proxy use, and browser CSP restricts resources to local assets. Git runs without remote lazy fetching, external diff/textconv/filter helpers, or filesystem monitor hooks. Dirty comparisons involving Git clean/process filters (including LFS) are rejected with an explanation; use committed `--range` comparisons for those paths. Binary changes stay in the file list as metadata, with raw bytes preserved in private review snapshots; SVG is reviewed as source. Executable HTML previews and remote review commands are disabled.
+Hunkyard performs no telemetry, analytics, update checks, remote sharing, forge requests, or automatic downloads. It makes no provider requests itself; the one exception you opt into is automatic preference maintenance, which runs your configured `claude` or `codex` CLI. Browser libraries and fonts ship inside the binary. The supported runtime uses Git; automatic Sapling/Jujutsu selection and their command overrides are disabled. The process HTTP transport rejects external destinations before DNS/proxy use, and browser CSP restricts resources to local assets. Git runs without remote lazy fetching, external diff/textconv/filter helpers, or filesystem monitor hooks. Dirty comparisons involving Git clean/process filters (including LFS) are rejected with an explanation; use committed `--range` comparisons for those paths. Binary changes stay in the file list as metadata, with raw bytes preserved in private review snapshots; SVG is reviewed as source. Executable HTML previews and remote review commands are disabled.
 
 The launching Codex/Claude session still communicates with its model provider as usual. Its tools and permissions remain under the host's control. Hunkyard itself only exchanges local HTTP and private files. This is an application-level boundary, not an operating-system network sandbox.
 

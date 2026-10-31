@@ -1110,3 +1110,26 @@ func TestLoadConfig_DefaultMarkdownViewUnset(t *testing.T) {
 		t.Errorf("DefaultMarkdownView = %q, want empty when unset", got)
 	}
 }
+
+func TestPreferencesMaintenanceIsGlobalOnly(t *testing.T) {
+	global := Config{PreferencesMaintenance: PreferencesMaintenance{Host: "claude"}}
+	project := Config{PreferencesMaintenance: PreferencesMaintenance{Host: "codex", Model: "cheap"}}
+	merged := mergeConfigs(global, project, ConfigPresence{})
+	if merged.PreferencesMaintenance.Host != "claude" || merged.PreferencesMaintenance.Model != "" {
+		t.Fatalf("project config changed maintenance: %+v", merged.PreferencesMaintenance)
+	}
+}
+
+func TestPreferencesMaintenanceDefaults(t *testing.T) {
+	tests := []struct{ in, want PreferencesMaintenance }{
+		{PreferencesMaintenance{Host: "claude"}, PreferencesMaintenance{Host: "claude", Model: "claude-opus-5-5", Effort: "high"}},
+		{PreferencesMaintenance{Host: "codex"}, PreferencesMaintenance{Host: "codex", Model: "gpt-6.1-sol", Effort: "high"}},
+		{PreferencesMaintenance{Host: "codex", Model: "gpt-6.1-sol", Effort: "medium"}, PreferencesMaintenance{Host: "codex", Model: "gpt-6.1-sol", Effort: "medium"}},
+		{PreferencesMaintenance{}, PreferencesMaintenance{}},
+	}
+	for _, tt := range tests {
+		if got := tt.in.Resolved(); got != tt.want {
+			t.Errorf("Resolved(%+v) = %+v, want %+v", tt.in, got, tt.want)
+		}
+	}
+}

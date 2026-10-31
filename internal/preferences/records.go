@@ -37,6 +37,16 @@ type observation struct {
 	Signals           observationSignals  `json:"signals"`
 	SuggestedSurfaces []string            `json:"suggested_surfaces"`
 	Context           *NeighboringContext `json:"context,omitempty"`
+	CodeContext       *CodeContext        `json:"code_context,omitempty"`
+}
+
+// CodeContext is where a review comment was left, so maintenance can read
+// short comments such as "remove these comments" against the code.
+type CodeContext struct {
+	Path      string `json:"path"`
+	StartLine int    `json:"start_line"`
+	EndLine   int    `json:"end_line"`
+	Excerpt   string `json:"excerpt"`
 }
 
 type observationSignals struct {
