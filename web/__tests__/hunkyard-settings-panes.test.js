@@ -289,13 +289,14 @@ test('renderUpdatesPane: uses brand icons for all agents with SVG assets', () =>
   assert.doesNotMatch(pane.innerHTML, /updates-agent-icon--fallback/);
 });
 
-test('renderUpdatesPane: current Hunkyard still shows its version and release notes', () => {
+test('renderUpdatesPane: shows the running version without claiming it is current', () => {
   const sp = loadShared();
   const pane = makePane();
-  sp.renderUpdatesPane(pane, { version: '0.20.2' }, {});
+  // Hunkyard never checks for releases, so even a stale latest_version is ignored.
+  sp.renderUpdatesPane(pane, { version: '0.20.2', latest_version: '9.9.9' }, {});
   assert.match(pane.innerHTML, /v0\.20\.2/);
-  assert.match(pane.innerHTML, /Release notes/);
-  assert.match(pane.innerHTML, /Up to date/);
+  assert.match(pane.innerHTML, /href="https:\/\/github\.com\/BSH2409\/hunkyard\/releases"/);
+  assert.doesNotMatch(pane.innerHTML, /Up to date|Update available|9\.9\.9|Don't remind me/);
 });
 
 test('renderUpdatesPane: shows muted integrations before uninstalled integrations', () => {
