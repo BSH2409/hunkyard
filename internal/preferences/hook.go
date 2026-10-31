@@ -17,7 +17,6 @@ import (
 	"github.com/BSH2409/hunkyard/internal/strictjson"
 )
 
-//nolint:gocyclo // Transcript confinement and advisory failure handling share one bounded input boundary.
 func (s *Store) hook(event string, input io.Reader, output, errorOutput io.Writer) {
 	switch event {
 	case "UserPromptSubmit":
@@ -95,6 +94,7 @@ func (s *Store) healthLine(current *generation) string {
 	return fmt.Sprintf("Hunkyard preferences: %d observations pending; %s.", pending, maintenance)
 }
 
+//nolint:gocyclo // Validation, selection, session state, and capture share one advisory hook boundary.
 func (s *Store) promptSubmitHook(input io.Reader, output, errorOutput io.Writer) {
 	response := map[string]any{"continue": true}
 	health := map[string]any{"capture_action": "not_attempted", "context_emitted": false, "payload_fields": []string{}}

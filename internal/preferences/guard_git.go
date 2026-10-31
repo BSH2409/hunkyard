@@ -17,6 +17,8 @@ type gitAction struct {
 
 // shellSegments splits a shell command into simple commands, honouring
 // quotes and backslash escapes, at &&, ||, ;, | and newlines.
+//
+//nolint:gocyclo // A single-pass tokenizer keeps quoting and operator rules in one place.
 func shellSegments(command string) [][]string {
 	var segments [][]string
 	var words []string

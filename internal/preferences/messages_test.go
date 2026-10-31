@@ -10,7 +10,8 @@ import (
 )
 
 func TestPickMessageDeterministic(t *testing.T) {
-	if pickMessage(spinnerVerbs, "s1:t1") != pickMessage(spinnerVerbs, "s1:t1") {
+	first := pickMessage(spinnerVerbs, "s1:t1")
+	if again := pickMessage(spinnerVerbs, "s1:t1"); again != first {
 		t.Fatal("same seed picked different messages")
 	}
 	seen := map[string]bool{}

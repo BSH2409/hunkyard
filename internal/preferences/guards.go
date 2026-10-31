@@ -173,6 +173,8 @@ func gitLines(dir string, args ...string) []string {
 }
 
 // guardFinding explains why a guard blocks an action, or "" when it passes.
+//
+//nolint:gocyclo // One case per guard kind keeps each check beside its message.
 func guardFinding(g guard, action gitAction, command, dir string, state sessionState) string {
 	switch g.Kind {
 	case "staged_paths":
@@ -226,6 +228,7 @@ func shellCommandText(value any) string {
 	return ""
 }
 
+//nolint:gocyclo // Override denial, git detection, scope, and overrides form one advisory decision.
 func (s *Store) preToolUseHook(input io.Reader, output io.Writer) {
 	response := map[string]any{"continue": true}
 	defer func() { _ = json.NewEncoder(output).Encode(response) }()

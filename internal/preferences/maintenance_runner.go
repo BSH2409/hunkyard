@@ -130,6 +130,8 @@ func (s *Store) recordMaintenanceRun(p config.PreferencesMaintenance, outcome, e
 // runAutomaticMaintenance consolidates pending observations with the
 // configured model CLI. The engine still validates every proposal; a
 // rejected proposal is retried once with the validation error.
+//
+//nolint:gocyclo // Each failure class maps to one recorded outcome in a single locked run.
 func (s *Store) runAutomaticMaintenance(ctx context.Context, p config.PreferencesMaintenance, force bool, run maintenanceRunner) (map[string]any, error) {
 	p = p.Resolved()
 	if p.Host == "" {
@@ -180,15 +182,15 @@ func (s *Store) runAutomaticMaintenance(ctx context.Context, p config.Preference
 				return nil
 			case err != nil && (authFailure.MatchString(err.Error()) || authFailure.Match(output)):
 				fail("auth_failed")
-				return nil
+				return nil //nolint:nilerr // The failure is recorded as a maintenance outcome, not returned.
 			case err != nil:
 				fail("command_failed")
-				return nil
+				return nil //nolint:nilerr // The failure is recorded as a maintenance outcome, not returned.
 			}
 			proposal, err := extractProposalJSON(output)
 			if err != nil {
 				fail("invalid_output")
-				return nil
+				return nil //nolint:nilerr // The failure is recorded as a maintenance outcome, not returned.
 			}
 			mode := "due"
 			if force {

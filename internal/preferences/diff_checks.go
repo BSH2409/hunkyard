@@ -110,6 +110,7 @@ func addedLines(dir string) []addedLine {
 	return lines
 }
 
+//nolint:gocyclo // Guard selection, turn baselines, and finding collection share one advisory hook boundary.
 func (s *Store) stopHook(input io.Reader, output io.Writer) {
 	response := map[string]any{"continue": true}
 	defer func() { _ = json.NewEncoder(output).Encode(response) }()

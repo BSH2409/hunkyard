@@ -554,12 +554,13 @@ func (s *Session) buildFilesForFocus(f Focus, v vcs.VCS, repoRoot string) ([]*Fi
 			fe.Content = string(data)
 			fe.FileHash = fileHash(data)
 		}
-		if fe.FileType == "binary" {
+		switch {
+		case fe.FileType == "binary":
 			fe.DiffHunks = nil
-		} else if fc.Status != "added" && fc.Status != "untracked" {
+		case fc.Status != "added" && fc.Status != "untracked":
 			hunks, _ := v.FileDiffBetweenSHAs(fc.Path, fc.OldPath, f.DiffBaseSHA(), f.HeadSHA, repoRoot, false)
 			fe.DiffHunks = hunks
-		} else {
+		default:
 			fe.DiffHunks = vcs.FileDiffUnifiedNewFile(fe.Content)
 		}
 		out = append(out, fe)
