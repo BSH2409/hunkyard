@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -139,7 +140,10 @@ func TestHostRoundLoopProtocol(t *testing.T) {
 				t.Logf("other-owner reply rejected: %s", output)
 			}
 			// Restart after publishing, with no waiter; queued feedback and the original skills must survive.
-			start.Process.Signal(os.Interrupt)
+			// The shutdown endpoint stops the daemon gracefully on every OS; Windows cannot send os.Interrupt.
+			if resp, err := http.Post(entry.ConnURL()+"/api/shutdown?pid="+strconv.Itoa(start.Process.Pid), "application/json", nil); err == nil {
+				resp.Body.Close()
+			}
 			stopped := make(chan error, 1)
 			go func() { stopped <- start.Wait() }()
 			select {

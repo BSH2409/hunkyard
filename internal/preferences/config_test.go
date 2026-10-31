@@ -5,13 +5,14 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
 
 func TestExplicitEmptyPreferenceRoot(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("LEARN_PREFERENCES_HOME", filepath.Join(home, "canonical"))
 	for _, root := range []string{" ", string(filepath.Separator)} {
 		if _, err := Open(Config{Root: root}); err == nil {
@@ -29,7 +30,7 @@ func TestExplicitEmptyPreferenceRoot(t *testing.T) {
 
 func TestConfigRoot(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("LEARN_PREFERENCES_HOME", "")
 	config, err := resolveConfig(Config{})
 	if err != nil || config.Root != filepath.Join(home, ".agents") || config.Clock == nil {
@@ -58,7 +59,7 @@ func TestConfigRoot(t *testing.T) {
 
 func TestDefaultPreferenceRootAndPrivateModes(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setHome(t, home)
 	t.Setenv("LEARN_PREFERENCES_HOME", "")
 	s, err := Open(Config{})
 	if err != nil || s.config.Root != filepath.Join(home, ".agents") {
@@ -72,7 +73,7 @@ func TestDefaultPreferenceRootAndPrivateModes(t *testing.T) {
 		mode os.FileMode
 	}{{s.dataPath(), 0700}, {s.dataPath("observations"), 0700}, {s.dataPath("observations", "pending.jsonl"), 0600}, {s.dataPath("observations", ".pending.lock"), 0600}} {
 		info, err := os.Stat(item.path)
-		if err != nil || info.Mode().Perm() != item.mode {
+		if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != item.mode {
 			t.Fatalf("private mode differs for %s: %v", item.path, err)
 		}
 	}
@@ -84,7 +85,7 @@ func TestDefaultPreferenceRootAndPrivateModes(t *testing.T) {
 }
 
 func TestBlankHomeUsesAccountHomeWithoutWriting(t *testing.T) {
-	t.Setenv("HOME", "")
+	setHome(t, "")
 	t.Setenv("LEARN_PREFERENCES_HOME", "")
 	account, err := user.Current()
 	if err != nil {
@@ -94,4 +95,12 @@ func TestBlankHomeUsesAccountHomeWithoutWriting(t *testing.T) {
 	if err != nil || config.Root != filepath.Join(account.HomeDir, ".agents") {
 		t.Fatal("blank HOME resolved incorrectly", err)
 	}
+}
+
+// setHome points the home directory at dir on every platform; Windows reads
+// USERPROFILE rather than HOME.
+func setHome(t *testing.T, dir string) {
+	t.Helper()
+	t.Setenv("HOME", dir)
+	t.Setenv("USERPROFILE", dir)
 }

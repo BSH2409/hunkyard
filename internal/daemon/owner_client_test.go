@@ -16,7 +16,9 @@ import (
 )
 
 func TestOwnerRequestVerifiesServerBeforeCredential(t *testing.T) {
-	t.Setenv("HOME", t.TempDir())
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home) // Windows reads the home directory from it
 	t.Setenv("HUNKYARD_OWNER_ID", "codex:synthetic")
 	owner, err := feedback.OpenOwner(filepath.Join(os.Getenv("HOME"), ".hunkyard"), "012345abcdef", feedback.CurrentIdentity())
 	if err != nil {

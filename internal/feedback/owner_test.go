@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -62,7 +63,8 @@ func TestOwnerCredentialPrivacy(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if info.Mode().Perm() != want {
+		// Windows has no permission bits; ACLs on the profile protect it.
+		if runtime.GOOS != "windows" && info.Mode().Perm() != want {
 			t.Fatalf("owner artifact permissions: %o, want %o", info.Mode().Perm(), want)
 		}
 	}
@@ -102,6 +104,9 @@ func TestOwnerIdentityUsesHostSession(t *testing.T) {
 }
 
 func TestOwnerDoesNotChangeParentPermissions(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows has no permission bits to preserve")
+	}
 	parent := t.TempDir()
 	if err := os.Chmod(parent, 0755); err != nil {
 		t.Fatal(err)
