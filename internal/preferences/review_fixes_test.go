@@ -145,7 +145,7 @@ func TestGuardOnlyAppliesInItsRulesRepository(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.addGuard("no_unrequested_commit", result.RuleID, nil); err != nil {
+	if _, err := s.addGuard("no_unrequested_commit", result.RuleID, nil, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	stage(t, repo, "a.go")

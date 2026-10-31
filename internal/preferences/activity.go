@@ -15,6 +15,7 @@ const (
 	activityViolated             = "violated"
 	activityBlocked              = "blocked"
 	activityOverridden           = "overridden"
+	activityInterrupted          = "interrupted"
 	activityMaintenanceSucceeded = "maintenance_succeeded"
 	activityMaintenanceFailed    = "maintenance_failed"
 )

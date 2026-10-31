@@ -7,12 +7,15 @@ import (
 
 // sessionState is what the hooks remember about one host session.
 type sessionState struct {
-	InjectedRuleIDs []string `json:"injected_rule_ids"`
-	CommitRequested bool     `json:"commit_requested"`
-	StopBlockedTurn string   `json:"stop_blocked_turn,omitempty"`
-	TurnDiffDigest  string   `json:"turn_diff_digest,omitempty"`
-	TurnAddedLines  []string `json:"turn_added_lines,omitempty"`
-	UpdatedAt       string   `json:"updated_at"`
+	InjectedRuleIDs  []string `json:"injected_rule_ids"`
+	CommitRequested  bool     `json:"commit_requested"`
+	StopBlockedTurn  string   `json:"stop_blocked_turn,omitempty"`
+	TurnDiffDigest   string   `json:"turn_diff_digest,omitempty"`
+	TurnAddedLines   []string `json:"turn_added_lines,omitempty"`
+	NotifiedBatchIDs []string `json:"notified_batch_ids,omitempty"`
+	InterruptedAt    string   `json:"interrupted_at,omitempty"`
+	WakeToken        string   `json:"wake_token,omitempty"`
+	UpdatedAt        string   `json:"updated_at"`
 }
 
 func (s *Store) sessionPath(sessionID string) string {

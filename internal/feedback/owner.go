@@ -50,6 +50,13 @@ func CurrentIdentity() Identity {
 			seed = "claude:" + id
 		}
 	}
+	return IdentityForSeed(seed)
+}
+
+// IdentityForSeed derives the owner identity for a host seed such as
+// "claude:SESSION" or "codex:THREAD", so hooks can find the reviews their own
+// session launched.
+func IdentityForSeed(seed string) Identity {
 	if seed == "" {
 		return Identity{Key: "standalone", Kind: "terminal"}
 	}

@@ -22,6 +22,8 @@ type guard struct {
 	Kind     string   `json:"kind"`
 	RuleID   string   `json:"rule_id"`
 	Patterns []string `json:"patterns"`
+	Match    []string `json:"match,omitempty"`
+	NotMatch []string `json:"not_match,omitempty"`
 }
 
 type guardFile struct {
@@ -58,7 +60,7 @@ func (s *Store) writeGuards(guards []guard) error {
 	return atomicReplace(s.dataPath("guards.json"), append(encoded, '\n'))
 }
 
-func (s *Store) addGuard(kind, ruleID string, patterns []string) (guard, error) {
+func (s *Store) addGuard(kind, ruleID string, patterns, match, notMatch []string) (guard, error) {
 	if !slices.Contains(guardKinds, kind) {
 		return guard{}, fmt.Errorf("unknown guard kind")
 	}
@@ -76,9 +78,14 @@ func (s *Store) addGuard(kind, ruleID string, patterns []string) (guard, error) 
 	if kind == "diff_check" && diffChecks[patterns[0]] == nil {
 		return guard{}, fmt.Errorf("unknown diff check")
 	}
+	candidate := guard{Kind: kind, RuleID: ruleID, Patterns: patterns, Match: match, NotMatch: notMatch}
+	if failure := exampleFailure(candidate); failure != "" {
+		return guard{}, fmt.Errorf("%s", failure)
+	}
 	var added guard
 	err := withFileLock(s.dataPath("guards.json")+".lock", false, func() error {
-		added = guard{ID: "g_" + digest(kind + "\x00" + ruleID + "\x00" + strings.Join(patterns, "\x00"))[:12], Kind: kind, RuleID: ruleID, Patterns: patterns}
+		added = candidate
+		added.ID = "g_" + digest(kind + "\x00" + ruleID + "\x00" + strings.Join(patterns, "\x00"))[:12]
 		guards := slices.DeleteFunc(s.loadGuards(), func(g guard) bool { return g.ID == added.ID })
 		return s.writeGuards(append(guards, added))
 	})
@@ -239,6 +246,12 @@ func (s *Store) preToolUseHook(input io.Reader, output io.Writer) {
 	if payload == nil || os.Getenv("LEARN_PREFERENCES_MAINTENANCE") == "1" {
 		return
 	}
+	if editTools[textField(payload["tool_name"])] {
+		if output := s.editRulesResponse(payload); output != nil {
+			response["hookSpecificOutput"] = output
+		}
+		return
+	}
 	command := shellCommandText(record(payload["tool_input"])["command"])
 	if command == "" {
 		return
@@ -258,7 +271,26 @@ func (s *Store) preToolUseHook(input io.Reader, output io.Writer) {
 	if len(guards) == 0 {
 		return
 	}
-	cwd := textField(payload["cwd"])
+	session := textField(payload["session_id"])
+	if verdict := s.evaluateCommand(guards, action, command, textField(payload["cwd"]), s.loadSession(session), session, true); verdict.blocked {
+		deny(verdict.message())
+	}
+}
+
+type guardVerdict struct {
+	blocked                  bool
+	ruleID, guardID, finding string
+	directive                string
+}
+
+func (v guardVerdict) message() string {
+	return fmt.Sprintf("Blocked by your preference %q (%s): %s. If the user wants this anyway, ask them to run: ! hunkyard preferences allow %s --once", v.directive, v.ruleID, v.finding, v.ruleID)
+}
+
+// evaluateCommand applies in-scope guards to a git action. With apply set
+// it consumes overrides and writes activity; without it (preferences check)
+// it only reports.
+func (s *Store) evaluateCommand(guards []guard, action gitAction, command, cwd string, state sessionState, session string, apply bool) guardVerdict {
 	dir := cwd
 	if action.Dir != "" {
 		dir = action.Dir
@@ -266,8 +298,6 @@ func (s *Store) preToolUseHook(input io.Reader, output io.Writer) {
 			dir = filepath.Join(cwd, dir)
 		}
 	}
-	session := textField(payload["session_id"])
-	state := s.loadSession(session)
 	repo, _ := repositoryKey(cwd)
 	for _, g := range guards {
 		r := s.activeRule(g.RuleID)
@@ -281,12 +311,64 @@ func (s *Store) preToolUseHook(input io.Reader, output io.Writer) {
 		if finding == "" {
 			continue
 		}
+		verdict := guardVerdict{blocked: true, ruleID: g.RuleID, guardID: g.ID, finding: finding, directive: textField(r["directive"])}
+		if !apply {
+			return verdict
+		}
 		if s.consumeOverride(g.RuleID) {
 			_ = s.recordActivity(ActivityEvent{Kind: activityOverridden, RuleID: g.RuleID, RepoKey: repo, SessionKey: digest(session), Detail: finding})
 			continue
 		}
 		_ = s.recordActivity(ActivityEvent{Kind: activityBlocked, RuleID: g.RuleID, RepoKey: repo, SessionKey: digest(session), Detail: finding})
-		deny(fmt.Sprintf("Blocked by your preference %q (%s): %s. If the user wants this anyway, ask them to run: ! hunkyard preferences allow %s --once", textField(r["directive"]), g.RuleID, finding, g.RuleID))
-		return
+		return verdict
 	}
+	return guardVerdict{}
+}
+
+// exampleTriggers evaluates one guard example without git or side effects:
+// a repository path for staged_paths, "path:line" for diff_check, and a
+// shell command for the other kinds (with no commit requested).
+func exampleTriggers(g guard, example string) bool {
+	switch g.Kind {
+	case "staged_paths":
+		for _, pattern := range g.Patterns {
+			if matchGuardPattern(pattern, example) {
+				return true
+			}
+		}
+		return false
+	case "diff_check":
+		path, line, _ := strings.Cut(example, ":")
+		check := diffChecks[g.Patterns[0]]
+		return check != nil && len(check(path, []string{line})) > 0
+	}
+	action, ok := parseGitInvocation(example)
+	return ok && guardFinding(g, action, example, "", sessionState{}) != ""
+}
+
+func exampleFailure(g guard) string {
+	for _, example := range g.Match {
+		if !exampleTriggers(g, example) {
+			return fmt.Sprintf("match example %q does not trigger the guard", example)
+		}
+	}
+	for _, example := range g.NotMatch {
+		if exampleTriggers(g, example) {
+			return fmt.Sprintf("not-match example %q triggers the guard", example)
+		}
+	}
+	return ""
+}
+
+// testGuards re-runs every stored guard's examples.
+func (s *Store) testGuards() []map[string]any {
+	results := []map[string]any{}
+	for _, g := range s.loadGuards() {
+		result := map[string]any{"guard_id": g.ID, "rule_id": g.RuleID, "kind": g.Kind, "status": "pass", "examples": len(g.Match) + len(g.NotMatch)}
+		if failure := exampleFailure(g); failure != "" {
+			result["status"], result["failure"] = "fail", failure
+		}
+		results = append(results, result)
+	}
+	return results
 }

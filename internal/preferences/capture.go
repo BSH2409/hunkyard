@@ -17,6 +17,7 @@ type CaptureInput struct {
 	Surfaces                                []string
 	CWD, RepoKey, Source, SessionID, TurnID string
 	Explicit                                bool
+	Interrupted                             bool
 	Context                                 NeighboringContext
 	CodeContext                             *CodeContext
 }
@@ -87,6 +88,12 @@ func (s *Store) prepareObservation(input CaptureInput) (observation, CaptureResu
 	}
 	// The launching host already classified review candidates; keywords do not add durable intent.
 	capturable = capturable || source == "review" && privacy.Excerpt != ""
+	// The first prompt after the user interrupts the agent is a correction of
+	// what the agent was doing, whatever words it uses.
+	if input.Interrupted {
+		capturable = true
+		signals.Correction = true
+	}
 	if input.Explicit {
 		capturable = true
 		source = "explicit"

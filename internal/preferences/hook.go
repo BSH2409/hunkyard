@@ -17,8 +17,13 @@ import (
 	"github.com/BSH2409/hunkyard/internal/strictjson"
 )
 
-func (s *Store) hook(event string, input io.Reader, output, errorOutput io.Writer) {
+// hook runs one host hook event and returns the process exit code.
+func (s *Store) hook(event string, input io.Reader, output, errorOutput io.Writer) int {
 	switch event {
+	case "ReviewWake":
+		return s.reviewWakeHook(input, errorOutput)
+	case "Interrupt":
+		s.interruptHook(input, output)
 	case "UserPromptSubmit":
 		s.promptSubmitHook(input, output, errorOutput)
 	case "SessionStart":
@@ -30,6 +35,7 @@ func (s *Store) hook(event string, input io.Reader, output, errorOutput io.Write
 	default:
 		_ = json.NewEncoder(output).Encode(map[string]any{"continue": true})
 	}
+	return 0
 }
 
 func readHookPayload(input io.Reader) map[string]any {
@@ -69,6 +75,11 @@ func (s *Store) sessionStartHook(input io.Reader, output io.Writer) {
 	text := selection.Text
 	if health := s.healthLine(current); health != "" {
 		text = strings.TrimSpace(text + "\n" + health)
+	}
+	for _, notice := range s.ownedReviewNotices(session) {
+		if notice.Pending > 0 {
+			text = strings.TrimSpace(text + "\n" + fmt.Sprintf("Hunkyard review %s has %d published review batch(es) waiting. Run: hunkyard feedback await --session %s --json", notice.ReviewID, notice.Pending, notice.ReviewID))
+		}
 	}
 	if text == "" {
 		return
@@ -161,13 +172,14 @@ func (s *Store) promptSubmitHook(input io.Reader, output, errorOutput io.Writer)
 		return
 	}
 	authored := userAuthoredText(prompt)
-	context := NeighboringContext{}
-	_, _, capture := analyzeSignals(authored)
-	if capture {
-		context = s.transcriptContext(payload)
-	}
 	session := textField(payload["session_id"])
 	state := s.loadSession(session)
+	interrupted := !isTrivialPrompt(authored) && (state.InterruptedAt != "" || s.hostKind == "claude" && transcriptShowsInterrupt(s.transcriptTail(payload), session, authored))
+	context := NeighboringContext{}
+	_, _, capture := analyzeSignals(authored)
+	if capture || interrupted {
+		context = s.transcriptContext(payload)
+	}
 	commitRequested := requestsCommit(authored)
 	if !isTrivialPrompt(authored) {
 		selection, err := s.promptSelection(authored+" "+context.PreviousUserRequest, repo, state.InjectedRuleIDs)
@@ -200,13 +212,16 @@ func (s *Store) promptSubmitHook(input io.Reader, output, errorOutput io.Writer)
 			stored.CommitRequested = stored.CommitRequested || commitRequested
 			stored.TurnDiffDigest = turnDigest
 			stored.TurnAddedLines = baseline
+			if interrupted {
+				stored.InterruptedAt = ""
+			}
 		})
 	}
 	if authored == "" {
 		health["capture_action"] = "ignored"
 		return
 	}
-	result, err := s.capture(CaptureInput{Feedback: authored, Source: "hook", CWD: cwd, RepoKey: repo, SessionID: textField(payload["session_id"]), TurnID: textField(payload["turn_id"]), Context: context}, true)
+	result, err := s.capture(CaptureInput{Feedback: authored, Source: "hook", CWD: cwd, RepoKey: repo, SessionID: textField(payload["session_id"]), TurnID: textField(payload["turn_id"]), Context: context, Interrupted: interrupted}, true)
 	if err != nil {
 		diagnose("capture_failed")
 	} else {
@@ -241,14 +256,17 @@ func userAuthoredText(prompt string) string {
 
 var harnessMessage = regexp.MustCompile(`^(?:<environment_context>|<user_instructions>|<local-command-|<command-name>|<system-reminder>|# AGENTS\.md instructions)`)
 
+// transcriptTail reads the last 256 KiB of the host transcript named in the
+// payload, only when it is a regular file the user owns, inside a known host
+// directory, and recorded for the same session.
+//
 //nolint:gocyclo // Transcript confinement and advisory failure handling share one bounded input boundary.
-func (s *Store) transcriptContext(payload map[string]any) NeighboringContext {
-	var empty NeighboringContext
+func (s *Store) transcriptTail(payload map[string]any) []byte {
 	name := textField(payload["transcript_path"])
 	cwd := textField(payload["cwd"])
 	session := textField(payload["session_id"])
 	if !filepath.IsAbs(name) || filepath.Ext(name) != ".jsonl" || filepath.Clean(name) != name {
-		return empty
+		return nil
 	}
 	roots := []string{s.config.Root, filepath.Join(cwd, ".codex"), filepath.Join(cwd, ".claude")}
 	if codex, err := hostHome("CODEX_HOME", ".codex"); err == nil {
@@ -266,24 +284,24 @@ func (s *Store) transcriptContext(payload map[string]any) NeighboringContext {
 		}
 	}
 	if !allowed {
-		return empty
+		return nil
 	}
 	resolved, err := filepath.EvalSymlinks(name)
 	if err != nil || resolved != name {
-		return empty
+		return nil
 	}
 	info, err := os.Lstat(name)
 	if err != nil || !info.Mode().IsRegular() || !ownedFile(info) {
-		return empty
+		return nil
 	}
 	file, err := os.Open(name)
 	if err != nil {
-		return empty
+		return nil
 	}
 	defer file.Close()
 	opened, err := file.Stat()
 	if err != nil || !os.SameFile(info, opened) {
-		return empty
+		return nil
 	}
 	first, _ := bufio.NewReaderSize(file, 256*1024).ReadSlice('\n')
 	var header map[string]any
@@ -293,23 +311,34 @@ func (s *Store) transcriptContext(payload map[string]any) NeighboringContext {
 			recorded = textField(record(header["payload"])["id"])
 		}
 		if recorded != "" && recorded != session {
-			return empty
+			return nil
 		}
 	}
 	offset := max(opened.Size()-256*1024, 0)
 	if _, err := file.Seek(offset, io.SeekStart); err != nil {
-		return empty
+		return nil
 	}
 	data, err := io.ReadAll(io.LimitReader(file, 256*1024))
 	if err != nil {
-		return empty
+		return nil
 	}
 	if offset > 0 {
 		if i := bytes.IndexByte(data, '\n'); i >= 0 {
 			data = data[i+1:]
 		} else {
-			return empty
+			return nil
 		}
+	}
+	return data
+}
+
+//nolint:gocyclo // Host transcript formats and message filtering are parsed in one bounded pass.
+func (s *Store) transcriptContext(payload map[string]any) NeighboringContext {
+	var empty NeighboringContext
+	session := textField(payload["session_id"])
+	data := s.transcriptTail(payload)
+	if data == nil {
+		return empty
 	}
 	type message struct{ role, text string }
 	messages := []message{}
@@ -476,4 +505,51 @@ func (s *Store) promptSelection(query, repo string, injected []string) (Selectio
 	}
 	text := selectionText(selected)
 	return Selection{Text: text, RuleIDs: ids, OmittedCount: selection.OmittedCount, EstimatedTokens: estimatedTokens(text)}, nil
+}
+
+var interruptMarkers = []string{"[Request interrupted by user", "The user doesn't want to proceed with this tool use"}
+
+// transcriptShowsInterrupt reports whether the last user turn in a Claude
+// transcript is an interruption or a rejected tool call.
+func transcriptShowsInterrupt(data []byte, session, prompt string) bool {
+	lines := bytes.Split(bytes.TrimSpace(data), []byte("\n"))
+	skippedPrompt := false
+	for i := len(lines) - 1; i >= 0; i-- {
+		var entry map[string]any
+		if strictjson.Decode(lines[i], &entry) != nil || entry["type"] != "user" {
+			continue
+		}
+		if recorded := textField(entry["sessionId"]); recorded != "" && recorded != session {
+			continue
+		}
+		text := string(lines[i])
+		// The host may already have recorded the prompt being submitted.
+		if !skippedPrompt && prompt != "" && strings.Contains(text, prompt) {
+			skippedPrompt = true
+			continue
+		}
+		for _, marker := range interruptMarkers {
+			if strings.Contains(text, marker) {
+				return true
+			}
+		}
+		return false
+	}
+	return false
+}
+
+// interruptHook records a Codex interrupt so the user's next prompt counts
+// as a correction. Codex honours only systemMessage here, so it prints {}.
+func (s *Store) interruptHook(input io.Reader, output io.Writer) {
+	defer func() { _, _ = output.Write([]byte("{}\n")) }()
+	payload := readHookPayload(input)
+	session := textField(payload["session_id"])
+	if payload == nil || session == "" || os.Getenv("LEARN_PREFERENCES_MAINTENANCE") == "1" {
+		return
+	}
+	_ = s.updateSession(session, func(state *sessionState) {
+		state.InterruptedAt = s.config.Clock().UTC().Format(time.RFC3339)
+	})
+	repo, _ := repositoryKey(textField(payload["cwd"]))
+	_ = s.recordActivity(ActivityEvent{Kind: activityInterrupted, RepoKey: repo, SessionKey: digest(session)})
 }

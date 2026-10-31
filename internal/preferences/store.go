@@ -27,6 +27,7 @@ var repositoryKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}-[0-9a-f]
 
 type Store struct {
 	config        Config
+	hostKind      string
 	fault         func(string) error
 	mirrorError   error
 	legacyPersona map[string]string

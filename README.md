@@ -83,7 +83,12 @@ hunkyard preferences install-hook --host claude --json
 hunkyard preferences install-cron --json
 ```
 
-`install-hook` registers one command per host event: `SessionStart` loads your core preferences once (with a health line when maintenance is due or failed), `UserPromptSubmit` adds rules relevant to what you typed and keeps them for the rest of the session, `PreToolUse` checks `git commit` and `git push` against your guards, and `Stop` runs mechanical checks on the changes before the agent finishes. Inspect and trust the commands through the host's normal `/hooks` UI. Installers replace earlier Hunkyard hooks, preserve unrelated settings, back up changed configuration, and roll back failed writes. Infrastructure failures in a hook are advisory and never block the host. On Claude, install also adds Hunkyard spinner verbs and tips to your own and offers `hunkyard preferences statusline` as the status line when none is set.
+`install-hook` registers one command per host event:
+
+- `SessionStart` loads your core preferences once, with a health line when maintenance is due or failed, and says when a Hunkyard review this session launched has published feedback waiting.
+- `UserPromptSubmit` adds rules relevant to what you typed and keeps them for the rest of the session. The first prompt after you interrupt the agent (Codex `Interrupt`, or Claude's "interrupted by user" and rejected tool calls) is recorded as a correction.
+- `PreToolUse` checks `git commit` and `git push` against your guards, and when the agent edits a file it adds the rules for that file's area (for example Ruby, migrations, jobs, frontend) once per session.
+- `Stop` delivers any review batch published while the agent worked, then runs mechanical checks on lines added this turn, including new untracked files. On Claude, a background `asyncRewake` handler also waits up to an hour for your next publication and wakes Claude when you publish. Inspect and trust the commands through the host's normal `/hooks` UI. Installers replace earlier Hunkyard hooks, preserve unrelated settings, back up changed configuration, and roll back failed writes. Infrastructure failures in a hook are advisory and never block the host. On Claude, install also adds Hunkyard spinner verbs and tips to your own and offers `hunkyard preferences statusline` as the status line when none is set.
 
 Guards turn a preference into a block at action time. The agent is told which rule blocked it and why; only you can let one action through:
 
@@ -93,7 +98,10 @@ hunkyard preferences guard add --kind no_coauthor_trailer --rule RULE_ID --json
 hunkyard preferences guard add --kind commit_message_format --rule RULE_ID --pattern '^Refs #\d+: ' --json
 hunkyard preferences guard add --kind no_unrequested_commit --rule RULE_ID --json
 hunkyard preferences guard add --kind diff_check --rule RULE_ID --pattern ruby_single_line_def --json
+hunkyard preferences guard add --kind no_coauthor_trailer --rule RULE_ID --match 'git commit -m "x\n\nCo-authored-by: a <a@b>"' --not-match 'git commit -m "x"' --json
 hunkyard preferences guard list --json
+hunkyard preferences guard test --json                 # re-run every guard's examples
+hunkyard preferences check --cwd . -- git commit -m x  # would this be blocked? no side effects
 hunkyard preferences allow RULE_ID --once    # run it yourself, e.g. with ! in the CLI
 hunkyard preferences doctor --json          # hooks, trust, store, maintenance and cron
 ```

@@ -36,24 +36,46 @@ func (s *Store) binaryCommand() (string, error) {
 	return shellQuote(binary), nil
 }
 
-func (s *Store) hookCommand(event string) (string, error) {
+func (s *Store) hookCommand(host, event string) (string, error) {
 	binary, err := s.binaryCommand()
 	if err != nil {
 		return "", err
 	}
-	return binary + " preferences hook --event " + event + " --root " + shellQuote(s.config.Root), nil
+	return binary + " preferences hook --event " + event + " --host " + host + " --root " + shellQuote(s.config.Root), nil
 }
 
+// hookEvent is one Hunkyard handler: name is the host's settings event,
+// handler the --event it runs (defaults to name), host limits it to one host.
 type hookEvent struct {
-	name, matcher, statusMessage string
-	emitsContext                 bool
+	name, handler, host, matcher, statusMessage string
+	emitsContext, asyncRewake                   bool
+	timeout                                     int
 }
 
 var hookEvents = []hookEvent{
 	{name: "SessionStart", statusMessage: loadingMessages[0], emitsContext: true},
 	{name: "UserPromptSubmit", statusMessage: loadingMessages[0], emitsContext: true},
-	{name: "PreToolUse", matcher: "Bash|shell|exec_command", statusMessage: "Checking your preferences"},
+	{name: "PreToolUse", matcher: "Bash|shell|exec_command|Edit|Write|MultiEdit|apply_patch", statusMessage: "Checking your preferences"},
 	{name: "Stop", statusMessage: "Reviewing against your preferences"},
+	{name: "Interrupt", host: "codex", statusMessage: capturingMessages[2]},
+	{name: "Stop", handler: "ReviewWake", host: "claude", statusMessage: reviewWaitingMessages[1], asyncRewake: true, timeout: reviewWakeTimeout},
+}
+
+func (e hookEvent) handlerName() string {
+	if e.handler != "" {
+		return e.handler
+	}
+	return e.name
+}
+
+func hookEventsFor(host string) []hookEvent {
+	var events []hookEvent
+	for _, event := range hookEvents {
+		if event.host == "" || event.host == host {
+			events = append(events, event)
+		}
+	}
+	return events
 }
 
 func (s *Store) hookPath(host string) (string, error) {
@@ -106,12 +128,12 @@ func (s *Store) installHook(host string) (map[string]any, error) {
 		return nil, err
 	}
 	commands := map[string]any{}
-	for _, event := range hookEvents {
-		command, err := s.hookCommand(event.name)
+	for _, event := range hookEventsFor(host) {
+		command, err := s.hookCommand(host, event.handlerName())
 		if err != nil {
 			return nil, err
 		}
-		commands[event.name] = command
+		commands[event.handlerName()] = command
 	}
 	if err := ensureDirectory(filepath.Dir(target)); err != nil {
 		return nil, err
@@ -139,14 +161,10 @@ func (s *Store) installHook(host string) (map[string]any, error) {
 				return fmt.Errorf("hooks must be an object")
 			}
 		}
-		for _, event := range hookEvents {
-			groups := []map[string]any{}
-			if value, exists := hooks[event.name]; exists {
-				var err error
-				groups, err = mapArray(value)
-				if err != nil {
-					return err
-				}
+		for name, value := range hooks {
+			groups, err := mapArray(value)
+			if err != nil {
+				return err
 			}
 			retained := []any{}
 			for _, group := range groups {
@@ -165,15 +183,31 @@ func (s *Store) installHook(host string) (map[string]any, error) {
 					retained = append(retained, group)
 				}
 			}
-			handler := map[string]any{"type": "command", "command": commands[event.name], "timeout": 5, "statusMessage": event.statusMessage}
+			hooks[name] = retained
+		}
+		for _, event := range hookEventsFor(host) {
+			timeout := event.timeout
+			if timeout == 0 {
+				timeout = 5
+			}
+			handler := map[string]any{"type": "command", "command": commands[event.handlerName()], "timeout": timeout, "statusMessage": event.statusMessage}
 			if host == "codex" && event.emitsContext {
 				handler["additionalContextLimit"] = 1500
+			}
+			if event.asyncRewake {
+				handler["asyncRewake"] = true
 			}
 			group := map[string]any{"hooks": []any{handler}}
 			if event.matcher != "" {
 				group["matcher"] = event.matcher
 			}
-			hooks[event.name] = append(retained, group)
+			existing, _ := hooks[event.name].([]any)
+			hooks[event.name] = append(existing, group)
+		}
+		for name, value := range hooks {
+			if groups, _ := value.([]any); len(groups) == 0 {
+				delete(hooks, name)
+			}
 		}
 		document["hooks"] = hooks
 		if host == "claude" {
@@ -353,11 +387,11 @@ func writeCrontab(text string) error {
 }
 
 func (s *Store) hookInstalled() bool {
-	command, err := s.hookCommand("UserPromptSubmit")
-	if err != nil {
-		return false
-	}
 	for _, host := range []string{"codex", "claude"} {
+		command, err := s.hookCommand(host, "UserPromptSubmit")
+		if err != nil {
+			return false
+		}
 		target, err := s.hookPath(host)
 		if err != nil {
 			continue

@@ -66,8 +66,8 @@ func (s *Store) missingHookEvents(host string) []string {
 	}
 	hooks := record(readJSONFile(target)["hooks"])
 	var missing []string
-	for _, event := range hookEvents {
-		want, err := s.hookCommand(event.name)
+	for _, event := range hookEventsFor(host) {
+		want, err := s.hookCommand(host, event.handlerName())
 		if err != nil {
 			return []string{"hook command"}
 		}
@@ -80,7 +80,7 @@ func (s *Store) missingHookEvents(host string) []string {
 			}
 		}
 		if !found {
-			missing = append(missing, event.name)
+			missing = append(missing, event.handlerName())
 		}
 	}
 	return missing

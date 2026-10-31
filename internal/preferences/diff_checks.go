@@ -147,6 +147,11 @@ func (s *Store) stopHook(input io.Reader, output io.Writer) {
 	if payload == nil || payload["stop_hook_active"] == true || os.Getenv("LEARN_PREFERENCES_MAINTENANCE") == "1" {
 		return
 	}
+	if reason := s.unseenPublication(textField(payload["session_id"])); reason != "" {
+		response["decision"] = "block"
+		response["reason"] = reason
+		return
+	}
 	var checks []guard
 	for _, g := range s.loadGuards() {
 		if g.Kind == "diff_check" && len(g.Patterns) > 0 && diffChecks[g.Patterns[0]] != nil && s.activeRule(g.RuleID) != nil {
@@ -195,4 +200,21 @@ func (s *Store) stopHook(input io.Reader, output io.Writer) {
 	_ = s.recordActivity(ActivityEvent{Kind: activityBlocked, RepoKey: repo, SessionKey: digest(session), Detail: strings.Join(findings, "; ")})
 	response["decision"] = "block"
 	response["reason"] = "Before finishing, fix these preference violations:\n- " + strings.Join(findings, "\n- ")
+}
+
+// unseenPublication returns a stop reason when a review this session owns
+// has a published batch the agent has not been told about yet, so feedback
+// published mid-turn is never left unread.
+func (s *Store) unseenPublication(session string) string {
+	notices := s.ownedReviewNotices(session)
+	if len(notices) == 0 {
+		return ""
+	}
+	for _, notice := range notices {
+		if notice.Pending == 0 || !s.claimBatch(session, notice.BatchID) {
+			continue
+		}
+		return fmt.Sprintf("The reviewer published Hunkyard review %s (%s). Run: hunkyard feedback await --session %s --json and process it before finishing.", notice.ReviewID, notice.Disposition, notice.ReviewID)
+	}
+	return ""
 }

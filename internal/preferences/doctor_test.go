@@ -24,7 +24,7 @@ func TestDoctorReportsMissingEvents(t *testing.T) {
 	if err := os.MkdirAll(claudeDir, 0700); err != nil {
 		t.Fatal(err)
 	}
-	command, _ := s.hookCommand("UserPromptSubmit")
+	command, _ := s.hookCommand("claude", "UserPromptSubmit")
 	settings := `{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":` + quoteJSON(command) + `}]}]}}`
 	if err := os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte(settings), 0600); err != nil {
 		t.Fatal(err)

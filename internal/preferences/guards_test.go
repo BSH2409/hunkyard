@@ -41,7 +41,7 @@ func guardedStore(t *testing.T, kind string, patterns ...string) (*Store, string
 	captureRule(t, s, "Keep plans and specs out of git.", "devops")
 	current, _ := s.loadCurrent()
 	ruleID := textField(current.Rules.rules[0]["id"])
-	if _, err := s.addGuard(kind, ruleID, patterns); err != nil {
+	if _, err := s.addGuard(kind, ruleID, patterns, nil, nil); err != nil {
 		t.Fatal(err)
 	}
 	return s, ruleID
