@@ -20,6 +20,9 @@ async function appendMarker(request: Parameters<typeof sessionCwd>[0]) {
   return async () => {
     fs.writeFileSync(file, original);
     await signalRoundComplete(request);
+    // Wait for the server to reload the original, or the next test can mark
+    // the file viewed at this marker's hash and append the same marker again.
+    await expect.poll(async () => (await (await request.get('/api/file?path=server.go')).json()).content, { timeout: 15_000 }).not.toContain(MARKER);
   };
 }
 
