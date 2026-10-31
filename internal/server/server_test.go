@@ -1294,6 +1294,26 @@ func TestCheckForUpdates(t *testing.T) {
 	}
 }
 
+func TestCheckForUpdatesReadsFullReleaseResponse(t *testing.T) {
+	// GitHub's releases/latest response carries the notes and every asset;
+	// v1.0.2's was ~19 KB, so a truncated read never parsed.
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprintf(w, `{"url":"x","body":%q,"tag_name":"v9.9.9","assets":[]}`, strings.Repeat("release notes ", 2000))
+	}))
+	defer gh.Close()
+	s, _ := newTestServer(t)
+	s.currentVersion = "v1.0.0"
+	s.githubAPIURL = gh.URL
+	s.CheckForUpdates()
+	s.versionMu.RLock()
+	got := s.latestVersion
+	s.versionMu.RUnlock()
+	if got != "9.9.9" {
+		t.Fatalf("latestVersion = %q, want 9.9.9", got)
+	}
+}
+
 func TestReleaseNewer(t *testing.T) {
 	tests := []struct {
 		latest, current string

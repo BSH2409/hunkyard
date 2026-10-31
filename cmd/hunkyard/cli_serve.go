@@ -67,6 +67,12 @@ func checkStaleIntegrations(sc *server.DaemonCLIConfig, srv *Server, cwd string)
 	srv.SetIntegrationWarnings(warnings, checkMissingIntegrations(cwd, home))
 }
 
+// updateCheckEnabled reports whether the daemon asks GitHub for the latest
+// release, which the page shows as an update notice.
+func updateCheckEnabled(sc *server.DaemonCLIConfig) bool {
+	return !sc.NoUpdateCheck && os.Getenv("HUNKYARD_NO_UPDATE_CHECK") == ""
+}
+
 func bindListener(host string, port int) (net.Listener, error) {
 	addr := net.JoinHostPort(host, strconv.Itoa(port))
 	var listener net.Listener
@@ -310,6 +316,9 @@ func runServe(args []string) {
 	sess.CWD = cwd
 
 	checkStaleIntegrations(sc, srv, cwd)
+	if updateCheckEnabled(sc) {
+		go srv.CheckForUpdates()
+	}
 
 	if sc.LiveOrigin != "" && proxyLn != nil {
 		sess.ProxyPort = proxyLn.Addr().(*net.TCPAddr).Port

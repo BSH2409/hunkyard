@@ -478,7 +478,9 @@ func (s *Server) CheckForUpdates() {
 	if resp.StatusCode != http.StatusOK {
 		return
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	// The response carries the release notes and every asset (~19 KB for
+	// v1.0.2); a short limit truncates it into invalid JSON.
+	body, err := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 	if err != nil {
 		return
 	}
