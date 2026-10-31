@@ -17,12 +17,16 @@ import (
 
 	"github.com/BSH2409/hunkyard/internal/daemon"
 	"github.com/BSH2409/hunkyard/internal/feedback"
+	"github.com/BSH2409/hunkyard/internal/preferences"
 )
 
 // This exercises the real binary/protocol; it does not claim a live model applied a skill.
 func TestHostRoundLoopProtocol(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiled CLI round loop")
+	}
+	if !preferences.SupportedPlatform {
+		t.Skip("the round loop learns preferences: " + preferences.ErrUnsupportedPlatform.Error())
 	}
 	_, file, _, _ := runtime.Caller(0)
 	module := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))

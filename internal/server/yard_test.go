@@ -45,6 +45,9 @@ func yardRequest(srv *Server, method, path, site string) *httptest.ResponseRecor
 }
 
 func TestYardEndpointsWorkWithoutSession(t *testing.T) {
+	if !preferences.SupportedPlatform {
+		t.Skip(preferences.ErrUnsupportedPlatform.Error())
+	}
 	srv, root := yardServer(t)
 	seedYardRule(t, root)
 	for _, path := range []string{"/api/yard/rules", "/api/yard/persona", "/api/yard/pipeline", "/api/yard/activity?limit=5", "/api/yard/health", "/api/yard/loads"} {
@@ -59,6 +62,9 @@ func TestYardEndpointsWorkWithoutSession(t *testing.T) {
 }
 
 func TestYardMutationsRequireSameOriginBrowser(t *testing.T) {
+	if !preferences.SupportedPlatform {
+		t.Skip(preferences.ErrUnsupportedPlatform.Error())
+	}
 	srv, root := yardServer(t)
 	id := seedYardRule(t, root)
 	if w := yardRequest(srv, http.MethodPost, "/api/yard/rules/"+id+"/retire", ""); w.Code != http.StatusForbidden {
@@ -70,5 +76,17 @@ func TestYardMutationsRequireSameOriginBrowser(t *testing.T) {
 	w := yardRequest(srv, http.MethodGet, "/api/yard/rules", "")
 	if strings.Contains(w.Body.String(), `"status":"active"`) {
 		t.Fatalf("rule still active after retire: %s", w.Body.String())
+	}
+}
+
+func TestYardUnsupportedPlatformAnswers501(t *testing.T) {
+	previous := preferences.SupportedPlatform
+	preferences.SupportedPlatform = false
+	t.Cleanup(func() { preferences.SupportedPlatform = previous })
+	s, _ := newTestServer(t)
+	rec := httptest.NewRecorder()
+	s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/yard/rules", nil))
+	if rec.Code != http.StatusNotImplemented || !strings.Contains(rec.Body.String(), "Windows") {
+		t.Fatalf("unsupported platform: %d %s", rec.Code, rec.Body)
 	}
 }

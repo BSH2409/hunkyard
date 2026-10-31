@@ -493,3 +493,12 @@ func TestCurrentGenerationLinkTarget(t *testing.T) {
 		}
 	}
 }
+
+func TestOpenRefusesUnsupportedPlatform(t *testing.T) {
+	previous := SupportedPlatform
+	SupportedPlatform = false
+	t.Cleanup(func() { SupportedPlatform = previous })
+	if _, err := Open(Config{Root: t.TempDir()}); !errors.Is(err, ErrUnsupportedPlatform) {
+		t.Fatalf("Open on an unsupported platform: %v", err)
+	}
+}

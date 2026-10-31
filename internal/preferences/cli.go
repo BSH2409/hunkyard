@@ -22,6 +22,14 @@ import (
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	emit := func(value any) { _ = json.NewEncoder(stdout).Encode(value) }
 	usage := func(class string) int { emit(map[string]any{"status": "usage", "error_class": class}); return 2 }
+	if !SupportedPlatform {
+		// Installed hooks and status lines stay silent instead of failing every turn.
+		if len(args) > 0 && (args[0] == "hook" || args[0] == "statusline") {
+			return 0
+		}
+		emit(map[string]any{"status": "unsupported", "error": ErrUnsupportedPlatform.Error()})
+		return 3
+	}
 	if len(args) > 0 && (args[0] == "guard" || args[0] == "allow") {
 		return runGuardCLI(args, stdout)
 	}

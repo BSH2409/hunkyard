@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -18,6 +19,10 @@ import (
 //nolint:gocyclo // One case per Yard endpoint keeps the small API in one place.
 func (s *Server) handleYard(w http.ResponseWriter, r *http.Request) {
 	store, err := preferences.Open(preferences.Config{})
+	if errors.Is(err, preferences.ErrUnsupportedPlatform) {
+		http.Error(w, err.Error(), http.StatusNotImplemented)
+		return
+	}
 	if err != nil {
 		http.Error(w, "cannot open preference store", http.StatusInternalServerError)
 		return

@@ -26,6 +26,9 @@ SHARD="${E2E_SHARD:-all}"
 START_GIT=1; START_GIT2=1; START_FILE=1; START_SINGLE=1
 START_MULTI=1; START_RANGE=1; START_PERF=1
 START_HUGE=1; START_YARD=1
+# Learned preferences (and so the Yard fixture's seeded rules) are not
+# supported on native Windows; see preferences.SupportedPlatform.
+case "$(uname -s)" in MINGW*|MSYS*|CYGWIN*) START_YARD=0 ;; esac
 if [ "$SHARD" = "1/2" ]; then
   # Runs git --shard=1/2 against the GIT_PORT fixture, so GIT2 is unneeded.
   START_GIT2=0

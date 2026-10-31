@@ -52,6 +52,9 @@ func TestReviewCandidateHonorsHostClassificationWithoutPromotion(t *testing.T) {
 
 func preferenceFixture(t *testing.T) (*Store, *preferences.Store, Batch, string, string) {
 	t.Helper()
+	if !preferences.SupportedPlatform {
+		t.Skip(preferences.ErrUnsupportedPlatform.Error())
+	}
 	root := t.TempDir()
 	repo := filepath.Join(root, "reviewed-repository")
 	if err := os.Mkdir(repo, 0700); err != nil {
@@ -216,5 +219,20 @@ func TestLearnPassesCodeContext(t *testing.T) {
 	code, _ := observation["code_context"].(map[string]any)
 	if code["path"] != "main.go" || code["start_line"] != float64(4) || code["excerpt"] != "# explain the obvious" {
 		t.Fatalf("code context not passed: %v", observation["code_context"])
+	}
+}
+
+func TestLearnWithoutPreferenceSupportCompletesBatch(t *testing.T) {
+	store, _, batch, repo, _ := preferenceFixture(t)
+	previous := preferences.SupportedPlatform
+	preferences.SupportedPlatform = false
+	t.Cleanup(func() { preferences.SupportedPlatform = previous })
+	decisions := []PreferenceDecision{{CommentID: batch.Comments[0].ID, Revision: batch.Comments[0].Revision, Kind: "directive", Directive: "Prefer clear Go names.", Scope: "global", Surfaces: []string{"naming"}}}
+	report, err := store.Learn(nil, batch.ID, decisions, "owner", repo)
+	if err != nil || len(report.Outcomes) != 1 || report.Outcomes[0].Status != "unsupported" {
+		t.Fatalf("unsupported learning: %#v %v", report, err)
+	}
+	if err := store.Ack(batch.ID); err != nil {
+		t.Fatalf("batch could not be acknowledged: %v", err)
 	}
 }

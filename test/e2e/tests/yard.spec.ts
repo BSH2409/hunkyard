@@ -1,6 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { clearAllComments, loadPage } from './helpers';
 
+// Learned preferences are not supported on native Windows (preferences.SupportedPlatform).
+test.skip(process.platform === 'win32', 'learned preferences are not supported on native Windows');
+
 test.beforeEach(async ({ request }) => { await clearAllComments(request); });
 
 test('Yard tab lists a rule, shows health, and retires a rule', async ({ page }) => {

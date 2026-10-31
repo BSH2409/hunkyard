@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -347,7 +348,7 @@ func (s *Server) handleFeedbackLearn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefs, err := preferences.Open(preferences.Config{})
-	if err != nil {
+	if err != nil && !errors.Is(err, preferences.ErrUnsupportedPlatform) {
 		http.Error(w, "cannot open preference store", 500)
 		return
 	}

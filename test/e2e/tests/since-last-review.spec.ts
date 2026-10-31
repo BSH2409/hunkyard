@@ -8,10 +8,15 @@ const MARKER = '// since-last-review marker';
 async function appendMarker(request: Parameters<typeof sessionCwd>[0]) {
   const file = path.join(await sessionCwd(request), 'server.go');
   const original = fs.readFileSync(file, 'utf8');
+  const hashBefore = (await (await request.get('/api/file?path=server.go')).json()).file_hash;
   fs.writeFileSync(file, original + MARKER + '\n');
   // The agent's edit lands as a new round, as it would after review feedback.
   await expect(await signalRoundComplete(request)).toBeOK();
-  await expect.poll(async () => (await (await request.get('/api/file?path=server.go')).json()).content, { timeout: 15_000 }).toContain(MARKER);
+  // Wait for the new content and its hash, which the viewed state compares.
+  await expect.poll(async () => {
+    const file = await (await request.get('/api/file?path=server.go')).json();
+    return file.content.includes(MARKER) && file.file_hash !== hashBefore;
+  }, { timeout: 15_000 }).toBe(true);
   return async () => {
     fs.writeFileSync(file, original);
     await signalRoundComplete(request);
@@ -45,6 +50,8 @@ test('a viewed file that changes afterwards is un-viewed and badged', async ({ p
   const viewed = fileHeader(page, 'server.go').locator('.file-header-viewed input');
   await viewed.check();
   await expect(viewed).toBeChecked();
+  // Leave the page so its own round reload cannot race the fresh load below.
+  await page.goto('about:blank');
   const restore = await appendMarker(request);
   try {
     await loadPage(page);

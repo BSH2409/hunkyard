@@ -48,6 +48,9 @@ type generation struct {
 }
 
 func Open(config Config) (*Store, error) {
+	if !SupportedPlatform {
+		return nil, ErrUnsupportedPlatform
+	}
 	config, err := resolveConfig(config)
 	if err != nil {
 		return nil, err

@@ -1,6 +1,7 @@
 package preferences
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -8,6 +9,11 @@ import (
 // TestMain keeps tests away from the user's real configuration, so a
 // configured maintenance host never starts a real model run during tests.
 func TestMain(m *testing.M) {
+	if !SupportedPlatform {
+		// TestOpenRefusesUnsupportedPlatform covers this platform from Linux.
+		fmt.Println("skipping preference engine tests:", ErrUnsupportedPlatform)
+		os.Exit(0)
+	}
 	home, err := os.MkdirTemp("", "preferences-test-home-")
 	if err != nil {
 		panic(err)
