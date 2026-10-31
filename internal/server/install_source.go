@@ -6,14 +6,21 @@ import (
 	"strings"
 )
 
-// installationSource describes the package manager that owns the running
-// binary. It is deliberately conservative: an unrecognised path is returned
-// as unknown rather than guessing an update command.
+// installationSource describes how the running binary was installed, so
+// Updates can show the right update step.
 const (
 	installationSourceUnknown = "unknown"
 	installationSourceGo      = "go"
 	installationSourceNix     = "nix"
+	installationSourceRelease = "release" // an official release binary
+	installationSourceSource  = "source"  // built from a checkout
 )
+
+// buildDistribution is "release" in official release binaries, stamped by
+// the release workflow through `make build-all DISTRIBUTION=release`
+// (-X .../internal/server.buildDistribution=release). Other builds leave it
+// empty.
+var buildDistribution string
 
 var executablePath = os.Executable
 
@@ -27,15 +34,21 @@ func detectInstallationSource() string {
 	}
 
 	home, _ := os.UserHomeDir()
-	return installationSourceForPath(path, os.Getenv("GOBIN"), os.Getenv("GOPATH"), home)
+	return installationSourceForPath(path, os.Getenv("GOBIN"), os.Getenv("GOPATH"), home, buildDistribution)
 }
 
-func installationSourceForPath(path, goBin, goPath, home string) string {
+// installationSourceForPath prefers the Nix store, then the release stamp,
+// then a Go bin directory (`go install` builds carry no stamp); any other
+// unstamped binary was built from a checkout.
+func installationSourceForPath(path, goBin, goPath, home, distribution string) string {
 	cleanPath := filepath.Clean(path)
 	portablePath := filepath.ToSlash(cleanPath)
 
 	if strings.HasPrefix(portablePath, "/nix/store/") {
 		return installationSourceNix
+	}
+	if distribution == "release" {
+		return installationSourceRelease
 	}
 
 	goBins := []string{goBin}
@@ -52,5 +65,5 @@ func installationSourceForPath(path, goBin, goPath, home string) string {
 			return installationSourceGo
 		}
 	}
-	return installationSourceUnknown
+	return installationSourceSource
 }

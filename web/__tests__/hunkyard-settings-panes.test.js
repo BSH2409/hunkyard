@@ -621,3 +621,15 @@ test('renderUpdatesPane: an unrecognised install points at the release page and 
   assert.match(pane.innerHTML, /go build -o &quot;\$\(command -v hunkyard\)&quot; \.\/cmd\/hunkyard|go build -o "\$\(command -v hunkyard\)" \.\/cmd\/hunkyard/);
   assert.doesNotMatch(pane.innerHTML, /from the release notes/);
 });
+
+test('renderUpdatesPane: release and checkout builds get their own update steps', () => {
+  const sp = loadShared();
+  const release = makePane();
+  sp.renderUpdatesPane(release, { version: '1.0.2', installation_source: 'release' }, {});
+  assert.match(release.innerHTML, /Download your platform's binary from the release page/);
+  assert.doesNotMatch(release.innerHTML, /go build/);
+  const source = makePane();
+  sp.renderUpdatesPane(source, { version: '1.0.2', installation_source: 'source' }, {});
+  assert.match(source.innerHTML, /git pull &amp;&amp; go build -o &quot;\$\(command -v hunkyard\)&quot; \.\/cmd\/hunkyard/);
+  assert.doesNotMatch(source.innerHTML, /release page/);
+});

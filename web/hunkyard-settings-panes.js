@@ -399,7 +399,13 @@
     if (source === 'nix') {
       return '<div class="updates-row-note">Update the Nix profile or flake that provides Hunkyard.</div>';
     }
-    // A binary built from a checkout (the README's install) or downloaded by hand.
+    if (source === 'release') {
+      return '<div class="updates-row-note">Download your platform\'s binary from the release page and replace this one.</div>';
+    }
+    if (source === 'source') {
+      return '<div class="updates-row-note">Pull your Hunkyard checkout and rebuild, from the checkout:</div>'
+        + updateCommandHTML('git pull && go build -o "$(command -v hunkyard)" ./cmd/hunkyard', '');
+    }
     return '<div class="updates-row-note">Download your platform\'s binary from the release page, or pull your checkout and rebuild:</div>'
       + updateCommandHTML('go build -o "$(command -v hunkyard)" ./cmd/hunkyard', '');
   }
