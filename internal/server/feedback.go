@@ -2,12 +2,15 @@ package server
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
+	"unicode"
 
 	"github.com/BSH2409/hunkyard/internal/feedback"
 	"github.com/BSH2409/hunkyard/internal/preferences"
@@ -66,6 +69,10 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	sess := s.session.Load()
+	if request.Disposition == "approve" && openBlockingComments(sess) > 0 {
+		http.Error(w, "resolve blocking comments before approving", http.StatusConflict)
+		return
+	}
 	snapshot, err := sess.CaptureReviewSnapshot()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("cannot capture review: %v", err), http.StatusConflict)
@@ -95,7 +102,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	batch := feedback.Batch{Version: 1, ReviewID: s.ownerReviewID, SnapshotID: snapshot.ID, Round: snapshot.Round, Disposition: request.Disposition, Summary: request.Summary, SkillIDs: request.SkillIDs, Comments: []feedback.Comment{}}
 	appendComment := func(path string, c session.Comment) {
 		file, exists := files[path]
-		parent := feedback.Comment{ID: c.ID, Body: c.Body, Path: path, OldPath: file.OldPath, Scope: c.Scope, Side: c.Side, StartLine: c.StartLine, EndLine: c.EndLine, Quote: c.Quote, Anchor: c.Anchor, HeadSHA: c.HeadSHA, FocusKey: c.FocusKey, ContentID: c.ContentID, ViewID: c.ViewID, Outdated: path != "" && (!exists || (c.ContentID != "" && c.ContentID != file.ContentID))}
+		parent := feedback.Comment{ID: c.ID, Body: c.Body, Path: path, OldPath: file.OldPath, Scope: c.Scope, Side: c.Side, StartLine: c.StartLine, EndLine: c.EndLine, Quote: c.Quote, Anchor: c.Anchor, HeadSHA: c.HeadSHA, FocusKey: c.FocusKey, ContentID: c.ContentID, ViewID: c.ViewID, Outdated: path != "" && (!exists || (c.ContentID != "" && c.ContentID != file.ContentID)), Label: c.Label, Blocking: c.Blocking, ClaimUnchanged: c.ClaimUnchangedRound > 0 && !c.Resolved}
 		if c.AuthorKind != "agent" {
 			batch.Comments = append(batch.Comments, parent)
 		}
@@ -125,6 +132,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 			appendComment(path, c)
 		}
 	}
+	appendReviewerEdits(&batch, sess, files)
 	if request.Summary != "" {
 		batch.Comments = append(batch.Comments, feedback.Comment{ID: "review-summary", Body: request.Summary, Scope: "review"})
 	}
@@ -340,7 +348,7 @@ func (s *Server) handleFeedbackLearn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	prefs, err := preferences.Open(preferences.Config{})
-	if err != nil {
+	if err != nil && !errors.Is(err, preferences.ErrUnsupportedPlatform) {
 		http.Error(w, "cannot open preference store", 500)
 		return
 	}
@@ -367,4 +375,65 @@ func (s *Server) handleFeedbackLearn(w http.ResponseWriter, r *http.Request) {
 		notification = "Preference classification needs attention in the launching CLI."
 	}
 	sess.Notify(SSEEvent{Type: "preferences-updated", Content: notification})
+}
+
+const reviewerEditLineCap = 40
+
+// appendReviewerEdits adds the reviewer's own on-disk edits as "edit" comments
+// so the host classifies them like any other review feedback.
+func appendReviewerEdits(batch *feedback.Batch, sess *Session, files map[string]session.ReviewSnapshotFile) {
+	seen := map[string]bool{}
+	for _, edit := range sess.ReviewerEdits() {
+		id := fmt.Sprintf("edit:%s:%d", edit.Path, edit.StartLine)
+		if len(id) > 256 || seen[id] {
+			continue
+		}
+		seen[id] = true
+		file := files[edit.Path]
+		batch.Comments = append(batch.Comments, feedback.Comment{ID: id, Body: reviewerEditBody(edit.After), Path: edit.Path, OldPath: file.OldPath, Scope: "edit", StartLine: edit.StartLine, EndLine: edit.EndLine, Quote: cappedLines(edit.Before), ContentID: file.ContentID})
+	}
+}
+
+func reviewerEditBody(after []string) string {
+	if len(after) == 0 {
+		return "Reviewer deleted these lines."
+	}
+	return "Reviewer edited these lines:\n" + cappedLines(after)
+}
+
+// cappedLines joins lines without control characters, keeping the first
+// reviewerEditLineCap and counting the rest.
+func cappedLines(lines []string) string {
+	kept := lines
+	if len(kept) > reviewerEditLineCap {
+		kept = kept[:reviewerEditLineCap]
+	}
+	clean := make([]string, len(kept))
+	for i, line := range kept {
+		clean[i] = strings.Map(func(r rune) rune {
+			if r != '\t' && unicode.IsControl(r) {
+				return -1
+			}
+			return r
+		}, line)
+	}
+	text := strings.Join(clean, "\n")
+	if more := len(lines) - len(kept); more > 0 {
+		text += fmt.Sprintf("\n… %d more lines", more)
+	}
+	return text
+}
+
+// openBlockingComments counts unresolved blocking comments in every file, not
+// only those in the page's current scope.
+func openBlockingComments(sess *Session) int {
+	open := 0
+	for _, comments := range sess.GetVisibleComments() {
+		for _, c := range comments {
+			if c.Blocking && !c.Resolved {
+				open++
+			}
+		}
+	}
+	return open
 }

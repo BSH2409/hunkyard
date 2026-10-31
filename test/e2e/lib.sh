@@ -143,7 +143,10 @@ e2e_playwright_browser_present() {
 e2e_wait_port() {
   local port="$1" pid="$2" deadline="${3:-${E2E_READY_TIMEOUT:-300}}"
   local start=$SECONDS
-  while ! curl -sf "http://127.0.0.1:$port/api/session" >/dev/null 2>&1; do
+  # A fixture without a review session sets E2E_READY_PATH_<port>.
+  local path_var="E2E_READY_PATH_$port"
+  local ready_path="${!path_var:-/api/session}"
+  while ! curl -sf "http://127.0.0.1:$port$ready_path" >/dev/null 2>&1; do
     if [ -n "$pid" ] && ! kill -0 "$pid" 2>/dev/null; then
       echo "e2e: fixture for port $port (pid $pid) exited before becoming ready" >&2
       return 1
@@ -167,6 +170,7 @@ e2e_export_fake_home() {
   local fake_home="$1"
   export HOME="$fake_home"
   export CODEX_HOME="$fake_home/.codex"
+  export LEARN_PREFERENCES_HOME="$fake_home/.agents"
   export CLAUDE_CONFIG_DIR="$fake_home/.claude"
   export HUNKYARD_OWNER_ID="codex:e2e:$fake_home"
   if [ "$E2E_IS_WINDOWS" -eq 1 ]; then

@@ -469,3 +469,36 @@ func TestPersonaMirrorConfinementAndManagedRemoval(t *testing.T) {
 		t.Fatal("unknown manual file changed", err)
 	}
 }
+
+func TestCurrentGenerationLinkTarget(t *testing.T) {
+	id := "gen_" + strings.Repeat("a", 16)
+	if !generationIDPattern.MatchString(id) {
+		t.Skip("fixture id does not match the generation pattern")
+	}
+	tests := []struct {
+		target string
+		ok     bool
+	}{
+		{"generations/" + id, true},
+		{`generations\` + id, true}, // os.Readlink on Windows
+		{"generations/../" + id, false},
+		{"/abs/generations/" + id, false},
+		{"other/" + id, false},
+		{"generations/" + id + "/x", false},
+	}
+	for _, tt := range tests {
+		got, ok := currentGenerationID(tt.target)
+		if ok != tt.ok || ok && got != id {
+			t.Errorf("currentGenerationID(%q) = %q, %v; want ok=%v", tt.target, got, ok, tt.ok)
+		}
+	}
+}
+
+func TestOpenRefusesUnsupportedPlatform(t *testing.T) {
+	previous := SupportedPlatform
+	SupportedPlatform = false
+	t.Cleanup(func() { SupportedPlatform = previous })
+	if _, err := Open(Config{Root: t.TempDir()}); !errors.Is(err, ErrUnsupportedPlatform) {
+		t.Fatalf("Open on an unsupported platform: %v", err)
+	}
+}

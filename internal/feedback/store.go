@@ -217,3 +217,16 @@ func (s *Store) HasPublications() (bool, error) {
 	err := s.transaction(func(state *journal) error { published = len(state.Publications) > 0; return nil })
 	return published, err
 }
+
+// LatestSnapshotID returns the snapshot of the most recent publication, or ""
+// before the first one.
+func (s *Store) LatestSnapshotID() (string, error) {
+	id := ""
+	err := s.transaction(func(state *journal) error {
+		if n := len(state.Publications); n > 0 {
+			id = state.Publications[n-1].Batch.SnapshotID
+		}
+		return nil
+	})
+	return id, err
+}

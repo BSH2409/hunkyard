@@ -12,11 +12,16 @@ import (
 type Config struct {
 	Root  string
 	Clock func() time.Time
+
+	explicitRoot bool
 }
 
+// resolveConfig defaults the root to $LEARN_PREFERENCES_HOME, then ~/.agents,
+// the same canonical store the learn-preferences skill has always used.
 func resolveConfig(config Config) (Config, error) {
+	config.explicitRoot = config.Root != ""
 	if config.Root == "" {
-		config.Root = os.Getenv("CODEX_HOME")
+		config.Root = os.Getenv("LEARN_PREFERENCES_HOME")
 		if strings.TrimSpace(config.Root) == "" {
 			home, err := os.UserHomeDir()
 			if err != nil || strings.TrimSpace(home) == "" {
@@ -29,7 +34,7 @@ func resolveConfig(config Config) (Config, error) {
 					return Config{}, fmt.Errorf("home directory is unavailable")
 				}
 			}
-			config.Root = filepath.Join(home, ".codex")
+			config.Root = filepath.Join(home, ".agents")
 		}
 	}
 	if strings.TrimSpace(config.Root) == "" {

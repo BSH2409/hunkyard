@@ -89,3 +89,23 @@ describe('hunkyard-comment-form', () => {
     assert.ok(f.el.className.includes('compact'));
   });
 });
+
+describe('label picker', () => {
+  const { buildLabelPicker } = require('../hunkyard-comment-form.js');
+  function click(el) { (el.listeners.click || []).forEach(fn => fn({ preventDefault() {} })); }
+  it('selects one label at a time and toggles blocking', () => {
+    const picker = buildLabelPicker();
+    assert.deepEqual(picker.getValue(), { label: '', blocking: false });
+    const buttons = picker.el.children;
+    const issue = buttons.find(b => b.dataset.label === 'issue');
+    const nit = buttons.find(b => b.dataset.label === 'nit');
+    const blocking = buttons.find(b => b.dataset.blocking === 'true');
+    click(issue);
+    click(blocking);
+    assert.deepEqual(picker.getValue(), { label: 'issue', blocking: true });
+    click(nit);
+    assert.equal(picker.getValue().label, 'nit');
+    click(nit);
+    assert.equal(picker.getValue().label, '');
+  });
+});

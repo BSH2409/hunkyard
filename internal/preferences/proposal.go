@@ -38,8 +38,11 @@ type maintenanceBatch struct {
 	digest       string
 	observations []map[string]any
 	rules        []rule
-	catalog      *catalog
-	source       *sourceSnapshot
+	// candidateReview lists the oldest candidates for the proposal to
+	// promote, merge or ignore; omitted from the document when empty.
+	candidateReview []string
+	catalog         *catalog
+	source          *sourceSnapshot
 }
 type validatedProposal struct {
 	document map[string]any

@@ -194,3 +194,90 @@ func TestPreferenceCronRejectsSymlinkLog(t *testing.T) {
 		t.Fatal("cron followed log symlink", err)
 	}
 }
+
+func TestHookPathFollowsHostConfiguration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	t.Setenv("LEARN_PREFERENCES_HOME", "")
+	tests := []struct {
+		host, codexHome, claudeDir, want string
+	}{
+		{"codex", "", "", filepath.Join(home, ".codex", "hooks.json")},
+		{"codex", filepath.Join(home, "codex-custom"), "", filepath.Join(home, "codex-custom", "hooks.json")},
+		{"claude", "", "", filepath.Join(home, ".claude", "settings.json")},
+		{"claude", "", filepath.Join(home, ".claude-office"), filepath.Join(home, ".claude-office", "settings.json")},
+	}
+	for _, tt := range tests {
+		t.Setenv("CODEX_HOME", tt.codexHome)
+		t.Setenv("CLAUDE_CONFIG_DIR", tt.claudeDir)
+		s, err := Open(Config{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, err := s.hookPath(tt.host); err != nil || got != tt.want {
+			t.Errorf("hookPath(%s) with CODEX_HOME=%q CLAUDE_CONFIG_DIR=%q = %q, %v; want %q", tt.host, tt.codexHome, tt.claudeDir, got, err, tt.want)
+		}
+	}
+}
+
+func TestInstallHookReplacesEarlierRootHook(t *testing.T) {
+	s := testStore(t)
+	if err := ensureDirectory(s.config.Root); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(s.config.Root, "hooks.json")
+	original := `{"hooks":{"UserPromptSubmit":[{"hooks":[{"type":"command","command":"'/old/hunkyard' preferences hook --root '/home/x/.codex'"},{"type":"command","command":"echo hi"}]}]}}`
+	if err := os.WriteFile(target, []byte(original), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.installHook("codex"); err != nil {
+		t.Fatal(err)
+	}
+	data, err := regularFile(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := strings.Count(string(data), " preferences hook --event UserPromptSubmit "); n != 1 {
+		t.Fatalf("want exactly one preference hook, got %d: %s", n, data)
+	}
+	if strings.Contains(string(data), "/home/x/.codex") || !strings.Contains(string(data), "echo hi") {
+		t.Fatalf("stale hook kept or unrelated hook lost: %s", data)
+	}
+}
+
+func TestInstallHookWritesAllEventsPerHost(t *testing.T) {
+	want := map[string][]string{"claude": {"PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"}, "codex": {"PreToolUse", "SessionStart", "Stop", "UserPromptSubmit"}}
+	for host, events := range want {
+		t.Run(host, func(t *testing.T) {
+			s := testStore(t)
+			t.Setenv("CLAUDE_CONFIG_DIR", filepath.Join(s.config.Root, "claude"))
+			result, err := s.installHook(host)
+			if err != nil {
+				t.Fatal(err)
+			}
+			hooks := record(readJSONFile(textField(result["path"]))["hooks"])
+			for _, event := range events {
+				groups, err := mapArray(hooks[event])
+				if err != nil {
+					t.Fatalf("%s missing: %v", event, err)
+				}
+				found := 0
+				for _, group := range groups {
+					entries, _ := mapArray(group["hooks"])
+					for _, entry := range entries {
+						if strings.Contains(textField(entry["command"]), " preferences hook --event "+event+" ") {
+							found++
+						}
+					}
+					if event == "PreToolUse" && textField(group["matcher"]) == "" {
+						t.Fatal("PreToolUse needs a shell matcher")
+					}
+				}
+				if found != 1 {
+					t.Fatalf("%s: want one Hunkyard handler, got %d", event, found)
+				}
+			}
+		})
+	}
+}

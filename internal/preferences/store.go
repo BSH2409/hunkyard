@@ -27,6 +27,7 @@ var repositoryKeyPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}-[0-9a-f]
 
 type Store struct {
 	config        Config
+	hostKind      string
 	fault         func(string) error
 	mirrorError   error
 	legacyPersona map[string]string
@@ -47,6 +48,9 @@ type generation struct {
 }
 
 func Open(config Config) (*Store, error) {
+	if !SupportedPlatform {
+		return nil, ErrUnsupportedPlatform
+	}
 	config, err := resolveConfig(config)
 	if err != nil {
 		return nil, err
@@ -189,8 +193,8 @@ func (s *Store) loadCurrent() (*generation, error) {
 	if err != nil {
 		return nil, err
 	}
-	id := strings.TrimPrefix(filepath.ToSlash(target), "generations/")
-	if target != "generations/"+id || !generationIDPattern.MatchString(id) || strings.Contains(id, "..") {
+	id, ok := currentGenerationID(target)
+	if !ok {
 		return nil, fmt.Errorf("current must name one relative generation")
 	}
 	if err := checkDirectoryChain(s.config.Root, s.dataPath("generations")); err != nil {
@@ -879,4 +883,15 @@ func validateTimestamp(value any) error {
 		return fmt.Errorf("timestamp must be an ISO-8601 string")
 	}
 	return nil
+}
+
+// currentGenerationID reads the generation a `current` link names. The link is
+// written as generations/<id>; os.Readlink on Windows returns it with a
+// backslash, so both separators are accepted.
+func currentGenerationID(target string) (string, bool) {
+	id, found := strings.CutPrefix(strings.ReplaceAll(target, `\`, "/"), "generations/")
+	if !found || !generationIDPattern.MatchString(id) || strings.Contains(id, "..") {
+		return "", false
+	}
+	return id, true
 }

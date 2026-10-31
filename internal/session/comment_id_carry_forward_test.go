@@ -192,3 +192,10 @@ func newCarryForwardRoundSession(t *testing.T) (*Session, string) {
 	t.Cleanup(func() { quiesceSession(t, s) })
 	return s, identity
 }
+
+func TestCarryForwardKeepsLabels(t *testing.T) {
+	carried := carryForwardComment(Comment{ID: "c1", Label: "nit", Blocking: true}, "2026-10-31T00:00:00Z")
+	if carried.Label != "nit" || !carried.Blocking {
+		t.Fatalf("labels dropped at round-complete: %+v", carried)
+	}
+}

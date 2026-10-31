@@ -26,6 +26,7 @@ func main() {
 
 	// Keep directly installable and plugin-packaged skills byte-identical.
 	copyAsset(filepath.Join(repoRoot, "internal", "preferences", "assets", "maintenance-proposal.json"), filepath.Join(integrationsDir, "preferences", "schemas", "maintenance-proposal.json"))
+	copyAsset(filepath.Join(integrationsDir, "preferences", "references", "local-maintenance.md"), filepath.Join(repoRoot, "internal", "preferences", "assets", "maintenance-instructions.md"))
 	for _, dir := range []string{"codex/plugin/hunkyard/skills/learn-preferences", "claude-code/skills/learn-preferences"} {
 		for _, name := range []string{"SKILL.md", "references/local-maintenance.md", "schemas/maintenance-proposal.json"} {
 			copyAsset(filepath.Join(integrationsDir, "preferences", filepath.FromSlash(name)), filepath.Join(integrationsDir, filepath.FromSlash(dir), filepath.FromSlash(name)))

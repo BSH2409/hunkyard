@@ -90,6 +90,7 @@ hunkyard install <agent>          # Install integration config for an AI tool
 hunkyard plan [...]               # Plan-file workflow
 hunkyard plan-hook [--mode claude|codex]  # Internal hook used by agent plan flows
 hunkyard check                    # Self-check (env, git, gh availability)
+hunkyard yard [--port N] [--host H] [--no-open]  # Preference Yard: rules, loads, activity, health (no review session)
 hunkyard _serve                   # Internal: foreground server (used by daemon spawn)
 hunkyard --version | -v           # Version
 hunkyard help | --help | -h       # Show help

@@ -10,18 +10,23 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/BSH2409/hunkyard/internal/daemon"
 	"github.com/BSH2409/hunkyard/internal/feedback"
+	"github.com/BSH2409/hunkyard/internal/preferences"
 )
 
 // This exercises the real binary/protocol; it does not claim a live model applied a skill.
 func TestHostRoundLoopProtocol(t *testing.T) {
 	if testing.Short() {
 		t.Skip("compiled CLI round loop")
+	}
+	if !preferences.SupportedPlatform {
+		t.Skip("the round loop learns preferences: " + preferences.ErrUnsupportedPlatform.Error())
 	}
 	_, file, _, _ := runtime.Caller(0)
 	module := filepath.Clean(filepath.Join(filepath.Dir(file), "../.."))
@@ -47,7 +52,7 @@ func TestHostRoundLoopProtocol(t *testing.T) {
 			manifest := filepath.Join(home, "skills.json")
 			data, _ := json.Marshal(map[string]any{"version": 1, "skills": []feedback.SkillRef{{ID: "naming", Name: "Naming", Path: skill, Source: kind}}})
 			writeFile(t, manifest, string(data))
-			env := append(clientFinishEnv(t, home), "HUNKYARD_OWNER_ID="+kind+":round-loop", "CODEX_HOME="+filepath.Join(home, "codex"))
+			env := append(clientFinishEnv(t, home), "HUNKYARD_OWNER_ID="+kind+":round-loop", "LEARN_PREFERENCES_HOME="+filepath.Join(home, "agents"))
 			start := exec.Command(binary, "_serve", "--no-open", "--port", "0", "--skills-file", manifest)
 			start.Dir = repo
 			start.Env = env
@@ -139,7 +144,10 @@ func TestHostRoundLoopProtocol(t *testing.T) {
 				t.Logf("other-owner reply rejected: %s", output)
 			}
 			// Restart after publishing, with no waiter; queued feedback and the original skills must survive.
-			start.Process.Signal(os.Interrupt)
+			// The shutdown endpoint stops the daemon gracefully on every OS; Windows cannot send os.Interrupt.
+			if resp, err := http.Post(entry.ConnURL()+"/api/shutdown?pid="+strconv.Itoa(start.Process.Pid), "application/json", nil); err == nil {
+				resp.Body.Close()
+			}
 			stopped := make(chan error, 1)
 			go func() { stopped <- start.Wait() }()
 			select {
@@ -176,7 +184,7 @@ func TestHostRoundLoopProtocol(t *testing.T) {
 			data, _ = json.Marshal([]feedback.PreferenceDecision{{CommentID: comment.ID, Revision: 1, Kind: "directive", Directive: "Prefer names describing domain behavior.", Scope: "repository", Surfaces: []string{"naming"}}})
 			writeFile(t, decisions, string(data))
 			command("feedback", "learn", "--session", key, "--batch", batch.ID, "--decisions", decisions, "--json")
-			if _, err := os.Stat(filepath.Join(home, "codex", "learn-preferences", "current", "rules.yml")); err != nil {
+			if _, err := os.Stat(filepath.Join(home, "agents", "learn-preferences", "current", "rules.yml")); err != nil {
 				t.Fatal(err)
 			}
 			command("comment", "--session", key, "--reply-to", comment.ID, "--author", kind, "Applied the naming guidance.")

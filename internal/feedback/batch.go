@@ -28,6 +28,11 @@ type Comment struct {
 	ContentID string `json:"content_id,omitempty"`
 	ViewID    string `json:"view_id,omitempty"`
 	Outdated  bool   `json:"outdated,omitempty"`
+	Label     string `json:"label,omitempty"`
+	Blocking  bool   `json:"blocking,omitempty"`
+	// ClaimUnchanged marks a comment the agent replied to without changing
+	// the commented code; Hunkyard reopened it.
+	ClaimUnchanged bool `json:"claim_unchanged,omitempty"`
 }
 
 type Batch struct {
@@ -71,6 +76,9 @@ func validateBatch(batch Batch) error {
 			return fmt.Errorf("invalid human comment")
 		}
 		seen[c.ID] = true
+		if !ValidLabel(c.Label) {
+			return fmt.Errorf("invalid comment label")
+		}
 		for _, name := range []string{c.Path, c.OldPath} {
 			if name != "" && (path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || strings.ContainsAny(name, "\\\x00")) {
 				return fmt.Errorf("invalid comment path")
@@ -82,3 +90,13 @@ func validateBatch(batch Batch) error {
 
 // Only a human edit creates new learning evidence; automatic reanchoring does not.
 func revisionHash(comment Comment) string { return digest(comment.Body) }
+
+// ValidLabel reports whether label is a review comment label: none, or one
+// of the conventional-comment kinds Hunkyard offers.
+func ValidLabel(label string) bool {
+	switch label {
+	case "", "nit", "issue", "suggestion", "praise", "question":
+		return true
+	}
+	return false
+}

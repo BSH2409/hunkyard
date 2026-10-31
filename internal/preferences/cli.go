@@ -1,11 +1,13 @@
 package preferences
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
 	"github.com/BSH2409/hunkyard/internal/clicmd"
+	"github.com/BSH2409/hunkyard/internal/config"
 	"io"
 	"os"
 	"path/filepath"
@@ -20,6 +22,39 @@ import (
 func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	emit := func(value any) { _ = json.NewEncoder(stdout).Encode(value) }
 	usage := func(class string) int { emit(map[string]any{"status": "usage", "error_class": class}); return 2 }
+	if !SupportedPlatform {
+		// Installed hooks and status lines stay silent instead of failing every turn.
+		if len(args) > 0 && (args[0] == "hook" || args[0] == "statusline") {
+			return 0
+		}
+		emit(map[string]any{"status": "unsupported", "error": ErrUnsupportedPlatform.Error()})
+		return 3
+	}
+	if len(args) > 0 && (args[0] == "guard" || args[0] == "allow") {
+		return runGuardCLI(args, stdout)
+	}
+	if len(args) > 0 && args[0] == "check" {
+		return runGuardCheck(args[1:], stdout)
+	}
+	if len(args) > 0 && args[0] == "statusline" {
+		return runStatusline(args[1:], stdout)
+	}
+	if len(args) > 0 && args[0] == "doctor" {
+		parser := flag.NewFlagSet("doctor", flag.ContinueOnError)
+		parser.SetOutput(io.Discard)
+		root := parser.String("root", "", "Canonical preference root")
+		parser.Bool("json", false, "JSON output")
+		if parser.Parse(args[1:]) != nil {
+			return usage("LearnPreferences::CLIUsageError")
+		}
+		s, err := Open(Config{Root: *root})
+		if err != nil {
+			emit(map[string]any{"status": "rejected", "error_class": "LearnPreferences::ValidationError"})
+			return 3
+		}
+		emit(s.doctor())
+		return 0
+	}
 	if len(args) == 0 || !slices.Contains(strings.Fields("capture search build audit retire maintain migrate install-hook install-cron status hook select"), args[0]) {
 		return usage("LearnPreferences::CLIUsageError")
 	}
@@ -28,8 +63,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	parser.SetOutput(io.Discard)
 	root := parser.String("root", "", "Canonical preference root")
 	asJSON := parser.Bool("json", false, "JSON output")
-	var feedback, directive, scope, repo, cwd, previous, response, query, proposalPath, projectRoot, host string
-	var explicit, duplicates, dry, due, force bool
+	var feedback, directive, scope, repo, cwd, previous, response, query, proposalPath, projectRoot, host, event string
+	var explicit, duplicates, dry, due, force, auto bool
 	modeCount := 0
 	modeFlag := func(name, help string, target *bool) {
 		parser.BoolFunc(name, help, func(value string) error {
@@ -67,16 +102,20 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		modeFlag("dry-run", "Validate without writes", &dry)
 		modeFlag("due", "Run once per local date", &due)
 		modeFlag("force", "Run regardless of daily stamp", &force)
+		parser.BoolVar(&auto, "auto", false, "Consolidate with the configured model CLI")
 		parser.StringVar(&proposalPath, "proposal", "", "Local proposal JSON")
 	case "migrate":
 		parser.BoolVar(&dry, "dry-run", false, "Inspect legacy inputs")
 		parser.StringVar(&projectRoot, "project-root", "", "Project preference root")
 		parser.StringVar(&repo, "repo-key", "", "Repository identity")
 		parser.StringVar(&proposalPath, "proposal", "", "Local proposal JSON")
+	case "hook":
+		parser.StringVar(&event, "event", "UserPromptSubmit", "Host hook event")
+		parser.StringVar(&host, "host", "", "claude or codex")
 	case "install-hook":
 		parser.StringVar(&host, "host", "codex", "codex or claude")
 	}
-	remaining := clicmd.ReorderFlagsFirst(args[1:], map[string]bool{"json": true, "explicit": true, "duplicates": true, "dry-run": true, "due": true, "force": true})
+	remaining := clicmd.ReorderFlagsFirst(args[1:], map[string]bool{"json": true, "explicit": true, "duplicates": true, "dry-run": true, "due": true, "force": true, "auto": true})
 	var ruleID string
 	if err := parser.Parse(remaining); err != nil {
 		class := "OptionParser::InvalidOption"
@@ -93,7 +132,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if command == "retire" && ruleID == "" {
 		return usage("LearnPreferences::CLIUsageError")
 	}
-	if command == "maintain" && modeCount != 1 {
+	if command == "maintain" && (auto && (dry || modeCount > 1) || !auto && modeCount != 1) {
 		return usage("LearnPreferences::CLIUsageError")
 	}
 	if command == "capture" {
@@ -143,8 +182,8 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		return 3
 	}
 	if command == "hook" {
-		s.hook(stdin, stdout, stderr)
-		return 0
+		s.hostKind = host
+		return s.hook(event, stdin, stdout, stderr)
 	}
 	var result any
 	exit := 0
@@ -196,7 +235,19 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if proposalPath != "" {
 			proposal, err = readProposal(proposalPath)
 		}
-		if err == nil {
+		maintenance := config.PreferencesMaintenance{}
+		if auto && proposal == nil {
+			global, _, _ := config.LoadConfigFile(config.GlobalConfigPath())
+			maintenance = global.PreferencesMaintenance
+		}
+		if err == nil && maintenance.Host != "" {
+			var value map[string]any
+			value, err = s.runAutomaticMaintenance(context.Background(), maintenance, force, execMaintenanceRunner)
+			result = value
+			if value["status"] == "failed" {
+				exit = 4
+			}
+		} else if err == nil {
 			mode := "due"
 			if dry {
 				mode = "dry_run"
@@ -290,4 +341,156 @@ func readProposal(name string) ([]byte, error) {
 		return nil, fmt.Errorf("proposal must be a regular file of at most 16 MiB")
 	}
 	return regularFile(name)
+}
+
+// runGuardCLI handles `guard add|list|remove` and `allow RULE_ID --once`.
+//
+//nolint:gocyclo // One case per guard subcommand keeps each beside its flags.
+func runGuardCLI(args []string, stdout io.Writer) int {
+	emit := func(value any) { _ = json.NewEncoder(stdout).Encode(value) }
+	usage := func() int {
+		emit(map[string]any{"status": "usage", "error_class": "LearnPreferences::CLIUsageError"})
+		return 2
+	}
+	command := args[0]
+	rest := args[1:]
+	if command == "guard" {
+		if len(rest) == 0 {
+			return usage()
+		}
+		command, rest = "guard "+rest[0], rest[1:]
+	}
+	parser := flag.NewFlagSet(command, flag.ContinueOnError)
+	parser.SetOutput(io.Discard)
+	root := parser.String("root", "", "Canonical preference root")
+	parser.Bool("json", false, "JSON output")
+	kind := parser.String("kind", "", "Guard kind")
+	ruleID := parser.String("rule", "", "Rule identity")
+	once := parser.Bool("once", false, "Allow the next blocked action only")
+	var patterns, match, notMatch []string
+	parser.Func("pattern", "Guard pattern", func(value string) error { patterns = append(patterns, value); return nil })
+	parser.Func("match", "Example the guard must trigger on", func(value string) error { match = append(match, value); return nil })
+	parser.Func("not-match", "Example the guard must allow", func(value string) error { notMatch = append(notMatch, value); return nil })
+	if parser.Parse(clicmd.ReorderFlagsFirst(rest, map[string]bool{"json": true, "once": true})) != nil {
+		return usage()
+	}
+	s, err := Open(Config{Root: *root})
+	if err != nil {
+		emit(map[string]any{"status": "rejected", "error_class": "LearnPreferences::ValidationError"})
+		return 3
+	}
+	var result map[string]any
+	switch {
+	case command == "guard add" && parser.NArg() == 0:
+		var added guard
+		added, err = s.addGuard(*kind, *ruleID, patterns, match, notMatch)
+		result = map[string]any{"status": "success", "guard": added}
+	case command == "guard test" && parser.NArg() == 0:
+		results := s.testGuards()
+		status := "success"
+		for _, result := range results {
+			if result["status"] == "fail" {
+				status = "failed"
+			}
+		}
+		result = map[string]any{"status": status, "guards": results}
+	case command == "guard list" && parser.NArg() == 0:
+		result = map[string]any{"status": "success", "guards": s.loadGuards()}
+	case command == "guard remove" && parser.NArg() == 1:
+		err = s.removeGuard(parser.Arg(0))
+		result = map[string]any{"status": "success"}
+	case command == "allow" && parser.NArg() == 1 && *once:
+		result, err = s.allowOnce(parser.Arg(0))
+	default:
+		return usage()
+	}
+	if err != nil {
+		emit(map[string]any{"status": "rejected", "error_class": "LearnPreferences::ValidationError", "error": err.Error()})
+		return 3
+	}
+	emit(result)
+	return 0
+}
+
+// runStatusline prints one short line for Claude's status bar. It never
+// fails loudly: on any error it prints nothing.
+func runStatusline(args []string, stdout io.Writer) int {
+	parser := flag.NewFlagSet("statusline", flag.ContinueOnError)
+	parser.SetOutput(io.Discard)
+	root := parser.String("root", "", "Canonical preference root")
+	if parser.Parse(args) != nil {
+		return 0
+	}
+	s, err := Open(Config{Root: *root})
+	if err != nil {
+		return 0
+	}
+	current, err := s.loadCurrent()
+	if err != nil {
+		return 0
+	}
+	rules := 0
+	if current != nil {
+		for _, r := range current.Rules.rules {
+			if r["status"] == "active" || r["status"] == "core" {
+				rules++
+			}
+		}
+	}
+	pending := s.unprocessedCount(current)
+	maintenance := "ok"
+	if run := s.lastMaintenanceRun(); run.Outcome == "failed" {
+		maintenance = "failed"
+	} else if pending > 0 {
+		maintenance = "due"
+	}
+	fmt.Fprintf(stdout, "◆ yard: %d rules · %d pending · maint %s\n", rules, pending, maintenance)
+	return 0
+}
+
+// runGuardCheck reports whether guards would block a command, without
+// recording activity or consuming an allow-once override.
+func runGuardCheck(args []string, stdout io.Writer) int {
+	emit := func(value any) { _ = json.NewEncoder(stdout).Encode(value) }
+	separator := slices.Index(args, "--")
+	found := separator >= 0
+	flags, command := args, []string(nil)
+	if found {
+		flags, command = args[:separator], args[separator+1:]
+	}
+	parser := flag.NewFlagSet("check", flag.ContinueOnError)
+	parser.SetOutput(io.Discard)
+	root := parser.String("root", "", "Canonical preference root")
+	cwd := parser.String("cwd", "", "Directory the command runs in")
+	parser.Bool("json", false, "JSON output")
+	if !found || len(command) == 0 || parser.Parse(flags) != nil {
+		emit(map[string]any{"status": "usage", "error_class": "LearnPreferences::CLIUsageError"})
+		return 2
+	}
+	s, err := Open(Config{Root: *root})
+	if err != nil {
+		emit(map[string]any{"status": "rejected", "error_class": "LearnPreferences::ValidationError"})
+		return 3
+	}
+	if *cwd == "" {
+		*cwd, _ = os.Getwd()
+	}
+	text := command[0]
+	if len(command) > 1 {
+		quoted := make([]string, len(command))
+		for i, word := range command {
+			quoted[i] = shellQuote(word)
+		}
+		text = strings.Join(quoted, " ")
+	}
+	result := map[string]any{"status": "success", "blocked": false}
+	if runsPreferenceOverride(text) {
+		result["blocked"], result["reason"] = true, "only the user can grant preference overrides"
+	} else if action, ok := parseGitInvocation(text); ok {
+		if verdict := s.evaluateCommand(s.loadGuards(), action, text, *cwd, sessionState{}, "", false); verdict.blocked {
+			result["blocked"], result["rule_id"], result["guard_id"], result["reason"] = true, verdict.ruleID, verdict.guardID, verdict.message()
+		}
+	}
+	emit(result)
+	return 0
 }

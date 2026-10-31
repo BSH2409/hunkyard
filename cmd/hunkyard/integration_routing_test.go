@@ -876,3 +876,37 @@ func TestPrintUniqueHints_Dedups(t *testing.T) {
 	printUniqueHints(nil)
 	printUniqueHints([]string{"a", "b", "a", "c", "b"})
 }
+
+func TestInstallOneFile_NeverWritesThroughSymlinkedSkillFolder(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlinks need extra privileges on Windows")
+	}
+	dir := t.TempDir()
+	shared := filepath.Join(dir, "agents", "skills", "learn-preferences")
+	testutil.WriteFile(t, filepath.Join(shared, "SKILL.md"), "other tool's skill")
+	link := filepath.Join(dir, "claude", "skills", "learn-preferences")
+	if err := os.MkdirAll(filepath.Dir(link), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(shared, link); err != nil {
+		t.Fatal(err)
+	}
+	f := integrationMap["preferences"][0]
+	dest := filepath.Join(link, "SKILL.md")
+
+	installOneFile(f, dest, false)
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink == 0 {
+		t.Fatal("install without --force replaced the symlink")
+	}
+
+	installOneFile(f, dest, true)
+	if info, err := os.Lstat(link); err != nil || info.Mode()&os.ModeSymlink != 0 {
+		t.Fatal("install with --force kept writing through the symlink")
+	}
+	if data, _ := os.ReadFile(filepath.Join(shared, "SKILL.md")); string(data) != "other tool's skill" {
+		t.Fatalf("shared skill was overwritten: %q", data)
+	}
+	if data, _ := os.ReadFile(dest); !strings.Contains(string(data), "hunkyard preferences") {
+		t.Fatal("installed copy missing")
+	}
+}

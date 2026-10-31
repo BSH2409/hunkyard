@@ -22,7 +22,8 @@ func CreateSession(sc *DaemonCLIConfig) (*Session, error) {
 	if v != nil && sc.BaseBranch != "" {
 		v.SetDefaultBranchOverride(sc.BaseBranch)
 	}
-	if len(sc.Files) == 0 {
+	switch {
+	case len(sc.Files) == 0:
 		if v == nil {
 			return nil, fmt.Errorf("not in a version-controlled repository and no files specified")
 		}
@@ -31,9 +32,9 @@ func CreateSession(sc *DaemonCLIConfig) (*Session, error) {
 		} else {
 			sess, err = session.NewGitSessionLenient(v, sc.IgnorePatterns)
 		}
-	} else if sc.PlanDir != "" {
+	case sc.PlanDir != "":
 		sess, err = session.NewSessionFromFiles(sc.Files, sc.IgnorePatterns)
-	} else {
+	default:
 		sess, err = session.NewSessionFromPaths(v, sc.Files, sc.IgnorePatterns)
 	}
 	if err != nil {

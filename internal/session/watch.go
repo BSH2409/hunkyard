@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -470,22 +471,25 @@ func (s *Session) watchFileMtimes(stop <-chan struct{}) {
 // otherwise it is silently dropped on round bump.
 func carryForwardComment(old Comment, now string) Comment {
 	c := Comment{
-		AuthorKind:  old.AuthorKind,
-		ContentID:   old.ContentID,
-		ViewID:      old.ViewID,
-		ID:          old.ID,
-		StartLine:   old.StartLine,
-		EndLine:     old.EndLine,
-		Side:        old.Side,
-		Body:        old.Body,
-		Quote:       old.Quote,
-		QuoteOffset: old.QuoteOffset,
-		Anchor:      old.Anchor,
-		Author:      old.Author,
-		Scope:       old.Scope,
-		CreatedAt:   old.CreatedAt,
-		UpdatedAt:   now,
-		Resolved:    old.Resolved,
+		Label:               old.Label,
+		Blocking:            old.Blocking,
+		ClaimUnchangedRound: old.ClaimUnchangedRound,
+		AuthorKind:          old.AuthorKind,
+		ContentID:           old.ContentID,
+		ViewID:              old.ViewID,
+		ID:                  old.ID,
+		StartLine:           old.StartLine,
+		EndLine:             old.EndLine,
+		Side:                old.Side,
+		Body:                old.Body,
+		Quote:               old.Quote,
+		QuoteOffset:         old.QuoteOffset,
+		Anchor:              old.Anchor,
+		Author:              old.Author,
+		Scope:               old.Scope,
+		CreatedAt:           old.CreatedAt,
+		UpdatedAt:           now,
+		Resolved:            old.Resolved,
 		// ResolvedRound records *which* round flipped Resolved false->true.
 		// It is round-scoped state that must survive carry-forward (paired
 		// with Resolved); without it, the timeline visibility filter for
@@ -1153,6 +1157,7 @@ func (s *Session) carryForwardComments() {
 // without LCS remapping or anchor search.
 func (s *Session) carryForwardFileComments(f *FileEntry) {
 	s.mu.RLock()
+	round := s.ReviewRound
 	prevContent := f.PreviousContent
 	currContent := f.Content
 	prevComments := make([]Comment, len(f.PreviousComments))
@@ -1184,8 +1189,12 @@ func (s *Session) carryForwardFileComments(f *FileEntry) {
 		prevIDs[c.ID] = struct{}{}
 	}
 	preserved := make([]Comment, 0, len(f.Comments))
+	// The snapshot is taken at the round's first edit; replies and
+	// resolutions posted after it live on the current copy of the comment.
+	latest := map[string]Comment{}
 	for _, c := range f.Comments {
 		if _, isPrev := prevIDs[c.ID]; isPrev {
+			latest[c.ID] = c
 			continue
 		}
 		preserved = append(preserved, c)
@@ -1193,6 +1202,9 @@ func (s *Session) carryForwardFileComments(f *FileEntry) {
 	f.Comments = preserved
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, c := range prevComments {
+		if current, ok := latest[c.ID]; ok {
+			c.Replies, c.Resolved, c.ResolvedRound = current.Replies, current.Resolved, current.ResolvedRound
+		}
 		// Live pins use DOMAnchor for positioning; skip line remapping.
 		if c.DOMAnchor != nil {
 			carried := carryForwardComment(c, now)
@@ -1218,9 +1230,44 @@ func (s *Session) carryForwardFileComments(f *FileEntry) {
 			carried.StartLine = corrStart
 			carried.EndLine = corrEnd
 			carried.Drifted = drift != 0
+			if agentClaimedFixInRound(c, round) {
+				carried.ClaimUnchangedRound = 0
+				if linesEqualAnchor(newLines, corrStart, corrEnd, c.Anchor) {
+					carried.ClaimUnchangedRound = round
+					carried.Resolved = false
+					carried.ResolvedRound = 0
+				}
+			}
 		}
 
 		f.Comments = append(f.Comments, carried)
 	}
 	s.mu.Unlock()
+}
+
+// fixClaimPattern recognizes an agent reply that says the comment was handled,
+// as opposed to an explanation of why the code stays.
+var fixClaimPattern = regexp.MustCompile(`(?i)\b(fixed|done|addressed|updated|changed|renamed|removed|added|moved|implemented|refactored|applied|split|replaced|switched)\b`)
+
+// agentClaimedFixInRound reports whether the agent answered c during round
+// with a fix claim. Questions and praise ask for no change.
+func agentClaimedFixInRound(c Comment, round int) bool {
+	if c.Label == "question" || c.Label == "praise" {
+		return false
+	}
+	for _, reply := range c.Replies {
+		if reply.AuthorKind == "agent" && reply.ReviewRound == round && fixClaimPattern.MatchString(reply.Body) {
+			return true
+		}
+	}
+	return false
+}
+
+// linesEqualAnchor reports whether the commented lines still read exactly as
+// they did when the comment was made.
+func linesEqualAnchor(lines []string, start, end int, anchor string) bool {
+	if start < 1 || end > len(lines) || start > end {
+		return false
+	}
+	return strings.TrimRight(strings.Join(lines[start-1:end], "\n"), "\n ") == strings.TrimRight(anchor, "\n ")
 }

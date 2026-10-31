@@ -25,8 +25,8 @@ func TestPreferencesBinaryWithoutRubyOrProviderCLI(t *testing.T) {
 		t.Fatalf("build: %v %s", err, output)
 	}
 	home := t.TempDir()
-	root := filepath.Join(home, ".codex")
-	env := []string{"HOME=" + home, "USERPROFILE=" + home, "CODEX_HOME=" + root, "CLAUDE_CONFIG_DIR=" + filepath.Join(home, ".claude"), "PATH=" + filepath.Join(home, "empty-path")}
+	root := filepath.Join(home, ".agents")
+	env := []string{"HOME=" + home, "USERPROFILE=" + home, "LEARN_PREFERENCES_HOME=" + root, "CODEX_HOME=" + filepath.Join(home, ".codex"), "CLAUDE_CONFIG_DIR=" + filepath.Join(home, ".claude"), "PATH=" + filepath.Join(home, "empty-path")}
 	run := func(input string, args ...string) map[string]any {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -63,12 +63,23 @@ func TestPreferencesBinaryWithoutRubyOrProviderCLI(t *testing.T) {
 			t.Fatal("compiled hook installer failed")
 		}
 	}
-	payload, _ := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "session_id": "fixture-host", "cwd": home, "prompt": "continue"})
+	for _, settings := range []string{filepath.Join(home, ".codex", "hooks.json"), filepath.Join(home, ".claude", "settings.json")} {
+		if _, err := os.Stat(settings); err != nil {
+			t.Fatal("hook not written to host configuration", err)
+		}
+	}
+	payload, _ := json.Marshal(map[string]any{"hook_event_name": "UserPromptSubmit", "session_id": "fixture-host", "cwd": home, "prompt": "continue with the naming changes"})
 	result := run(string(payload), "preferences", "hook")
 	if result["continue"] != true || result["hookSpecificOutput"] == nil {
 		t.Fatal("compiled hook did not deliver persona")
 	}
-	source := filepath.Join(root, "skills", "code-like-him")
+	for _, event := range []string{"SessionStart", "PreToolUse", "Stop"} {
+		eventPayload, _ := json.Marshal(map[string]any{"hook_event_name": event, "session_id": "fixture-host", "cwd": home, "tool_name": "Bash", "tool_input": map[string]any{"command": "ls"}})
+		if result := run(string(eventPayload), "preferences", "hook", "--event", event); result["continue"] != true {
+			t.Fatalf("%s hook did not continue: %v", event, result)
+		}
+	}
+	source := filepath.Join(root, "learn-preferences", "sources", "code-like-him")
 	if err := os.MkdirAll(source, 0700); err != nil {
 		t.Fatal(err)
 	}

@@ -6,7 +6,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 
 test('publication retries keep their identity until the review data changes', async () => {
-  const form = new EventTarget();
+  const form = new EventTarget(); form.querySelector = () => null;
   const dialog = new EventTarget(); dialog.querySelector = () => form; dialog.showModal = () => {}; dialog.close = () => {};
   const summary = { value: 'Please check this boundary.' };
   const elements = { publishReviewDialog: dialog, publishSummary: summary, publishReviewSubmit: {}, publishReviewCancel: new EventTarget() };

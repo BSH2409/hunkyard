@@ -58,13 +58,23 @@ hunkyard feedback ack --session REVIEW_ID --batch BATCH_ID --json
 
 Keep the same owner on every command. `--follow` waits until publication, cancellation, or an error and suppresses `pending` responses. `--timeout` (default 45s) bounds each HTTP wait, not the overall follow process. Ctrl+C stops the waiter without stopping the review daemon or acknowledging feedback. Omit `--follow` for a one-shot wait that can return `pending`; this means the browser review is still open. A timeout is never approval. After processing a change request, `hunkyard --session REVIEW_ID` starts the next review round. Queued publications survive a stopped daemon and an interrupted waiter.
 
+### Review tools
+
+- **Labels.** A line or file comment can carry a conventional-comment label (nit, issue, suggestion, praise, question) and a **blocking** flag. While a blocking comment is unresolved, Approve is disabled in the submit dialog.
+- **Since last review.** In Git mode, the **All changes | Since last review** toggle shows only what changed after your last published review. Before the first publication it shows all changes and says so.
+- **Changed since you viewed.** A file you marked Viewed comes back un-viewed with a badge when its content changes.
+- **Claimed fixed, code unchanged.** When the agent replies to a comment but leaves the commented lines identical, the next round reopens the comment and badges it, and the published batch sets `claim_unchanged`.
+- **Your own edits.** Lines you edit on disk during a review are published as `edit` comments (your version against the agent's), so the agent keeps them and can learn from them.
+
 See the [complete local protocol](integrations/shared/review-workflow.md) for trusted skill catalogs, human comment revisions, preference classification, replies, acknowledgments, and repeated review rounds. It is CLI/JSON and does not depend on a host SDK.
 
 ## Go-backed coding preferences
 
 The review bridge classifies every human comment revision through the Go preference engine, including summaries and human replies. It excludes agent messages and keeps classification checkpoints separate from delivery acknowledgments. Replay does not add duplicate evidence.
 
-The canonical store remains `${CODEX_HOME:-$HOME/.codex}`, shared by both hosts. Clear durable instructions can become active preferences; uncertain reusable feedback stays pending. Task-specific edits are ignored. Generated personas preserve repository/global/source precedence and token budgets.
+Learned preferences and the Preference Yard run on macOS and Linux (including WSL). On native Windows, reviews work but `hunkyard preferences` reports that learning is unsupported, installed hooks stay silent, and review feedback is acknowledged without learning.
+
+The canonical store is `${LEARN_PREFERENCES_HOME:-$HOME/.agents}`, shared by both hosts. Clear durable instructions can become active preferences; uncertain reusable feedback stays pending. Task-specific edits are ignored. Generated personas preserve repository/global/source precedence and token budgets.
 
 A separate installation replaces the `learn-preferences` workflow with the Go-backed skill:
 
@@ -83,7 +93,40 @@ hunkyard preferences install-hook --host claude --json
 hunkyard preferences install-cron --json
 ```
 
-Inspect and trust a hook through the host's normal `/hooks` UI. Installers preserve unrelated settings, back up changed configuration, and roll back failed writes. Hook failures are advisory and do not block the host.
+`install-hook` registers one command per host event:
+
+- `SessionStart` loads your core preferences once, with a health line when maintenance is due or failed, and says when a Hunkyard review this session launched has published feedback waiting.
+- `UserPromptSubmit` adds rules relevant to what you typed and keeps them for the rest of the session. The first prompt after you interrupt the agent (Codex `Interrupt`, or Claude's "interrupted by user" and rejected tool calls) is recorded as a correction.
+- `PreToolUse` checks `git commit` and `git push` against your guards, and when the agent edits a file it adds the rules for that file's area (for example Ruby, migrations, jobs, frontend) once per session.
+- `Stop` delivers any review batch published while the agent worked, then runs mechanical checks on lines added this turn, including new untracked files. On Claude, a background `asyncRewake` handler also waits up to an hour for your next publication and wakes Claude when you publish. Inspect and trust the commands through the host's normal `/hooks` UI. Installers replace earlier Hunkyard hooks, preserve unrelated settings, back up changed configuration, and roll back failed writes. Infrastructure failures in a hook are advisory and never block the host. On Claude, install also adds Hunkyard spinner verbs and tips to your own and offers `hunkyard preferences statusline` as the status line when none is set.
+
+Guards turn a preference into a block at action time. The agent is told which rule blocked it and why; only you can let one action through:
+
+```sh
+hunkyard preferences guard add --kind staged_paths --rule RULE_ID --pattern 'docs/superpowers/**' --pattern '*-plan.md' --json
+hunkyard preferences guard add --kind no_coauthor_trailer --rule RULE_ID --json
+hunkyard preferences guard add --kind commit_message_format --rule RULE_ID --pattern '^Refs #\d+: ' --json
+hunkyard preferences guard add --kind no_unrequested_commit --rule RULE_ID --json
+hunkyard preferences guard add --kind diff_check --rule RULE_ID --pattern ruby_single_line_def --json
+hunkyard preferences guard add --kind no_coauthor_trailer --rule RULE_ID --match 'git commit -m "x\n\nCo-authored-by: a <a@b>"' --not-match 'git commit -m "x"' --json
+hunkyard preferences guard list --json
+hunkyard preferences guard test --json                 # re-run every guard's examples
+hunkyard preferences check --cwd . -- git commit -m x  # would this be blocked? no side effects
+hunkyard preferences allow RULE_ID --once    # run it yourself, e.g. with ! in the CLI
+hunkyard preferences doctor --json          # hooks, trust, store, maintenance and cron
+```
+
+### Preference Yard
+
+`hunkyard yard` opens the Preference Yard on `127.0.0.1`, or on `--host`, `HUNKYARD_HOST` or the global config `host` when set (also `--port`, `--no-open`); it warns when that address is not loopback. It is also the **Yard** tab in a review's Settings. It shows:
+
+- **Rules** with evidence and violation counts. You can retire a rule, promote a repository rule to global, or add a rule.
+- **Pipeline**: captured observations waiting for maintenance.
+- **Persona**: the generated files agents receive.
+- **Loads**: which rules each recent session received, and why. The reasons are core at session start, a surface matched in your prompt, kept from earlier, or a file being edited.
+- **Activity** and **Health**, with a button to run maintenance.
+
+Changes are accepted only from the Yard page itself (same-origin).
 
 Maintenance uses a **local proposal file** prepared by the launching host:
 
@@ -93,11 +136,17 @@ hunkyard preferences maintain --dry-run --proposal /path/to/proposal.json --json
 hunkyard preferences maintain --due --proposal /path/to/proposal.json --json
 ```
 
-Without a proposal, maintenance returns a digest-bound batch for the host to review. An hourly cron job only saves local requests; it does not call a model. The Go engine validates evidence, scope, citations, action counters, and rule relationships before atomic publication. See [maintenance, migration, and recovery](integrations/preferences/references/local-maintenance.md).
+Without a proposal, maintenance returns a digest-bound batch for the host to review. Automatic maintenance hands that batch to a model CLI you choose in `~/.hunkyard.config.json` (global config only):
+
+```json
+{"preferences_maintenance": {"host": "claude", "model": "claude-opus-5-5", "effort": "high"}}
+```
+
+`host` is `claude` or `codex`; `model` and `effort` default to `claude-opus-5-5`/`high` for Claude and `gpt-6.1-sol`/`high` for Codex. When it is set, the hourly cron job and session start run `hunkyard preferences maintain --auto` whenever observations are pending and today's maintenance has not succeeded. A rejected proposal is retried once with the validation error; every outcome is recorded and shown at session start, in `doctor`, and in the status line. Without the setting, the cron job only saves local requests and an agent session prepares the proposal. The Go engine validates evidence, scope, citations, action counters, and rule relationships before atomic publication. See [maintenance, migration, and recovery](integrations/preferences/references/local-maintenance.md).
 
 ## Local-only behavior
 
-Hunkyard performs no telemetry, analytics, update checks, remote sharing, forge requests, provider requests, or automatic downloads. Browser libraries and fonts ship inside the binary. The supported runtime uses Git; automatic Sapling/Jujutsu selection and their command overrides are disabled. The process HTTP transport rejects external destinations before DNS/proxy use, and browser CSP restricts resources to local assets. Git runs without remote lazy fetching, external diff/textconv/filter helpers, or filesystem monitor hooks. Dirty comparisons involving Git clean/process filters (including LFS) are rejected with an explanation; use committed `--range` comparisons for those paths. Binary changes stay in the file list as metadata, with raw bytes preserved in private review snapshots; SVG is reviewed as source. Executable HTML previews and remote review commands are disabled.
+Hunkyard performs no telemetry, analytics, update checks, remote sharing, forge requests, or automatic downloads. It makes no provider requests itself; the one exception you opt into is automatic preference maintenance, which runs your configured `claude` or `codex` CLI. Browser libraries and fonts ship inside the binary. The supported runtime uses Git; automatic Sapling/Jujutsu selection and their command overrides are disabled. The process HTTP transport rejects external destinations before DNS/proxy use, and browser CSP restricts resources to local assets. Git runs without remote lazy fetching, external diff/textconv/filter helpers, or filesystem monitor hooks. Dirty comparisons involving Git clean/process filters (including LFS) are rejected with an explanation; use committed `--range` comparisons for those paths. Binary changes stay in the file list as metadata, with raw bytes preserved in private review snapshots; SVG is reviewed as source. Executable HTML previews and remote review commands are disabled.
 
 The launching Codex/Claude session still communicates with its model provider as usual. Its tools and permissions remain under the host's control. Hunkyard itself only exchanges local HTTP and private files. This is an application-level boundary, not an operating-system network sandbox.
 

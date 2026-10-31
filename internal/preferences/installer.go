@@ -21,7 +21,7 @@ const cronEnd = "# END CODEX LEARN-PREFERENCES"
 
 func shellQuote(text string) string { return "'" + strings.ReplaceAll(text, "'", "'\"'\"'") + "'" }
 
-func (s *Store) hookCommand() (string, error) {
+func (s *Store) binaryCommand() (string, error) {
 	binary, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -33,25 +33,90 @@ func (s *Store) hookCommand() (string, error) {
 	if strings.ContainsAny(binary+s.config.Root, "\x00\r\n") {
 		return "", fmt.Errorf("hook paths must be single-line")
 	}
-	return shellQuote(binary) + " preferences hook --root " + shellQuote(s.config.Root), nil
+	return shellQuote(binary), nil
+}
+
+func (s *Store) hookCommand(host, event string) (string, error) {
+	binary, err := s.binaryCommand()
+	if err != nil {
+		return "", err
+	}
+	return binary + " preferences hook --event " + event + " --host " + host + " --root " + shellQuote(s.config.Root), nil
+}
+
+// hookEvent is one Hunkyard handler: name is the host's settings event,
+// handler the --event it runs (defaults to name), host limits it to one host.
+type hookEvent struct {
+	name, handler, host, matcher, statusMessage string
+	emitsContext, asyncRewake                   bool
+	timeout                                     int
+}
+
+var hookEvents = []hookEvent{
+	{name: "SessionStart", statusMessage: loadingMessages[0], emitsContext: true},
+	{name: "UserPromptSubmit", statusMessage: loadingMessages[0], emitsContext: true},
+	{name: "PreToolUse", matcher: "Bash|shell|exec_command|Edit|Write|MultiEdit|apply_patch", statusMessage: "Checking your preferences"},
+	{name: "Stop", statusMessage: "Reviewing against your preferences"},
+	{name: "Interrupt", host: "codex", statusMessage: capturingMessages[2]},
+	{name: "Stop", handler: "ReviewWake", host: "claude", statusMessage: reviewWaitingMessages[1], asyncRewake: true, timeout: reviewWakeTimeout},
+}
+
+func (e hookEvent) handlerName() string {
+	if e.handler != "" {
+		return e.handler
+	}
+	return e.name
+}
+
+func hookEventsFor(host string) []hookEvent {
+	var events []hookEvent
+	for _, event := range hookEvents {
+		if event.host == "" || event.host == host {
+			events = append(events, event)
+		}
+	}
+	return events
 }
 
 func (s *Store) hookPath(host string) (string, error) {
 	switch host {
 	case "codex":
-		return filepath.Join(s.config.Root, "hooks.json"), nil
+		if s.config.explicitRoot {
+			return filepath.Join(s.config.Root, "hooks.json"), nil
+		}
+		root, err := hostHome("CODEX_HOME", ".codex")
+		if err != nil {
+			return "", err
+		}
+		return filepath.Join(root, "hooks.json"), nil
 	case "claude":
-		root := os.Getenv("CLAUDE_CONFIG_DIR")
-		if root == "" {
-			home, err := os.UserHomeDir()
-			if err != nil {
-				return "", err
-			}
-			root = filepath.Join(home, ".claude")
+		root, err := hostHome("CLAUDE_CONFIG_DIR", ".claude")
+		if err != nil {
+			return "", err
 		}
 		return filepath.Join(root, "settings.json"), nil
 	}
 	return "", fmt.Errorf("hook host must be codex or claude")
+}
+
+// hostHome returns a host's configuration directory: the environment
+// override when set, otherwise the named directory under the user's home.
+func hostHome(env, fallback string) (string, error) {
+	if dir := os.Getenv(env); strings.TrimSpace(dir) != "" {
+		return dir, nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(home, fallback), nil
+}
+
+// isHunkyardPreferenceHook matches any earlier Hunkyard preference hook,
+// whatever binary path or store root it was installed with, and the legacy
+// Ruby hook it replaced.
+func isHunkyardPreferenceHook(command string) bool {
+	return strings.Contains(command, " preferences hook") || strings.Contains(command, "learn-preferences/scripts/user_prompt_hook.rb")
 }
 
 var trustedField = regexp.MustCompile(`"trusted"\s*:`)
@@ -62,9 +127,13 @@ func (s *Store) installHook(host string) (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	command, err := s.hookCommand()
-	if err != nil {
-		return nil, err
+	commands := map[string]any{}
+	for _, event := range hookEventsFor(host) {
+		command, err := s.hookCommand(host, event.handlerName())
+		if err != nil {
+			return nil, err
+		}
+		commands[event.handlerName()] = command
 	}
 	if err := ensureDirectory(filepath.Dir(target)); err != nil {
 		return nil, err
@@ -92,40 +161,62 @@ func (s *Store) installHook(host string) (map[string]any, error) {
 				return fmt.Errorf("hooks must be an object")
 			}
 		}
-		groups := []map[string]any{}
-		if value, exists := hooks["UserPromptSubmit"]; exists {
-			var err error
-			groups, err = mapArray(value)
+		for name, value := range hooks {
+			groups, err := mapArray(value)
 			if err != nil {
 				return err
 			}
-		}
-		retained := []any{}
-		for _, group := range groups {
-			entries, err := mapArray(group["hooks"])
-			if err != nil {
-				return err
-			}
-			keep := []any{}
-			for _, entry := range entries {
-				old := textField(entry["command"])
-				if old == command || strings.Contains(old, "learn-preferences/scripts/user_prompt_hook.rb") {
-					continue
+			retained := []any{}
+			for _, group := range groups {
+				entries, err := mapArray(group["hooks"])
+				if err != nil {
+					return err
 				}
-				keep = append(keep, entry)
+				keep := []any{}
+				for _, entry := range entries {
+					if !isHunkyardPreferenceHook(textField(entry["command"])) {
+						keep = append(keep, entry)
+					}
+				}
+				if len(keep) > 0 {
+					group["hooks"] = keep
+					retained = append(retained, group)
+				}
 			}
-			if len(keep) > 0 {
-				group["hooks"] = keep
-				retained = append(retained, group)
+			hooks[name] = retained
+		}
+		for _, event := range hookEventsFor(host) {
+			timeout := event.timeout
+			if timeout == 0 {
+				timeout = 5
+			}
+			handler := map[string]any{"type": "command", "command": commands[event.handlerName()], "timeout": timeout, "statusMessage": event.statusMessage}
+			if host == "codex" && event.emitsContext {
+				handler["additionalContextLimit"] = 1500
+			}
+			if event.asyncRewake {
+				handler["asyncRewake"] = true
+			}
+			group := map[string]any{"hooks": []any{handler}}
+			if event.matcher != "" {
+				group["matcher"] = event.matcher
+			}
+			existing, _ := hooks[event.name].([]any)
+			hooks[event.name] = append(existing, group)
+		}
+		for name, value := range hooks {
+			if groups, _ := value.([]any); len(groups) == 0 {
+				delete(hooks, name)
 			}
 		}
-		handler := map[string]any{"type": "command", "command": command, "timeout": 5}
-		if host == "codex" {
-			handler["statusMessage"] = "Loading coding preferences"
-			handler["additionalContextLimit"] = 1500
-		}
-		hooks["UserPromptSubmit"] = append(retained, map[string]any{"hooks": []any{handler}})
 		document["hooks"] = hooks
+		if host == "claude" {
+			statusCommand, err := s.binaryCommand()
+			if err != nil {
+				return err
+			}
+			mergeClaudeSpinnerSettings(document, statusCommand+" preferences statusline --root "+shellQuote(s.config.Root))
+		}
 		rendered, err := json.MarshalIndent(document, "", "  ")
 		if err != nil {
 			return err
@@ -169,18 +260,18 @@ func (s *Store) installHook(host string) (map[string]any, error) {
 			}
 			return errors.Join(installErr, rollback)
 		}
-		result = map[string]any{"installed": true, "path": target, "backup_path": backup, "command": command, "trust_required": true, "trust_instruction": "Inspect the UserPromptSubmit command in the host's /hooks view and trust it only if its absolute paths match this report."}
+		result = map[string]any{"installed": true, "path": target, "backup_path": backup, "command": commands["UserPromptSubmit"], "commands": commands, "trust_required": true, "trust_instruction": "Inspect each Hunkyard preferences command in the host's /hooks view and trust it only if its absolute paths match this report."}
 		return nil
 	})
 	return result, err
 }
 
 func (s *Store) renderCron(existing string) (string, error) {
-	command, err := s.hookCommand()
+	binary, err := s.binaryCommand()
 	if err != nil {
 		return "", err
 	}
-	command = strings.Replace(command, " preferences hook --root ", " preferences maintain --due --json --root ", 1)
+	command := binary + " preferences maintain --auto --json --root " + shellQuote(s.config.Root)
 	line := "17 * * * * " + command + " >> " + shellQuote(s.dataPath("logs", "cron.log")) + " 2>&1"
 	line = strings.ReplaceAll(line, "%", `\%`)
 	block := cronBegin + "\n" + line + "\n" + cronEnd + "\n"
@@ -296,11 +387,11 @@ func writeCrontab(text string) error {
 }
 
 func (s *Store) hookInstalled() bool {
-	command, err := s.hookCommand()
-	if err != nil {
-		return false
-	}
 	for _, host := range []string{"codex", "claude"} {
+		command, err := s.hookCommand(host, "UserPromptSubmit")
+		if err != nil {
+			return false
+		}
 		target, err := s.hookPath(host)
 		if err != nil {
 			continue
@@ -321,4 +412,45 @@ func (s *Store) hookInstalled() bool {
 		}
 	}
 	return false
+}
+
+// mergeClaudeSpinnerSettings adds Hunkyard's spinner verbs and tips to the
+// user's own, and offers a status line only when none is configured.
+func mergeClaudeSpinnerSettings(document map[string]any, statusCommand string) {
+	appendMissing := func(existing []string, additions []string) []any {
+		merged := []any{}
+		seen := map[string]bool{}
+		for _, value := range append(existing, additions...) {
+			if !seen[value] {
+				seen[value] = true
+				merged = append(merged, value)
+			}
+		}
+		return merged
+	}
+	verbs := record(document["spinnerVerbs"])
+	if verbs == nil {
+		verbs = map[string]any{"mode": "append"}
+	}
+	verbs["verbs"] = appendMissing(stringValues(verbs["verbs"]), spinnerVerbs)
+	document["spinnerVerbs"] = verbs
+	tips := record(document["spinnerTipsOverride"])
+	if tips == nil {
+		tips = map[string]any{}
+	}
+	existing, _ := tips["tips"].([]any)
+	plain := []string{}
+	objects := []any{}
+	for _, tip := range existing {
+		if text, ok := tip.(string); ok {
+			plain = append(plain, text)
+		} else {
+			objects = append(objects, tip)
+		}
+	}
+	tips["tips"] = append(objects, appendMissing(plain, spinnerTips)...)
+	document["spinnerTipsOverride"] = tips
+	if _, exists := document["statusLine"]; !exists {
+		document["statusLine"] = map[string]any{"type": "command", "command": statusCommand}
+	}
 }

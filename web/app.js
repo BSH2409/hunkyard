@@ -431,6 +431,9 @@
     });
   }
   let diffScope = getSetting('diffScope', null); // null = no preference saved yet
+  // Git mode: diff against the last published review instead of the base
+  // ref (/api/file/diff?since=published). Transient view state, not persisted.
+  let sinceReview = false;
 
   // Whether code diffs are fetched with whitespace ignored (appends `&w=1` to
   // /api/file/diff). Persisted via the consolidated `hunkyard-settings` cookie (not
@@ -719,11 +722,13 @@
     if (ignoreWhitespace && !storyNeedsRawDiff()) {
       diffUrl += '&w=1';
     }
+    if (sinceReview) diffUrl += '&since=published';
     const [fileRes, diffRes] = await Promise.all([
       fetch('/api/file?path=' + enc(fi.path), { signal }).then(function(r) { return r.ok ? r.json() : { content: '' }; }).catch(function() { return { content: '' }; }),
       fetch(diffUrl, { signal }).then(function(r) { return r.ok ? r.json() : { hunks: [] }; }).catch(function() { return { hunks: [] }; }),
     ]);
     if (signal && signal.aborted) return null;
+    if (sinceReview && diffRes.since_unavailable) sinceUnavailable = true;
     const content = Object.prototype.hasOwnProperty.call(diffRes, 'content')
       ? diffRes.content
       : (fileRes.content || '');
@@ -862,28 +867,54 @@
     try { localStorage.setItem(autoViewedMarkerKey(), '1'); } catch {}
   }
 
+  // Viewed state maps path → the file_hash seen when it was marked, so a file
+  // that changes afterwards comes back un-viewed (legacy `true` entries stay).
+  // A changed file keeps its old hash, and its badge, until viewed again.
+  // What to store for a file: its hash when viewed (a lazy file not loaded
+  // yet keeps the hash stored earlier), or the old hash while it is badged.
+  function viewedRecord(file, stored) {
+    if (file.viewed) return file.fileHash || stored || true;
+    if (file.changedSinceViewed && file.viewedHash) return file.viewedHash;
+    return undefined;
+  }
+
+  // Whether a stored entry still counts as viewed for the current hash.
+  function viewedStateFor(seen, fileHash) {
+    const changed = typeof seen === 'string' && !!fileHash && seen !== fileHash;
+    return { viewed: !!seen && !changed, changed: changed };
+  }
+
+  function storedViewedState() {
+    try { return JSON.parse(localStorage.getItem(viewedStorageKey()) || '{}'); } catch { return {}; }
+  }
+
   function saveViewedState() {
+    const stored = storedViewedState();
     const viewed = {};
     for (let i = 0; i < files.length; i++) {
-      if (files[i].viewed) viewed[files[i].path] = true;
+      const record = viewedRecord(files[i], stored[files[i].path]);
+      if (record !== undefined) viewed[files[i].path] = record;
     }
     try { localStorage.setItem(viewedStorageKey(), JSON.stringify(viewed)); } catch {}
   }
 
   function restoreViewedState() {
-    try {
-      const data = JSON.parse(localStorage.getItem(viewedStorageKey()) || '{}');
-      for (let i = 0; i < files.length; i++) {
-        files[i].viewed = !!data[files[i].path];
-        if (files[i].viewed) files[i].collapsed = true;
-      }
-    } catch {}
+    const data = storedViewedState();
+    for (let i = 0; i < files.length; i++) {
+      const seen = data[files[i].path];
+      const state = viewedStateFor(seen, files[i].fileHash);
+      files[i].changedSinceViewed = state.changed;
+      files[i].viewedHash = state.changed ? seen : '';
+      files[i].viewed = state.viewed;
+      if (files[i].viewed) files[i].collapsed = true;
+    }
   }
 
   function toggleViewed(filePath) {
     const file = getFileByPath(filePath);
     if (!file) return;
     file.viewed = !file.viewed;
+    file.changedSinceViewed = false;
     saveViewedState();
     updateViewedCount();
     updateTreeViewedState();
@@ -1133,6 +1164,7 @@
       // Show scope toggle and hide unavailable scopes
       const scopeToggle = document.getElementById('scopeToggle');
       scopeToggle.style.display = '';
+      document.getElementById('sinceToggle').style.display = '';
       const scopes = session.available_scopes || ['all', 'staged', 'unstaged'];
       scopeToggle.querySelectorAll('.toggle-btn').forEach(function(b) {
         // Clear previous disabled state before re-evaluating
@@ -2034,6 +2066,15 @@
         path: file.path, old_path: file.oldPath, status: file.status, file_type: file.fileType,
         additions: file.additions, deletions: file.deletions, generated: file.generated,
       }, currentFileDataScope(), signal).then(function(loaded) {
+        // A lazy file's hash arrives now; un-view it if it changed since viewed.
+        const seen = loaded && file.viewed ? storedViewedState()[file.path] : undefined;
+        if (seen && viewedStateFor(seen, loaded.fileHash).changed) {
+          file.viewed = false;
+          file.changedSinceViewed = true;
+          file.viewedHash = seen;
+          updateViewedCount();
+          updateTreeViewedState();
+        }
         if (!loaded || file.viewMode !== 'rendered-diff') return loaded;
         // A Rendered view restored while the file was lazy: build its
         // Before blocks, or fall back to Document without base content.
@@ -3181,6 +3222,7 @@
         '<button type="button" class="file-header-copy-path" aria-label="Copy file path">' + ICON_COPY_PATH + '</button>' +
       '</span>' +
       (showBadge ? '<span class="file-header-badge ' + escapeHtml(file.status) + '">' + escapeHtml(badgeLabel) + '</span>' : '') +
+      (file.changedSinceViewed ? '<span class="file-header-changed" title="This file changed after you marked it viewed">Changed since you viewed</span>' : '') +
       (file.additions || file.deletions ? '<span class="file-header-stats">' +
         (file.additions ? '<span class="add">+' + file.additions + '</span>' : '') +
         (file.deletions ? '<span class="del">-' + file.deletions + '</span>' : '') +
@@ -4956,6 +4998,12 @@
 
     form.appendChild(header);
     form.appendChild(textarea);
+    const commentFormModule = window.hunkyard && window.hunkyard.commentForm;
+    const labelsApply = !opts.onSubmit && !formObj.editingId && formObj.scope !== 'review';
+    if (labelsApply && commentFormModule && commentFormModule.buildLabelPicker) {
+      formObj.labelPicker = commentFormModule.buildLabelPicker();
+      form.appendChild(formObj.labelPicker.el);
+    }
     form.appendChild(actions);
     attachTemplateUI(form, textarea, actions);
     wrapper.appendChild(form);
@@ -5068,6 +5116,11 @@
         if (formObj.quoteOffset !== null && formObj.quoteOffset !== undefined) payload.quote_offset = formObj.quoteOffset;
         if (formObj.side) payload.side = formObj.side;
         if (configAuthor) payload.author = configAuthor;
+        if (formObj.labelPicker) {
+          const labelValue = formObj.labelPicker.getValue();
+          if (labelValue.label) payload.label = labelValue.label;
+          if (labelValue.blocking) payload.blocking = true;
+        }
         const res = await fetch('/api/file/comments?path=' + enc(filePath), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -7135,6 +7188,8 @@
             collapsed: files[pi].collapsed,
             viewed: files[pi].viewed,
             fileHash: files[pi].fileHash,
+            changedSinceViewed: files[pi].changedSinceViewed,
+            viewedHash: files[pi].viewedHash,
           };
         }
 
@@ -7170,6 +7225,13 @@
             // Lazy files must stay collapsed — they have no content to render
             if (!files[fi].lazy && !contentChanged) files[fi].collapsed = prev.collapsed;
             if (prev.viewed && !contentChanged) files[fi].viewed = true;
+            if (prev.viewed && contentChanged) {
+              files[fi].changedSinceViewed = true;
+              files[fi].viewedHash = prev.fileHash;
+            } else if (prev.changedSinceViewed) {
+              files[fi].changedSinceViewed = true;
+              files[fi].viewedHash = prev.viewedHash;
+            }
           }
         }
 
@@ -8345,6 +8407,24 @@
     if (ref) selectCompareTarget(ref);
   });
 
+  // ===== Since Toggle (All changes / Since last review) =====
+  let sinceUnavailable = false;
+  document.getElementById('sinceToggle').addEventListener('click', async function(e) {
+    const btn = e.target.closest('.toggle-btn');
+    if (!btn || btn.classList.contains('active')) return;
+    sinceReview = btn.dataset.since === 'published';
+    sinceUnavailable = false;
+    navCommentId = null;
+    document.querySelectorAll('#sinceToggle .toggle-btn').forEach(function(b) {
+      b.classList.toggle('active', b === btn);
+      b.setAttribute('aria-pressed', String(b === btn));
+    });
+    await reloadForScope();
+    if (sinceReview && sinceUnavailable) {
+      window.hunkyard.shared.showToast('No review published yet, so all changes are shown.');
+    }
+  });
+
   // ===== Scope Toggle (All / Branch / Staged / Unstaged) =====
   document.getElementById('scopeToggle').addEventListener('click', async function(e) {
     const btn = e.target.closest('.toggle-btn');
@@ -8376,7 +8456,7 @@
   let reloadInFlightKey = null;
   async function reloadForScope() {
     const diffFetchMode = ignoreWhitespace && !storyNeedsRawDiff() ? 'filtered' : 'raw';
-    const key = currentSessionFetchScope() + '\0' + currentFileDataScope() + '\0' + diffCommit + '\0' + diffFetchMode;
+    const key = currentSessionFetchScope() + '\0' + currentFileDataScope() + '\0' + diffCommit + '\0' + diffFetchMode + '\0' + sinceReview;
     if (reloadInFlight && reloadInFlightKey === key) return reloadInFlight;
     if (reloadInFlight) {
       // Different inputs — chain after the in-flight reload finishes so we
@@ -8795,6 +8875,7 @@
           loadCodeFonts(cachedConfig);
         }
         renderShortcutsPane();
+        renderYardPane();
       },
       onTabSwitch: function (tab) { settingsPanelTab = tab; },
       onClose: function () { settingsPanelOpen = false; },
@@ -8899,6 +8980,32 @@
         announceCopy: announceCopy,
       });
     }
+  }
+
+  // Approve stays unavailable while a blocking comment is unresolved.
+  function countOpenBlockingComments() {
+    let open = 0;
+    files.forEach(function(file) {
+      (file.comments || []).forEach(function(c) { if (c.blocking && !c.resolved) open++; });
+    });
+    return open;
+  }
+  window.hunkyardOpenBlockingComments = countOpenBlockingComments;
+
+  // The Yard tab shows learn-preferences activity since this page opened.
+  const yardSince = new Date().toISOString();
+  function renderYardPane() {
+    const yard = window.hunkyard && window.hunkyard.yard;
+    const pane = document.getElementById('yardPane');
+    if (!yard || !pane) return;
+    yard.render(pane, { mode: 'tab', since: yardSince, onAttention: setYardBadge });
+  }
+
+  function setYardBadge(count) {
+    const badge = document.getElementById('yardTabBadge');
+    if (!badge) return;
+    badge.hidden = !count;
+    badge.textContent = count ? String(count) : '';
   }
 
   function renderShortcutsPane() {

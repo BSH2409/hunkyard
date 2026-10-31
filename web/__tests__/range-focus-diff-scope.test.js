@@ -28,6 +28,8 @@ function extractFunction(name) {
 const loadSingleFile = new Function(`
   let diffCommit = '';
   let ignoreWhitespace = false;
+  let sinceReview = false;
+  let sinceUnavailable = false;
   let defaultMarkdownView = '';
   const session = { mode: 'git' };
   const window = { hunkyard: { renderers: { forFile: function() { return null; } } } };

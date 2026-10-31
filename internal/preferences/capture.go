@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/BSH2409/hunkyard/internal/strictjson"
 	"os"
+	"path/filepath"
 	"regexp"
 	"slices"
 	"strings"
@@ -16,10 +17,12 @@ type CaptureInput struct {
 	Surfaces                                []string
 	CWD, RepoKey, Source, SessionID, TurnID string
 	Explicit                                bool
+	Interrupted                             bool
 	Context                                 NeighboringContext
+	CodeContext                             *CodeContext
 }
 
-type CaptureResult struct{ Status, Action, ID, Reason string }
+type CaptureResult struct{ Status, Action, ID, Reason, RuleID string }
 
 var durableLanguage = regexp.MustCompile(`(?i)\b(?:always|never|prefer|avoid|from now on|every time|in the future)\b`)
 var correctionLanguage = regexp.MustCompile(`(?i)(?:^\s*no[,!. ]|\b(?:again|actually|instead|stop|don't|do not|wrong|too much)\b)`)
@@ -85,6 +88,12 @@ func (s *Store) prepareObservation(input CaptureInput) (observation, CaptureResu
 	}
 	// The launching host already classified review candidates; keywords do not add durable intent.
 	capturable = capturable || source == "review" && privacy.Excerpt != ""
+	// The first prompt after the user interrupts the agent is a correction of
+	// what the agent was doing, whatever words it uses.
+	if input.Interrupted {
+		capturable = true
+		signals.Correction = true
+	}
 	if input.Explicit {
 		capturable = true
 		source = "explicit"
@@ -115,7 +124,8 @@ func (s *Store) prepareObservation(input CaptureInput) (observation, CaptureResu
 		}
 		components = append(components, string(encoded))
 	}
-	entry := observation{ID: "obs_" + digest(strings.Join(components, "\x00")), CapturedAt: s.config.Clock().UTC().Format(time.RFC3339), Source: source, RepoKey: nullableString(repo), SessionKey: nullableString(session), TurnKey: nullableString(turn), PromptFingerprint: privacy.Fingerprint, SafeExcerpt: &privacy.Excerpt, Signals: signals, SuggestedSurfaces: detected, Context: context}
+	code := sanitizeCodeContext(input.CodeContext)
+	entry := observation{CodeContext: code, ID: "obs_" + digest(strings.Join(components, "\x00")), CapturedAt: s.config.Clock().UTC().Format(time.RFC3339), Source: source, RepoKey: nullableString(repo), SessionKey: nullableString(session), TurnKey: nullableString(turn), PromptFingerprint: privacy.Fingerprint, SafeExcerpt: &privacy.Excerpt, Signals: signals, SuggestedSurfaces: detected, Context: context}
 	return entry, CaptureResult{Status: "success", Action: "prepared", ID: entry.ID}, nil
 }
 
@@ -223,10 +233,13 @@ func (s *Store) capture(input CaptureInput, nonblocking bool) (CaptureResult, er
 		if err := strictjson.Decode(encoded, &fields); err != nil {
 			return err
 		}
+		_, findErr := catalog.findRule(ruleID(normalize(input.Directive), scope, sortedUnique(input.Surfaces)))
+		repeated := findErr == nil
 		activated, err := catalog.upsertExplicit(fields, input.Directive, scope, input.Surfaces)
 		if err != nil {
 			return err
 		}
+		result.RuleID = textField(activated["id"])
 		if result.Action == "duplicate" && current != nil && slices.Contains(current.ProcessedIDs, entry.ID) {
 			for _, existing := range current.Rules.rules {
 				if existing["id"] != activated["id"] {
@@ -258,6 +271,13 @@ func (s *Store) capture(input CaptureInput, nonblocking bool) (CaptureResult, er
 		}
 		result.Action = "activated"
 		result.Reason = ""
+		kind := activityLearned
+		if repeated {
+			kind = activityViolated
+		}
+		if err := s.recordActivity(ActivityEvent{Kind: kind, RuleID: result.RuleID, RepoKey: textField(repo), Detail: normalize(input.Directive)}); err != nil {
+			fmt.Fprintf(os.Stderr, "preferences: activity not recorded: %v\n", err)
+		}
 		if s.mirrorError != nil {
 			result.Reason = "compatibility_repair_needed"
 		}
@@ -275,4 +295,20 @@ func baseManifest(current *generation) map[string]any {
 		delete(manifest, key)
 	}
 	return manifest
+}
+
+func sanitizeCodeContext(code *CodeContext) *CodeContext {
+	if code == nil {
+		return nil
+	}
+	clean := *code
+	if filepath.IsAbs(clean.Path) || !safeRelative(filepath.ToSlash(clean.Path)) {
+		clean.Path = ""
+	}
+	privacy := sanitize(clean.Excerpt)
+	clean.Excerpt = ""
+	if privacy.Accepted {
+		clean.Excerpt = truncate(privacy.Excerpt, 600)
+	}
+	return &clean
 }

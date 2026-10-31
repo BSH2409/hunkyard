@@ -59,7 +59,7 @@ func TestHookBoundaryReferenceCases(t *testing.T) {
 				defer unlockFile(file)
 				diagnostic = "capture_failed"
 			case "test_hook_ordinary_prompt_injects_without_capture_and_correction_captures_once":
-				payload["prompt"] = "continue"
+				payload["prompt"] = "continue with the naming changes"
 			case "test_hook_secret_shaped_correction_is_not_captured":
 				payload["prompt"] = "Always use password=synthetic-value"
 			case "test_hook_adapter_never_reads_transcript_path_and_disk_errors_are_advisory":
@@ -75,7 +75,7 @@ func TestHookBoundaryReferenceCases(t *testing.T) {
 				t.Helper()
 				data, _ := json.Marshal(payload)
 				var out, errOut bytes.Buffer
-				s.hook(bytes.NewReader(data), &out, &errOut)
+				s.hook("UserPromptSubmit", bytes.NewReader(data), &out, &errOut)
 				var result map[string]any
 				if json.Unmarshal(out.Bytes(), &result) != nil || result["continue"] != true {
 					t.Fatal("hook blocked")
@@ -128,7 +128,7 @@ func TestHookHostPayloadsAndAdvisoryFailures(t *testing.T) {
 			}
 			data, _ := json.Marshal(payload)
 			var out, errOut bytes.Buffer
-			s.hook(bytes.NewReader(data), &out, &errOut)
+			s.hook("UserPromptSubmit", bytes.NewReader(data), &out, &errOut)
 			var result map[string]any
 			if json.Unmarshal(out.Bytes(), &result) != nil || result["continue"] != true {
 				t.Fatal("hook blocked session")
@@ -141,14 +141,14 @@ func TestHookHostPayloadsAndAdvisoryFailures(t *testing.T) {
 	}
 	for _, payload := range []string{"{", strings.Repeat("x", 1024*1024+1), `{"hook_event_name":"Other","prompt":"Prefer safe names"}`} {
 		var out, errOut bytes.Buffer
-		s.hook(strings.NewReader(payload), &out, &errOut)
+		s.hook("UserPromptSubmit", strings.NewReader(payload), &out, &errOut)
 		if strings.TrimSpace(out.String()) != `{"continue":true}` || len(payload) > 10 && strings.Contains(errOut.String(), payload) {
 			t.Fatal("malformed payload blocked session or leaked input")
 		}
 	}
 	t.Setenv("LEARN_PREFERENCES_MAINTENANCE", "1")
 	var out, errOut bytes.Buffer
-	s.hook(strings.NewReader("not read"), &out, &errOut)
+	s.hook("UserPromptSubmit", strings.NewReader("not read"), &out, &errOut)
 	if strings.TrimSpace(out.String()) != `{"continue":true}` || errOut.Len() != 0 {
 		t.Fatal("maintenance recursion was not suppressed")
 	}
@@ -189,5 +189,15 @@ func TestHookTranscriptSessionConfinement(t *testing.T) {
 	payload["transcript_path"] = link
 	if context := s.transcriptContext(payload); context.Source != "" {
 		t.Fatal("symlink transcript accepted")
+	}
+}
+
+func TestHookUnknownEventContinues(t *testing.T) {
+	s := testStore(t)
+	var out, errOut bytes.Buffer
+	s.hook("Notification", strings.NewReader(`{"hook_event_name":"Notification"}`), &out, &errOut)
+	var response map[string]any
+	if json.Unmarshal(out.Bytes(), &response) != nil || response["continue"] != true {
+		t.Fatalf("unknown events must continue: %q", out.String())
 	}
 }

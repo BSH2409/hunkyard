@@ -38,13 +38,15 @@ func checkpointKey(batchID string, c Comment) string {
 	return batchID + ":" + digest([]string{c.ID, strconv.Itoa(c.Revision)})
 }
 func completedPreference(status string) bool {
-	return status == "ignored" || status == "captured" || status == "rejected"
+	return status == "ignored" || status == "captured" || status == "rejected" || status == "unsupported"
 }
 
 //nolint:gocyclo // Each revision is captured and checkpointed in the same retryable workflow.
 func (s *Store) Learn(prefs *preferences.Store, batchID string, decisions []PreferenceDecision, owner, repoRoot string) (PreferenceReport, error) {
 	report := PreferenceReport{BatchID: batchID, Outcomes: []PreferenceOutcome{}}
-	if prefs == nil || owner == "" || repoRoot == "" {
+	// Without preference support (native Windows) decisions are validated and
+	// recorded as unsupported, so the batch can still be acknowledged.
+	if prefs == nil && preferences.SupportedPlatform || owner == "" || repoRoot == "" {
 		return report, fmt.Errorf("missing trusted preference context")
 	}
 	var batch Batch
@@ -107,10 +109,12 @@ func (s *Store) Learn(prefs *preferences.Store, batchID string, decisions []Pref
 				}
 			}
 			outcome = PreferenceOutcome{CommentID: c.ID, Revision: c.Revision, Status: "ignored"}
-			if decision.Kind != "ignore" {
+			if decision.Kind != "ignore" && prefs == nil {
+				outcome.Status = "unsupported"
+			} else if decision.Kind != "ignore" {
 				// The identity excludes batch/round so publishing an unchanged revision cannot inflate evidence.
 				turn := digest([]string{batch.ReviewID, c.ID, strconv.Itoa(c.Revision), revisionHash(c)})
-				result, err := prefs.Capture(preferences.CaptureInput{Feedback: c.Body, Directive: decision.Directive, Scope: decision.Scope, Surfaces: decision.Surfaces, CWD: repoRoot, Source: "review", SessionID: owner, TurnID: turn, Explicit: decision.Kind == "directive"})
+				result, err := prefs.Capture(preferences.CaptureInput{Feedback: c.Body, Directive: decision.Directive, Scope: decision.Scope, Surfaces: decision.Surfaces, CWD: repoRoot, Source: "review", SessionID: owner, TurnID: turn, Explicit: decision.Kind == "directive", CodeContext: &preferences.CodeContext{Path: c.Path, StartLine: c.StartLine, EndLine: c.EndLine, Excerpt: c.Quote}})
 				switch {
 				case err != nil:
 					outcome.Status = "failed"

@@ -163,9 +163,9 @@ type integration struct {
 
 var integrationMap = map[string][]integration{
 	"preferences": {
-		{source: "integrations/preferences/SKILL.md", dest: ".agents/skills/learn-preferences/SKILL.md", globalDest: ".codex/skills/learn-preferences/SKILL.md", globalDestKind: globalDestRelHome, hint: "The Go-backed learn-preferences skill is available in Codex and Claude"},
-		{source: "integrations/preferences/references/local-maintenance.md", dest: ".agents/skills/learn-preferences/references/local-maintenance.md", globalDest: ".codex/skills/learn-preferences/references/local-maintenance.md", globalDestKind: globalDestRelHome},
-		{source: "integrations/preferences/schemas/maintenance-proposal.json", dest: ".agents/skills/learn-preferences/schemas/maintenance-proposal.json", globalDest: ".codex/skills/learn-preferences/schemas/maintenance-proposal.json", globalDestKind: globalDestRelHome},
+		{source: "integrations/preferences/SKILL.md", dest: ".agents/skills/learn-preferences/SKILL.md", hint: "The Go-backed learn-preferences skill is available in Codex and Claude"},
+		{source: "integrations/preferences/references/local-maintenance.md", dest: ".agents/skills/learn-preferences/references/local-maintenance.md"},
+		{source: "integrations/preferences/schemas/maintenance-proposal.json", dest: ".agents/skills/learn-preferences/schemas/maintenance-proposal.json"},
 		{source: "integrations/preferences/SKILL.md", dest: ".claude/skills/learn-preferences/SKILL.md"},
 		{source: "integrations/preferences/references/local-maintenance.md", dest: ".claude/skills/learn-preferences/references/local-maintenance.md"},
 		{source: "integrations/preferences/schemas/maintenance-proposal.json", dest: ".claude/skills/learn-preferences/schemas/maintenance-proposal.json"},
@@ -391,9 +391,38 @@ func claudeConfigDirPath(dest string) (string, bool) {
 	return filepath.Join(dir, filepath.FromSlash(rest)), true
 }
 
+// symlinkedSkillDir returns the skill folder containing dest (the folder
+// directly under a "skills" directory) when that folder is a symlink, so an
+// install never writes through it into another tool's copy of the skill.
+func symlinkedSkillDir(dest string) string {
+	parts := strings.Split(filepath.ToSlash(dest), "/")
+	for i := len(parts) - 2; i > 0; i-- {
+		if parts[i-1] != "skills" {
+			continue
+		}
+		dir := filepath.FromSlash(strings.Join(parts[:i+1], "/"))
+		if info, err := os.Lstat(dir); err == nil && info.Mode()&os.ModeSymlink != 0 {
+			return dir
+		}
+		return ""
+	}
+	return ""
+}
+
 // installOneFile copies a single embedded integration file to dest, skipping
 // if it already exists (unless force is set). Exits on I/O errors.
 func installOneFile(f integration, dest string, force bool) {
+	if link := symlinkedSkillDir(dest); link != "" {
+		if !force {
+			fmt.Printf("  Skipped:   %s (skill folder is a symlink, use --force to replace it with a copy)\n", dest)
+			return
+		}
+		if err := os.Remove(link); err != nil {
+			fmt.Fprintf(os.Stderr, "Error replacing symlinked skill folder %s: %v\n", link, err)
+			os.Exit(1)
+		}
+		fmt.Printf("  Replaced:  %s (was a symlink; installing a copy)\n", link)
+	}
 	if !force {
 		if _, err := os.Stat(dest); err == nil {
 			fmt.Printf("  Skipped:   %s (already exists, use --force to overwrite)\n", dest)

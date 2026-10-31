@@ -14,13 +14,13 @@ set -e
 # (web/hunkyard-find.js).
 DEAD_VAR_ALLOWLIST="
 --hunkyard-find-bg --hunkyard-find-current-bg --hunkyard-find-current-fg
---font-sans --header-height --file-tree-width --comments-panel-width --story-rail-width --p
+--font-sans --header-height --review-chrome-height --file-tree-width --comments-panel-width --story-rail-width --p
 --hunkyard-border-strong --hunkyard-dur-base --hunkyard-dur-slow --hunkyard-ease-in --hunkyard-ease-out
 --hunkyard-fg-muted --hunkyard-fg-secondary --hunkyard-header-height
 --hunkyard-r-sm --hunkyard-r-xl
 --hunkyard-live-marker-bg --hunkyard-live-marker-border --hunkyard-live-marker-fg --hunkyard-live-marker-shadow
 --hunkyard-live-reanchor-active-outline
---diffs-font-family --diffs-tab-size --diffs-token-light --diffs-token-dark --diffs-modified-color-override
+--diffs-font-family --diffs-font-size --diffs-line-height --diffs-tab-size --diffs-token-light --diffs-token-dark --diffs-modified-color-override
 --hunkyard-diff-tint-mix
 --diffs-bg-deletion-override --diffs-bg-addition-override
 --diffs-bg-deletion-number-override --diffs-bg-addition-number-override
