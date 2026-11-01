@@ -27,12 +27,24 @@ var (
 // routePositionalArgs classifies bare positional hunkyard arguments (no subcommand).
 func routePositionalArgs(args []string) positionalRoute {
 	if localonly.Enabled() {
-		return positionalRouteReview
+		return localPositionalRoute(args)
 	}
 	if _, ok := changeReviewArgs(args); ok {
 		return positionalRouteChangeReview
 	}
 	if live.LooksLikeLiveArgs(args) {
+		return positionalRouteLive
+	}
+	if preview.LooksLikePreviewArgs(args) {
+		return positionalRoutePreview
+	}
+	return positionalRouteReview
+}
+
+// localPositionalRoute routes a loopback URL to live mode and an HTML file to
+// preview; anything else, a forge URL included, is a source review.
+func localPositionalRoute(args []string) positionalRoute {
+	if live.LooksLikeLiveArgs(args) && localonly.CheckURL(args[0]) == nil {
 		return positionalRouteLive
 	}
 	if preview.LooksLikePreviewArgs(args) {

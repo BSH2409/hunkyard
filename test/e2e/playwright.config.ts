@@ -12,6 +12,8 @@ const PERF_PORT = process.env.HUNKYARD_TEST_PERF_PORT || '3134';
 // Huge-review fixture (~2,500 files) whose flat document is taller than 2^22px.
 const HUGE_PORT = process.env.HUNKYARD_TEST_HUGE_PORT || '3136';
 const YARD_PORT = process.env.HUNKYARD_TEST_YARD_PORT || '3137';
+// Live mode: a local upstream app proxied into the review page.
+const LIVE_PORT = process.env.HUNKYARD_TEST_LIVE_PORT || '3129';
 // Big working tree (5,000 tracked, 300 untracked, 30,000 ignored files) behind selected code paths.
 const BIGTREE_PORT = process.env.HUNKYARD_TEST_BIGTREE_PORT || '3138';
 // The local-only build omits executable-preview projects.
@@ -112,9 +114,17 @@ const allFixtureServers: FixtureServer[] = [
     stdout: 'pipe',
   },
   {
+    key: 'live',
+    command: `bash setup-fixtures-livemode.sh ${LIVE_PORT}`,
+    url: `http://localhost:${LIVE_PORT}/api/session`,
+    reuseExistingServer: true,
+    timeout: 120_000,
+    stdout: 'pipe',
+  },
+  {
     key: 'yard',
     command: `bash setup-fixtures-yard.sh ${YARD_PORT}`,
-    url: `http://localhost:${YARD_PORT}/api/yard/health`,
+    url: `http://localhost:${YARD_PORT}/api/session`,
     reuseExistingServer: true,
     timeout: 30_000,
     stdout: 'pipe',
@@ -237,6 +247,14 @@ export default defineConfig({
       use: {
         browserName: 'chromium',
         baseURL: `http://localhost:${BIGTREE_PORT}`,
+      },
+    },
+    {
+      name: 'live-mode',
+      testMatch: /\.livemode\.spec\.ts$/,
+      use: {
+        browserName: 'chromium',
+        baseURL: `http://localhost:${LIVE_PORT}`,
       },
     },
     {

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"strings"
 	"time"
 
 	"github.com/BSH2409/hunkyard/internal/config"
@@ -28,11 +27,4 @@ func recordSessionStats(sess *Session, author string, startedAt time.Time) {
 
 func filterPathsIgnored(paths []string, patterns []string) []string {
 	return config.FilterPathsIgnored(paths, patterns)
-}
-
-func splitLines(content string) []string {
-	if content == "" {
-		return []string{}
-	}
-	return strings.Split(content, "\n")
 }

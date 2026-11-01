@@ -31,7 +31,7 @@ Resolution order for e.g. `on_finish_unresolved` in a PR review:
 1. `on_finish_unresolved:diff` (if set)
 2. `on_finish_unresolved` (fallback)
 
-Internally, git/Sapling/JJ branch/PR/range reviews use mode `diff`; plan and file-based reviews use `files`. This is identical to the prompt system.
+Internally, git branch/PR/range reviews use mode `diff`; plan and file-based reviews use `files`. This is identical to the prompt system.
 
 Only **one** hook fires per finish: the most specific key that resolves wins (mode-specific over generic). There is no stock hook - if nothing is configured, nothing executes.
 

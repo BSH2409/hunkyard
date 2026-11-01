@@ -30,6 +30,12 @@ export const vendoredAssets = [
     kind: "copy",
   },
   {
+    path: "web/snapdom.min.js",
+    sources: ["@zumer/snapdom@3.3.5"],
+    packagePath: "dist/snapdom.js",
+    kind: "copy",
+  },
+  {
     path: "web/mermaid.min.js",
     sources: ["mermaid@12.1.0"],
     packagePath: "dist/mermaid.min.js",

@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/BSH2409/hunkyard/internal/session"
 )
 
 // ListedComment is a comment flattened for CLI/finish output. It embeds Comment
@@ -14,6 +16,25 @@ type ListedComment struct {
 	Scope string  `json:"scope"`
 	Path  *string `json:"path,omitempty"`
 	Comment
+}
+
+// UnmarshalJSON decodes the list fields itself: Comment's own UnmarshalJSON
+// would otherwise be promoted and drop them.
+func (l *ListedComment) UnmarshalJSON(data []byte) error {
+	var list struct {
+		Scope string  `json:"scope"`
+		Path  *string `json:"path"`
+	}
+	if err := json.Unmarshal(data, &list); err != nil {
+		return err
+	}
+	if err := json.Unmarshal(data, &l.Comment); err != nil {
+		return err
+	}
+	// "scope" on the wire is the list scope; Comment.Scope is shadowed.
+	l.Comment.Scope = ""
+	l.Scope, l.Path = list.Scope, list.Path
+	return nil
 }
 
 func isUnresolved(c Comment) bool {
@@ -151,6 +172,9 @@ func formatCommentHeader(e ListedComment) string {
 	}
 	if e.Drifted {
 		header += " (drifted)"
+	}
+	if e.PinStatus == session.PinOutdated {
+		header += " (outdated)"
 	}
 	return header
 }

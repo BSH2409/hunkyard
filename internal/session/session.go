@@ -64,8 +64,6 @@ func randomReviewCommentID() string { return randomID("r_") }
 // RandomReplyID returns a random reply ID (e.g. "rp_d7e2a0").
 func RandomReplyID() string { return randomID("rp_") }
 
-func randomCommentID() string                   { return RandomCommentID() }
-func randomReplyID() string                     { return RandomReplyID() }
 func stampWithFocus(c Comment, f Focus) Comment { return StampWithFocus(c, f) }
 
 // Reply represents a single reply in a comment thread.
@@ -118,6 +116,11 @@ type DOMAnchor struct {
 	// silently ignores unknown fields by default.
 	ViewportWidth  int `json:"viewport_width"`
 	ViewportHeight int `json:"viewport_height"`
+
+	// Fingerprint is what the element looked like when it was pinned; the
+	// page compares it with the element it finds later to decide whether
+	// the pin is current or outdated.
+	Fingerprint *PinFingerprint `json:"fingerprint,omitempty"`
 }
 
 // Comment represents a single inline review comment.
@@ -182,6 +185,15 @@ type Comment struct {
 	// DOMAnchor is non-nil iff this comment is a live-mode pin.
 	// For code-review comments DOMAnchor is always nil.
 	DOMAnchor *DOMAnchor `json:"dom_anchor,omitempty"`
+	// PinScreenshot is the captured page for a live/preview pin; when
+	// capture failed, ScreenshotStatus is "failed" and ScreenshotReason says why.
+	PinScreenshot *PinScreenshot `json:"pin_screenshot,omitempty"`
+	// PinStatus is PinCurrent or PinOutdated as last reported by the page,
+	// on review round PinCheckedRound. Empty means never checked.
+	PinStatus        string `json:"pin_status,omitempty"`
+	PinCheckedRound  int    `json:"pin_checked_round,omitempty"`
+	ScreenshotStatus string `json:"screenshot_status,omitempty"`
+	ScreenshotReason string `json:"screenshot_reason,omitempty"`
 
 	// PinNumber is a monotonic, review-scoped integer assigned at live-pin
 	// creation, so reviewers can refer to "pin #7" regardless of route. Set
@@ -458,6 +470,9 @@ type Session struct {
 
 	// roundBusy is set while a round transition is applied (pause.go).
 	roundBusy atomic.Bool
+	// gitWatchTicks counts the git watcher's ticks; a count of 2 means the
+	// first tick, which takes the baseline, has finished.
+	gitWatchTicks atomic.Int64
 
 	// Activity that keeps the review from pausing (activity.go).
 	activityMu      sync.Mutex
@@ -471,9 +486,11 @@ type Session struct {
 
 	// Working-tree snapshot shared by scope, commit and file requests
 	// (wt_snapshot.go); guarded by snapMu, not mu.
-	snapMu     sync.Mutex
-	snap       *wtSnapshot
-	snapStale  bool
+	snapMu    sync.Mutex
+	snap      *wtSnapshot
+	snapStale bool
+	// snapGen counts invalidations, so a reading that overlapped one stays stale.
+	snapGen    uint64
 	snapFlight flightGroup
 	// slowWalkInterval and waitingWalkInterval override the git watcher's
 	// tree-walk intervals (tests); zero uses the defaults in watch.go.
@@ -528,11 +545,12 @@ type Session struct {
 	pollInterval          time.Duration // watcher tick; 0 means 1s (tests shorten it)
 	pendingEdits          int
 	lastRoundEdits        int
-	lastHunkyardJSONMtime time.Time // mtime after our last WriteFiles(); used to detect external changes
-	awaitingFirstReview   bool      // true until first review-cycle completes
-	waitingForAgent       bool      // true between finish (with unresolved comments) and round-complete
-	planHook              string    // plan_mode | codex while a plan hook waits on review-cycle
-	browserClients        int32     // number of connected SSE browser clients (atomic)
+	lastHunkyardJSONMtime time.Time     // mtime after our last WriteFiles(); used to detect external changes
+	lastWritten           *writtenState // IDs and resolved flags of the review.json last written or loaded
+	awaitingFirstReview   bool          // true until first review-cycle completes
+	waitingForAgent       bool          // true between finish (with unresolved comments) and round-complete
+	planHook              string        // plan_mode | codex while a plan hook waits on review-cycle
+	browserClients        int32         // number of connected SSE browser clients (atomic)
 
 	// Focus is the discriminator that selects what the session is showing.
 	// Defaults to FocusWorkingTree (today's behavior). Range-mode sessions
@@ -1687,31 +1705,29 @@ func (s *Session) UpdateCommentWithAnchor(filePath, id, body string, newAnchor *
 	}
 	if newAnchor != nil {
 		c.DOMAnchor = newAnchor
+		c.PinStatus = PinCurrent
+		c.PinCheckedRound = s.ReviewRound
 	}
 	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
 	s.scheduleWrite()
 	return *c, true, ""
 }
 
-// PatchCommentDrift partially updates the live-pin drift fields on a
-// comment. Pointer arguments distinguish "not set" from "set to zero/false":
-// only non-nil arguments are written. Returns the updated comment and true
-// on success; (zero, false) when the comment is not found.
-func (s *Session) PatchCommentDrift(filePath, id string, drifted *bool, driftedOnRound *int) (Comment, bool) {
+// SetPinStatus records the status the page found for a live pin on the
+// current round. It refuses comments that are not pins and unknown statuses.
+func (s *Session) SetPinStatus(filePath, id, status string) (Comment, bool) {
+	if status != PinCurrent && status != PinOutdated {
+		return Comment{}, false
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	fe, i := s.locateFileCommentLocked(filePath, id)
-	if fe == nil {
+	if fe == nil || fe.Comments[i].DOMAnchor == nil {
 		return Comment{}, false
 	}
 	c := &fe.Comments[i]
-	if drifted != nil {
-		c.Drifted = *drifted
-	}
-	if driftedOnRound != nil {
-		c.DriftedOnRound = *driftedOnRound
-	}
-	c.UpdatedAt = time.Now().UTC().Format(time.RFC3339)
+	c.PinStatus = status
+	c.PinCheckedRound = s.ReviewRound
 	s.scheduleWrite()
 	return *c, true
 }
@@ -2063,6 +2079,35 @@ func (s *Session) fileByPathLocked(path string) *FileEntry {
 // reviewing). The file is read from disk and added with appropriate status and
 // diff hunks so that comments and diff rendering work correctly.
 // Returns true if the file was found (either already existed or was added).
+// resolveInRepo returns the on-disk path of a request's repo-relative path,
+// and false when it does not exist or leads outside repoRoot: "..", an
+// absolute path, or a symlink pointing out of the repository.
+func resolveInRepo(repoRoot, path string) (string, bool) {
+	if repoRoot == "" {
+		return "", false
+	}
+	clean := filepath.Clean(filepath.FromSlash(path))
+	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+		return "", false
+	}
+	absPath := filepath.Join(repoRoot, clean)
+	if !strings.HasPrefix(absPath, repoRoot+string(filepath.Separator)) && absPath != repoRoot {
+		return "", false
+	}
+	resolved, err := filepath.EvalSymlinks(absPath)
+	if err != nil {
+		return "", false
+	}
+	resolvedRoot, err := filepath.EvalSymlinks(repoRoot)
+	if err != nil {
+		return "", false
+	}
+	if !strings.HasPrefix(resolved, resolvedRoot+string(filepath.Separator)) && resolved != resolvedRoot {
+		return "", false
+	}
+	return resolved, true
+}
+
 func (s *Session) EnsureFileEntry(path string) bool {
 	s.mu.RLock()
 	if s.fileByPathLocked(path) != nil {
@@ -2078,7 +2123,10 @@ func (s *Session) EnsureFileEntry(path string) bool {
 		return false
 	}
 
-	absPath := filepath.Join(repoRoot, path)
+	absPath, inRepo := resolveInRepo(repoRoot, path)
+	if !inRepo {
+		return false
+	}
 	data, err := os.ReadFile(absPath)
 	if err != nil {
 		return false
@@ -2522,11 +2570,7 @@ func (s *Session) restoreFileCommentsLocked(cj *HunkyardJSON) {
 			continue
 		}
 		f.Comments = cf.Comments
-		for i := range f.Comments {
-			if f.Comments[i].Scope == "" {
-				f.Comments[i].Scope = "line"
-			}
-		}
+		defaultEmptyCommentScopes(f.Comments)
 	}
 }
 
@@ -2607,6 +2651,7 @@ func (s *Session) loadHunkyardJSONLocked() {
 	if info, err := os.Stat(ReviewPathsFor(s.hunkyardJSONPath()).Review); err == nil {
 		s.lastHunkyardJSONMtime = info.ModTime()
 	}
+	s.lastWritten = newWrittenState(cj)
 
 	// Restore round snapshots from the folder sidecar.
 	sidecarHadData := s.loadSnapshotsFromSidecar(s.hunkyardJSONPath())
@@ -2737,7 +2782,7 @@ func omitTombstonedComments(comments []Comment, deleted map[string]struct{}) []C
 
 func defaultEmptyCommentScopes(comments []Comment) {
 	for i := range comments {
-		if comments[i].Scope == "" {
+		if comments[i].Scope == "" && comments[i].DOMAnchor == nil {
 			comments[i].Scope = "line"
 		}
 	}
@@ -2747,7 +2792,7 @@ func defaultEmptyCommentScopes(comments []Comment) {
 
 // Subscribe registers a new SSE subscriber.
 func (s *Session) Subscribe() chan SSEEvent {
-	ch := make(chan SSEEvent, 4)
+	ch := make(chan SSEEvent, 16)
 	s.subMu.Lock()
 	s.subscribers[ch] = struct{}{}
 	s.subMu.Unlock()
@@ -2766,6 +2811,16 @@ func (s *Session) notify(event SSEEvent) {
 	s.subMu.Lock()
 	defer s.subMu.Unlock()
 	for ch := range s.subscribers {
+		select {
+		case ch <- event:
+			continue
+		default:
+		}
+		// A slow tab: drop its oldest event so the newest one gets through.
+		select {
+		case <-ch:
+		default:
+		}
 		select {
 		case ch <- event:
 		default:
@@ -2835,28 +2890,8 @@ func (s *Session) GetFileSnapshotFromDisk(path string) (map[string]any, bool) {
 	viewID := s.viewIDLocked()
 	s.mu.RUnlock()
 
-	if repoRoot == "" {
-		return nil, false
-	}
-	clean := filepath.Clean(filepath.FromSlash(path))
-	if clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-		return nil, false
-	}
-	absPath := filepath.Join(repoRoot, clean)
-	// Reject before symlink resolution if the joined path escapes repoRoot
-	// via ".." segments that Clean left relative to an absolute root join.
-	if !strings.HasPrefix(absPath, repoRoot+string(filepath.Separator)) && absPath != repoRoot {
-		return nil, false
-	}
-	resolved, err := filepath.EvalSymlinks(absPath)
-	if err != nil {
-		return nil, false
-	}
-	resolvedRoot, err := filepath.EvalSymlinks(repoRoot)
-	if err != nil {
-		return nil, false
-	}
-	if !strings.HasPrefix(resolved, resolvedRoot+string(filepath.Separator)) && resolved != resolvedRoot {
+	resolved, ok := resolveInRepo(repoRoot, path)
+	if !ok {
 		return nil, false
 	}
 	data, err := os.ReadFile(resolved)

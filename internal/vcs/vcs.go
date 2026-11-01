@@ -1,20 +1,12 @@
 package vcs
 
-import (
-	"context"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
+import "context"
 
-	"github.com/BSH2409/hunkyard/internal/localonly"
-)
-
-// VCS abstracts version control operations so hunkyard can support multiple backends
-// (git, Sapling, Jujutsu, etc.). Each method corresponds to an existing
-// package-level function in git.go; the interface lets callers work with any VCS uniformly.
+// VCS abstracts version control operations. GitVCS is the only implementation;
+// each method corresponds to an existing package-level function in git.go, and
+// the interface lets tests substitute a fake backend.
 type VCS interface {
-	// Name returns the VCS identifier ("git", "sl", "jj", etc.).
+	// Name returns the VCS identifier ("git").
 	Name() string
 
 	// RepoRoot returns the absolute path to the repository root.
@@ -45,7 +37,7 @@ type VCS interface {
 	// DefaultBaseRef returns the best ref to use as the diff base for the
 	// auto-detected default branch. For git, prefers `origin/<branch>` when
 	// the remote-tracking ref exists locally, since the local default branch
-	// is often stale. For Sapling, returns the default branch as-is.
+	// is often stale.
 	DefaultBaseRef() string
 
 	// ChangedFilesOnDefaultInDir returns changed files when on the default branch.
@@ -135,7 +127,7 @@ type VCS interface {
 	HasStagingArea() bool
 
 	// SkipDirNames returns directory names that should be skipped during walks
-	// (e.g. ".git", ".sl").
+	// (e.g. ".git").
 	SkipDirNames() []string
 }
 
@@ -147,135 +139,13 @@ type InitialChangeSnapshotter interface {
 	InitialChangesAndScopes(baseRef, dir string) (changes []FileChange, scopes []string, ok bool, err error)
 }
 
-// DetectVCS returns the appropriate VCS backend for the current directory.
-// If vcsOverride is set ("git", "sl"/"sapling", or "jj"), that backend is
-// preferred but falls back to git if the requested backend isn't available.
-// Otherwise, auto-detection checks for .jj/ first, then .sl/ (Sapling on git
-// repos has both), then falls back to git. Returns nil if no VCS is detected.
+// DetectVCS returns the git backend when the current directory is inside a
+// git repository. Git is the only backend: vcsOverride may be "" or "git";
+// any other value (including the removed "sl"/"sapling" and "jj"/"jujutsu")
+// returns nil, as does a directory outside a git repository.
 func DetectVCS(vcsOverride string) VCS {
-	if !localonly.Enabled() {
-		return detectVCS(vcsOverride)
-	}
 	if (vcsOverride == "" || vcsOverride == "git") && IsGitRepo() {
 		return &GitVCS{}
 	}
 	return nil
-}
-
-func detectVCS(vcsOverride string) VCS {
-	switch vcsOverride {
-	case "git":
-		return &GitVCS{}
-	case "sl", "sapling":
-		if _, err := exec.LookPath("sl"); err == nil {
-			return &SaplingVCS{}
-		}
-		fmt.Fprintf(os.Stderr, "Warning: vcs=%q requested but sl not in PATH, falling back to git\n", vcsOverride)
-		if IsGitRepo() {
-			return &GitVCS{}
-		}
-		return nil
-	case "jj", "jujutsu":
-		if _, err := exec.LookPath("jj"); err == nil {
-			return &JJVCS{}
-		}
-		fmt.Fprintf(os.Stderr, "Warning: vcs=%q requested but jj not in PATH, falling back to git\n", vcsOverride)
-		if IsGitRepo() {
-			return &GitVCS{}
-		}
-		return nil
-	}
-
-	// Auto-detect: check for .jj/ first since colocated JJ repos also have .git/.
-	if hasJJDir() {
-		if _, err := exec.LookPath("jj"); err == nil {
-			return &JJVCS{}
-		}
-	}
-
-	// Check for .sl/ before git since Sapling repos on top of git have both.
-	if hasSLDir() {
-		if _, err := exec.LookPath("sl"); err == nil {
-			return &SaplingVCS{}
-		}
-	}
-
-	if IsGitRepo() {
-		// Check if Sapling metadata exists under .git/sl — this means sl was used
-		// here but it's primarily a git repo. Hint but don't switch automatically.
-		if hasGitSLDir() {
-			fmt.Fprintf(os.Stderr, "Hint: Sapling detected. Use --vcs sl or set \"vcs\": \"sl\" in config to use Sapling.\n")
-		}
-		return &GitVCS{}
-	}
-
-	return nil
-}
-
-// hasJJDir checks whether a .jj/ directory exists at or above the current directory.
-func hasJJDir() bool {
-	dir, err := os.Getwd()
-	if err != nil {
-		return false
-	}
-	return hasJJDirFrom(dir)
-}
-
-// hasJJDirFrom checks whether a .jj/ directory exists at or above the given directory.
-func hasJJDirFrom(dir string) bool {
-	for {
-		if info, err := os.Stat(filepath.Join(dir, ".jj")); err == nil && info.IsDir() {
-			return true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return false
-}
-
-// hasSLDir checks whether a .sl/ directory exists at or above the current directory.
-func hasSLDir() bool {
-	dir, err := os.Getwd()
-	if err != nil {
-		return false
-	}
-	return hasSLDirFrom(dir)
-}
-
-// hasSLDirFrom checks whether a .sl/ directory exists at or above the given directory.
-func hasSLDirFrom(dir string) bool {
-	for {
-		if info, err := os.Stat(filepath.Join(dir, ".sl")); err == nil && info.IsDir() {
-			return true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return false
-}
-
-// hasGitSLDir checks whether .git/sl/ exists at or above the current directory,
-// indicating Sapling has been used in a git repo.
-func hasGitSLDir() bool {
-	dir, err := os.Getwd()
-	if err != nil {
-		return false
-	}
-	for {
-		if info, err := os.Stat(filepath.Join(dir, ".git", "sl")); err == nil && info.IsDir() {
-			return true
-		}
-		parent := filepath.Dir(dir)
-		if parent == dir {
-			break
-		}
-		dir = parent
-	}
-	return false
 }

@@ -435,6 +435,16 @@ func isCommitish(s string) bool {
 	return commitishRe.MatchString(s)
 }
 
+// ValidCommitParam reports whether a commit selection from a request is a hex
+// SHA or a "<sha>..<sha>" range: never a ref name, and never anything git
+// could parse as an option.
+func ValidCommitParam(commit string) bool {
+	if _, _, ok := SplitCommitRange(commit); ok {
+		return true
+	}
+	return isCommitish(commit)
+}
+
 // splitCommitRange parses a commit query param of the form "<baseSHA>..<headSHA>".
 // Returns ok=false for a single-SHA (no "..") param, which keeps single-commit
 // behavior. Both parts must be valid commit-ish tokens; otherwise ok=false.
@@ -762,36 +772,13 @@ func ResolveDefaultBranchSHA(vcs VCS, repoRoot, defaultBranch string) (string, e
 	if vcs == nil || defaultBranch == "" {
 		return "", fmt.Errorf("default branch unknown")
 	}
-	switch vcs.Name() {
-	case "git":
-		if out, err := RunGitInDir(repoRoot, "rev-parse", "--verify", "origin/"+defaultBranch); err == nil {
-			return strings.TrimSpace(out), nil
-		}
-		if out, err := RunGitInDir(repoRoot, "rev-parse", "--verify", defaultBranch); err == nil {
-			return strings.TrimSpace(out), nil
-		}
-		return "", fmt.Errorf("could not resolve %s tip", defaultBranch)
-	case "jj":
-		if defaultBranch == jjTrunkRevset {
-			_, sha := resolveJJDefaultBaseInDir(repoRoot)
-			if sha != "" {
-				return sha, nil
-			}
-		}
-		if sha, err := ResolveJJRevisionToCommitID(repoRoot, defaultBranch); err == nil && strings.TrimSpace(sha) != "" {
-			return strings.TrimSpace(sha), nil
-		}
-		return "", fmt.Errorf("could not resolve %s tip", defaultBranch)
-	default:
-		// Sapling: try remote bookmark, then local.
-		if out, err := SLCommandInDir(repoRoot, "log", "-r", "remote/"+defaultBranch, "-T", "{node}"); err == nil && strings.TrimSpace(out) != "" {
-			return strings.TrimSpace(out), nil
-		}
-		if out, err := SLCommandInDir(repoRoot, "log", "-r", defaultBranch, "-T", "{node}"); err == nil && strings.TrimSpace(out) != "" {
-			return strings.TrimSpace(out), nil
-		}
-		return "", fmt.Errorf("could not resolve %s tip", defaultBranch)
+	if out, err := RunGitInDir(repoRoot, "rev-parse", "--verify", "origin/"+defaultBranch); err == nil {
+		return strings.TrimSpace(out), nil
 	}
+	if out, err := RunGitInDir(repoRoot, "rev-parse", "--verify", defaultBranch); err == nil {
+		return strings.TrimSpace(out), nil
+	}
+	return "", fmt.Errorf("could not resolve %s tip", defaultBranch)
 }
 
 // ResolveCommitOID resolves ref (branch name, tag, abbreviated SHA, or full
@@ -806,36 +793,14 @@ func ResolveCommitOID(v VCS, ref, dir string) (string, error) {
 	if ref == "" {
 		return "", fmt.Errorf("empty ref")
 	}
-	switch v.Name() {
-	case "git":
-		out, err := RunGitInDir(dir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
-		if err != nil {
-			return "", fmt.Errorf("resolve %q: %w", ref, err)
-		}
-		return strings.TrimSpace(out), nil
-	case "jj":
-		sha, err := ResolveJJRevisionToCommitID(dir, ref)
-		if err != nil {
-			return "", fmt.Errorf("resolve %q: %w", ref, err)
-		}
-		sha = strings.TrimSpace(sha)
-		if sha == "" {
-			return "", fmt.Errorf("resolve %q: empty commit id", ref)
-		}
-		return sha, nil
-	case "sl":
-		out, err := SLCommandInDir(dir, "log", "-r", ref, "-T", "{node}", "-l", "1")
-		if err != nil {
-			return "", fmt.Errorf("resolve %q: %w", ref, err)
-		}
-		out = strings.TrimSpace(out)
-		if out == "" {
-			return "", fmt.Errorf("resolve %q: empty node", ref)
-		}
-		return out, nil
-	default:
+	if v.Name() != "git" {
 		return "", fmt.Errorf("resolve not supported for vcs=%q", v.Name())
 	}
+	out, err := RunGitInDir(dir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", ref, err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // walkAncestors enumerates HEAD-first the recent ancestor SHAs that are
@@ -844,87 +809,34 @@ func WalkAncestors(vcs VCS, repoRoot string, maxDepth int) ([]string, error) {
 	if vcs == nil {
 		return nil, nil
 	}
-	switch vcs.Name() {
-	case "git":
-		out, err := RunGitInDir(repoRoot, "rev-list", "--first-parent", "-n", strconv.Itoa(maxDepth), "HEAD")
-		if err != nil {
-			return nil, err
-		}
-		return SplitNonEmpty(out), nil
-	case "jj":
-		out, err := JJCommandInDir(repoRoot, "log", "-r", JJTopicChainRevset(repoRoot, maxDepth), "--no-graph", "-T", "commit_id ++ \"\\n\"")
-		if err != nil {
-			return nil, err
-		}
-		return SplitNonEmpty(out), nil
-	default:
-		// Sapling: ancestors of `.` that are still draft.
-		out, err := SLCommandInDir(repoRoot, "log", "-r",
-			fmt.Sprintf("ancestors(., %d) & draft()", maxDepth),
-			"-T", "{node}\n")
-		if err != nil {
-			return nil, err
-		}
-		return SplitNonEmpty(out), nil
+	out, err := RunGitInDir(repoRoot, "rev-list", "--first-parent", "-n", strconv.Itoa(maxDepth), "HEAD")
+	if err != nil {
+		return nil, err
 	}
+	return splitNonEmpty(out), nil
 }
 
 // localBranchTips returns SHAs that have a useful local label, mapped to that
-// label. For git: refs/heads/ entries. For sapling/JJ: bookmarks when present,
-// plus in-progress commit descriptions for stack labels.
+// label: the refs/heads/ entries.
 func LocalBranchTips(vcs VCS, repoRoot string) (map[string]string, error) {
 	if vcs == nil {
 		return nil, nil
 	}
-	switch vcs.Name() {
-	case "git":
-		return localBranchTipsGit(repoRoot)
-	case "jj":
-		return localBranchTipsJJ(repoRoot), nil
-	default:
-		return localBranchTipsSapling(repoRoot), nil
-	}
-}
-
-func localBranchTipsGit(repoRoot string) (map[string]string, error) {
 	out, err := RunGitInDir(repoRoot, "for-each-ref", "--format=%(objectname) %(refname:lstrip=2)", "refs/heads/")
 	if err != nil {
 		return nil, err
 	}
 	result := make(map[string]string)
-	addLabelLines(result, out, true)
+	addLabelLines(result, out)
 	return result, nil
 }
 
-func localBranchTipsJJ(repoRoot string) map[string]string {
-	result := make(map[string]string)
-	if bookmarks, err := JJCommandInDir(repoRoot, "bookmark", "list", "-T", "normal_target.commit_id() ++ \" \" ++ name ++ \"\\n\""); err == nil {
-		addLabelLines(result, bookmarks, true)
-	}
-	if drafts, err := JJCommandInDir(repoRoot, "log", "-r", JJTopicChainRevset(repoRoot, 0), "--no-graph", "-T", "commit_id ++ \" \" ++ description.first_line() ++ \"\\n\""); err == nil {
-		addLabelLines(result, drafts, false)
-	}
-	return result
-}
-
-func localBranchTipsSapling(repoRoot string) map[string]string {
-	result := make(map[string]string)
-	if bookmarks, err := SLCommandInDir(repoRoot, "bookmarks", "-T", "{node} {bookmark}\n"); err == nil {
-		addLabelLines(result, bookmarks, true)
-	}
-	if drafts, err := SLCommandInDir(repoRoot, "log", "-r", "draft()", "-T", "{node} {desc|firstline}\n"); err == nil {
-		addLabelLines(result, drafts, false)
-	}
-	return result
-}
-
-func addLabelLines(result map[string]string, output string, overwrite bool) {
-	for _, line := range SplitNonEmpty(output) {
+// addLabelLines records each "<sha> <label>" line of output in result,
+// replacing any earlier label for the same SHA.
+func addLabelLines(result map[string]string, output string) {
+	for _, line := range splitNonEmpty(output) {
 		parts := strings.SplitN(line, " ", 2)
 		if len(parts) != 2 {
-			continue
-		}
-		if _, ok := result[parts[0]]; ok && !overwrite {
 			continue
 		}
 		result[parts[0]] = parts[1]
@@ -944,17 +856,6 @@ func RemoteBranchTips(vcs VCS, repoRoot, defaultBranch string) ([]BranchEntry, e
 	if vcs == nil {
 		return nil, nil
 	}
-	switch vcs.Name() {
-	case "git":
-		return remoteBranchTipsGit(repoRoot, defaultBranch)
-	case "jj":
-		return remoteBranchTipsJJ(repoRoot, defaultBranch)
-	default:
-		return remoteBranchTipsSapling(repoRoot, defaultBranch)
-	}
-}
-
-func remoteBranchTipsGit(repoRoot, defaultBranch string) ([]BranchEntry, error) {
 	out, err := RunGitInDir(repoRoot, "for-each-ref",
 		"--sort=-committerdate", "--count=40",
 		"--format=%(objectname) %(refname:lstrip=2)",
@@ -963,7 +864,7 @@ func remoteBranchTipsGit(repoRoot, defaultBranch string) ([]BranchEntry, error) 
 		return nil, err
 	}
 	var entries []BranchEntry
-	for _, line := range SplitNonEmpty(out) {
+	for _, line := range splitNonEmpty(out) {
 		parts := strings.SplitN(line, " ", 2)
 		if len(parts) != 2 {
 			continue
@@ -976,62 +877,6 @@ func remoteBranchTipsGit(repoRoot, defaultBranch string) ([]BranchEntry, error) 
 			continue
 		}
 		entries = append(entries, BranchEntry{Name: name, HeadSHA: parts[0]})
-		if len(entries) >= 20 {
-			break
-		}
-	}
-	return entries, nil
-}
-
-func remoteBranchTipsJJ(repoRoot, defaultBranch string) ([]BranchEntry, error) {
-	out, err := JJCommandInDir(repoRoot, "bookmark", "list", "--all-remotes", "-T", "normal_target.commit_id() ++ \" \" ++ name ++ \"@\" ++ remote ++ \"\\n\"")
-	if err != nil {
-		return nil, nil //nolint:nilerr // best-effort; remote bookmarks may not be configured
-	}
-	seen := make(map[string]bool)
-	var entries []BranchEntry
-	for _, line := range SplitNonEmpty(out) {
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		name := strings.TrimSpace(parts[1])
-		if !strings.Contains(name, "@") || strings.HasSuffix(name, "@") || strings.HasSuffix(name, "@git") || name == "@" {
-			continue
-		}
-		if strings.TrimSuffix(name, "@origin") == defaultBranch || strings.TrimSuffix(name, "@upstream") == defaultBranch {
-			continue
-		}
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		entries = append(entries, BranchEntry{Name: name, HeadSHA: parts[0]})
-		if len(entries) >= 20 {
-			break
-		}
-	}
-	return entries, nil
-}
-
-func remoteBranchTipsSapling(repoRoot, defaultBranch string) ([]BranchEntry, error) {
-	out, err := SLCommandInDir(repoRoot, "log", "-r",
-		"sort(remote(), -date)", "--limit", "40",
-		"-T", "{node} {remotebookmarks}\n")
-	if err != nil {
-		return nil, nil //nolint:nilerr // best-effort; missing is fine
-	}
-	var entries []BranchEntry
-	for _, line := range SplitNonEmpty(out) {
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) != 2 || parts[1] == "" {
-			continue
-		}
-		bookmark := strings.SplitN(parts[1], " ", 2)[0]
-		if bookmark == defaultBranch || strings.HasSuffix(bookmark, "/"+defaultBranch) {
-			continue
-		}
-		entries = append(entries, BranchEntry{Name: bookmark, HeadSHA: parts[0]})
 		if len(entries) >= 20 {
 			break
 		}
@@ -1129,10 +974,6 @@ func HasObject(sha, dir string) bool {
 	return cmd.Run() == nil
 }
 
-func untrackedFiles() ([]FileChange, error) {
-	return untrackedFilesInDir("")
-}
-
 // untrackedFilesInDir returns untracked files, running from the specified
 // directory. Start with status's cache-aware normal mode: it reports standalone
 // files exactly and collapses wholly-untracked directories with a trailing slash.
@@ -1215,8 +1056,6 @@ var SkipDirs = map[string]bool{
 	"vendor":       true,
 	"__pycache__":  true,
 	".git":         true,
-	".jj":          true,
-	".sl":          true,
 	"dist":         true,
 	"build":        true,
 	"_build":       true,
@@ -1624,4 +1463,21 @@ func fingerprintWithStats(root string, status []byte) string {
 		}
 	}
 	return b.String()
+}
+
+// splitNonEmpty splits output by newline and returns the non-empty lines,
+// trimming a trailing carriage return from each.
+func splitNonEmpty(output string) []string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return nil
+	}
+	var result []string
+	for _, line := range strings.Split(trimmed, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+	return result
 }

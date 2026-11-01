@@ -15,3 +15,8 @@ test('encodes special characters in pin id and path', () => {
   const r = buildReanchorRequest('p/1?', { pathname: '/foo/bar?q=1' });
   assert.match(r.url, /^\/api\/comment\/p%2F1%3F\?path=/);
 });
+
+test('buildReanchorRequest carries the new screenshot fields with the anchor', () => {
+  const req = buildReanchorRequest('p1', { pathname: '/a' }, { screenshot_status: 'failed', screenshot_reason: 'blank' });
+  assert.deepEqual(JSON.parse(req.body), { dom_anchor: { pathname: '/a' }, screenshot_status: 'failed', screenshot_reason: 'blank' });
+});

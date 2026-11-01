@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import * as fs from 'fs';
 import * as path from 'path';
-import { clearAllComments, loadPage, sessionCwd } from './helpers';
+import { clearAllComments, countRequests, loadPage, sessionCwd } from './helpers';
 
 const MARKER = 'Hand edit outside the round';
 
@@ -15,13 +15,19 @@ test('a hand edit shows a Refresh banner and loads on Refresh', async ({ page, r
   await loadPage(page);
   const banner = page.locator('#reviewUpdatesBanner');
   await expect(banner).toBeHidden();
+  const reloads = countRequests(page, '/api/session');
   try {
     fs.writeFileSync(file, original + '\n' + MARKER + '\n');
     await expect(banner).toBeVisible({ timeout: 10_000 });
+    // Wait past the watcher's next tick before checking nothing redrew.
+    await page.waitForTimeout(1500); // a negative is only observable over time
+    expect(reloads.n).toBe(0);
     await expect(page.getByText(MARKER)).toHaveCount(0);
     await page.locator('#reviewUpdatesRefresh').click();
     await expect(banner).toBeHidden();
     await expect(page.getByText(MARKER).first()).toBeVisible();
+    // Positive control: Refresh's reload is counted.
+    expect(reloads.n).toBeGreaterThan(0);
   } finally {
     fs.writeFileSync(file, original);
     await expect.poll(async () => (await (await request.get('/api/file?path=plan.md')).json()).content).toBe(original);

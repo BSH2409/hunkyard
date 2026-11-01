@@ -2,10 +2,8 @@ package vcs
 
 import (
 	"errors"
-	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"testing"
 )
 
@@ -66,59 +64,6 @@ func TestCompareTargetsFor_GitRepo(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("CompareTargetsFor(git) = %+v, want %+v", got, want)
-	}
-}
-
-func TestCompareTargetsFor_Sapling(t *testing.T) {
-	v := &compareTargetsVCS{
-		fakeFetchVCS:  &fakeFetchVCS{name: "sl"},
-		defaultBranch: "main",
-		remote:        []string{"remote/main", "remote/topic"},
-	}
-	got, err := CompareTargetsFor(v, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := CompareTargets{
-		VCS: "sl", Detected: "main", Local: nil,
-		Remote: []string{"remote/main", "remote/topic"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("CompareTargetsFor(sl) = %+v, want %+v", got, want)
-	}
-
-	v.remoteErr = errors.New("remote lookup failed")
-	if _, err := CompareTargetsFor(v, t.TempDir()); !errors.Is(err, v.remoteErr) {
-		t.Errorf("CompareTargetsFor(sl) error = %v, want %v", err, v.remoteErr)
-	}
-}
-
-func TestCompareTargetsFor_JJ(t *testing.T) {
-	if runtime.GOOS == "windows" {
-		t.Skip("fake jj shim is a POSIX shell script")
-	}
-	binDir := t.TempDir()
-	shim := filepath.Join(binDir, "jj")
-	if err := os.WriteFile(shim, []byte("#!/bin/sh\nprintf 'topic\\nmain\\ntopic\\n\\n'\n"), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	t.Setenv("PATH", binDir+string(os.PathListSeparator)+os.Getenv("PATH"))
-	v := &compareTargetsVCS{
-		fakeFetchVCS:  &fakeFetchVCS{name: "jj"},
-		defaultBranch: "main",
-		remote:        []string{"topic@origin"},
-	}
-
-	got, err := CompareTargetsFor(v, t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	want := CompareTargets{
-		VCS: "jj", Detected: "main", Local: []string{"topic", "main"},
-		Remote: []string{"topic@origin"},
-	}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("CompareTargetsFor(jj) = %+v, want %+v", got, want)
 	}
 }
 

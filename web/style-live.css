@@ -431,6 +431,11 @@ html[data-theme="light"] .hunkyard-mode-live {
 .hunkyard-live-composer-body::placeholder {
   color: var(--hunkyard-editor-fg-muted);
 }
+.hunkyard-live-composer-shot {
+  padding: 0 14px 8px;
+  font-size: 12px;
+  color: var(--hunkyard-editor-fg-muted);
+}
 .hunkyard-live-composer-error {
   padding: 0 14px 8px;
   font-size: 12px;

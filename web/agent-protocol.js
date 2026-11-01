@@ -21,6 +21,7 @@
     VIEWPORT_APPLIED:   'viewport-applied',
     HOVERED_ANCESTOR_LEVEL: 'hovered-ancestor-level',
     SHORTCUT_KEY:       'shortcut-key',
+    PIN_SCREENSHOT:     'pin-screenshot',
     ACTIVITY:           'activity',  // throttled interaction; keeps the review from pausing
   };
 
@@ -71,9 +72,23 @@
         // opened. Field dropped from validation; do NOT re-add without
         // also re-emitting from hunkyard-agent.js.
         if (!isFiniteNumber(a.viewport_width) || !isFiniteNumber(a.viewport_height)) return { ok: false, reason: 'selection.viewport' };
+        if (msg.selection_id !== undefined && !isString(msg.selection_id)) return { ok: false, reason: 'selection.selection_id' };
         if (msg.reanchor_for !== undefined && !isString(msg.reanchor_for)) {
           return { ok: false, reason: 'selection.reanchor_for' };
         }
+        return { ok: true };
+      }
+      case A2C.PIN_SCREENSHOT: {
+        if (!isString(msg.selection_id) || typeof msg.ok !== 'boolean') return { ok: false, reason: 'pin-screenshot.identity' };
+        if (!msg.ok) return isString(msg.reason) ? { ok: true } : { ok: false, reason: 'pin-screenshot.reason' };
+        if (!(msg.bytes instanceof ArrayBuffer)) return { ok: false, reason: 'pin-screenshot.bytes' };
+        for (const key of ['width', 'height', 'scale', 'band_offset_y']) {
+          if (!isFiniteNumber(msg[key])) return { ok: false, reason: 'pin-screenshot.' + key };
+        }
+        const r = msg.marker_rect;
+        const v = msg.viewport;
+        if (!r || !['x', 'y', 'width', 'height'].every(k => isFiniteNumber(r[k]))) return { ok: false, reason: 'pin-screenshot.marker_rect' };
+        if (!v || !['width', 'height', 'scroll_x', 'scroll_y'].every(k => isFiniteNumber(v[k]))) return { ok: false, reason: 'pin-screenshot.viewport' };
         return { ok: true };
       }
       case A2C.PIN_RESOLUTION_RESULT: {
@@ -89,6 +104,9 @@
         }
         if (msg.recovered_via !== undefined && !isString(msg.recovered_via)) {
           return { ok: false, reason: 'pin-resolution-result.recovered_via' };
+        }
+        if (msg.pin_status !== undefined && msg.pin_status !== 'current' && msg.pin_status !== 'outdated') {
+          return { ok: false, reason: 'pin-resolution-result.pin_status' };
         }
         return { ok: true };
       }

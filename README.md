@@ -129,17 +129,17 @@ hunkyard preferences allow RULE_ID --once    # run it yourself, e.g. with ! in t
 hunkyard preferences doctor --json          # hooks, trust, store, maintenance and cron
 ```
 
-### Preference Yard
+### Preferences tab
 
-`hunkyard yard` opens the Preference Yard on `127.0.0.1`, or on `--host`, `HUNKYARD_HOST` or the global config `host` when set (also `--port`, `--no-open`); it warns when that address is not loopback. It is also the **Yard** tab in a review's Settings. It shows:
+A review's Settings has a **Preferences** tab (the Preference Yard). It shows:
 
 - **Rules** with evidence and violation counts. You can retire a rule, promote a repository rule to global, or add a rule.
-- **Pipeline**: captured observations waiting for maintenance.
-- **Persona**: the generated files agents receive.
+- **Pipeline**: captured observations and the candidate, active and retired rules, with a button to run maintenance while observations or candidates are waiting.
+- **Persona**: the generated files agents receive, rendered as markdown.
 - **Loads**: which rules each recent session received, and why. The reasons are core at session start, a surface matched in your prompt, kept from earlier, or a file being edited.
-- **Activity** and **Health**, with a button to run maintenance.
+- **Activity** and **Health**.
 
-Changes are accepted only from the Yard page itself (same-origin).
+Changes are accepted only from the review page itself (same-origin).
 
 Maintenance uses a **local proposal file** prepared by the launching host:
 
@@ -157,9 +157,22 @@ Without a proposal, maintenance returns a digest-bound batch for the host to rev
 
 `host` is `claude` or `codex`; `model` and `effort` default to `claude-opus-5-5`/`high` for Claude and `gpt-6.1-sol`/`high` for Codex. When it is set, the hourly cron job and session start run `hunkyard preferences maintain --auto` whenever observations are pending and today's maintenance has not succeeded. A rejected proposal is retried once with the validation error; every outcome is recorded and shown at session start, in `doctor`, and in the status line. Without the setting, the cron job only saves local requests and an agent session prepares the proposal. The Go engine validates evidence, scope, citations, action counters, and rule relationships before atomic publication. See [maintenance, migration, and recovery](integrations/preferences/references/local-maintenance.md).
 
+### Live mode and HTML preview
+
+Review a running app or a local HTML page instead of its source, and pin comments to elements on screen:
+
+```sh
+hunkyard live http://localhost:3000     # an app on this machine (also: hunkyard http://localhost:3000)
+hunkyard preview docs/page.html         # a local HTML file (also: hunkyard docs/page.html)
+```
+
+Hunkyard serves the page through a proxy on the review port + 1 and injects its pin scripts into the responses; nothing in your app or repository changes. Only loopback origins are accepted. In Docker, publish both ports, for example `-p 127.0.0.1:5000:5000 -p 127.0.0.1:5001:5001`.
+
+Each pin takes a screenshot of the whole page inside the frame, with the element boxed in red (`#FF0000`, a 4 px line with a 2 px white halo, 6 px outside the element). The agent receives the screenshot URL, the box's exact position and the pin's status: `current`, `outdated` when the element's text, surroundings, size or HTML changed, or `unchecked` when its page has not been opened since the last round. Screenshots stay in the review folder, are served only to the review page and the agent (never to another site, including the reviewed app), and are deleted with their pin or when the review is approved. Commenting again on exactly the same element adds a reply to its open pin.
+
 ## Local-only behavior
 
-Hunkyard performs no telemetry, analytics, update checks, remote sharing, forge requests, or automatic downloads. It makes no provider requests itself; the one exception you opt into is automatic preference maintenance, which runs your configured `claude` or `codex` CLI. Browser libraries and fonts ship inside the binary. The supported runtime uses Git; automatic Sapling/Jujutsu selection and their command overrides are disabled. The process HTTP transport rejects external destinations before DNS/proxy use, and browser CSP restricts resources to local assets. Git runs without remote lazy fetching, external diff/textconv/filter helpers, or filesystem monitor hooks. Dirty comparisons involving Git clean/process filters (including LFS) are rejected with an explanation; use committed `--range` comparisons for those paths. Binary changes stay in the file list as metadata, with raw bytes preserved in private review snapshots; SVG is reviewed as source. Executable HTML previews and remote review commands are disabled.
+Hunkyard performs no telemetry, analytics, update checks, remote sharing, forge requests, or automatic downloads. It makes no provider requests itself; the one exception you opt into is automatic preference maintenance, which runs your configured `claude` or `codex` CLI. Browser libraries and fonts ship inside the binary. Git is the only supported version control system. The process HTTP transport rejects external destinations before DNS/proxy use, and the review page's CSP restricts it to local assets. A page under review (live mode or HTML preview) loads its own fonts, scripts and images as it does when opened directly; set `HUNKYARD_BLOCK_EXTERNAL=1` to keep it to local resources. Git runs without remote lazy fetching, external diff/textconv/filter helpers, or filesystem monitor hooks. Dirty comparisons involving Git clean/process filters (including LFS) are rejected with an explanation; use committed `--range` comparisons for those paths. Binary changes stay in the file list as metadata, with raw bytes preserved in private review snapshots; SVG is reviewed as source. Live mode and HTML preview run pages only from this machine (loopback origins and local files); remote review commands are disabled.
 
 The launching Codex/Claude session still communicates with its model provider as usual. Its tools and permissions remain under the host's control. Hunkyard itself only exchanges local HTTP and private files. This is an application-level boundary, not an operating-system network sandbox.
 

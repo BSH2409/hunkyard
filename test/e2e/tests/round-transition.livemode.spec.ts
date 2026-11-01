@@ -20,6 +20,7 @@
 // covers the integration shape — chrome + iframe + SSE + server.
 import { test, expect } from '@playwright/test';
 import { clearAllLivePins, getIframe, openPinComposer, waitForAgentReady } from './livemode-helpers';
+import { publishFixtureReview, signalRoundComplete } from './helpers';
 
 test.describe('live-mode round transition', () => {
   test.beforeEach(async ({ request }) => {
@@ -42,7 +43,7 @@ test.describe('live-mode round transition', () => {
     // Establish baseline navigation count after agent is ready.
     const baseline = proxyNavigations.length;
 
-    const resp = await request.post('/api/round-complete');
+    const resp = await signalRoundComplete(request);
     expect(resp.ok()).toBeTruthy();
 
     // The chrome's live-mode-sse handler fires reloadIframe() in response
@@ -88,11 +89,11 @@ test.describe('live-mode round transition', () => {
     // handleRoundCompleteFiles. Without this, SignalRoundComplete cancels the
     // debounced write and replies posted just before the bump are dropped
     // (see rounds.livemode.spec.ts).
-    const finish = await request.post('/api/finish');
+    const finish = await publishFixtureReview(request);
     expect(finish.ok()).toBeTruthy();
 
     // Force a round transition.
-    await request.post('/api/round-complete');
+    await signalRoundComplete(request);
 
     // live-round-start reloads the iframe — clear stale agent-ready so the
     // poll below observes the post-bump handshake, not the pre-bump one.

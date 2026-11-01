@@ -318,3 +318,57 @@ func mustJSON(t *testing.T, value any) []byte {
 	}
 	return data
 }
+
+func TestFeedbackAckAndNextRound(t *testing.T) {
+	s, _ := newTestServer(t)
+	s.reviewPath = t.TempDir()
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", t.TempDir())
+	owner, err := feedback.OpenOwner(t.TempDir(), "abcd1234ef01", feedback.Identity{Key: "test", Kind: "claude"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.BindOwner(owner, "abcd1234ef01", "generation"); err != nil {
+		t.Fatal(err)
+	}
+	store, err := s.feedbackStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	batch, err := store.Publish("test", feedback.Batch{Version: 1, ReviewID: "abcd1234ef01", SnapshotID: "snapshot_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", Round: 1, Disposition: "comment", Comments: []feedback.Comment{{ID: "human", Body: "Fix this one line"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	do := func(method, path, body string) *httptest.ResponseRecorder {
+		rec := httptest.NewRecorder()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		req.Header.Set(feedback.OwnerHeader, owner.Credential())
+		s.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := do(http.MethodPost, "/api/feedback/round", ""); rec.Code != http.StatusConflict || !strings.Contains(rec.Body.String(), "acknowledge published feedback") {
+		t.Fatalf("next round with unacknowledged feedback = %d %s, want 409", rec.Code, rec.Body)
+	}
+	for _, tc := range []struct {
+		name, method, body string
+		want               int
+	}{
+		{"wrong method", http.MethodGet, "", http.StatusMethodNotAllowed},
+		{"malformed body", http.MethodPost, "{", http.StatusBadRequest},
+		{"unknown field", http.MethodPost, `{"batch_id":"` + batch.ID + `","extra":1}`, http.StatusBadRequest},
+		{"unknown batch", http.MethodPost, `{"batch_id":"batch_missing"}`, http.StatusBadRequest},
+	} {
+		if rec := do(tc.method, "/api/feedback/ack", tc.body); rec.Code != tc.want {
+			t.Errorf("ack %s = %d %s, want %d", tc.name, rec.Code, rec.Body, tc.want)
+		}
+	}
+	learn := `{"batch_id":"` + batch.ID + `","decisions":[{"comment_id":"human","revision":1,"kind":"ignore"}]}`
+	if rec := do(http.MethodPost, "/api/feedback/learn", learn); rec.Code != http.StatusOK {
+		t.Fatalf("learn = %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(http.MethodPost, "/api/feedback/ack", `{"batch_id":"`+batch.ID+`"}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "acknowledged") {
+		t.Fatalf("ack = %d %s", rec.Code, rec.Body)
+	}
+	if rec := do(http.MethodPost, "/api/feedback/round", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"reviewing"`) {
+		t.Fatalf("next round after ack = %d %s", rec.Code, rec.Body)
+	}
+}

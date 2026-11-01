@@ -224,13 +224,20 @@ func TestRun_Timeout(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("timeout hook tested on unix")
 	}
-	ec := hooks.ExecutableCommand{Kind: "inline", Arg: "sleep 5"}
+	// The shell's child (sleep) holds the output pipe: the timeout must stop
+	// the whole hook, not just the shell, or finish waits the full 5 s.
+	ec := hooks.ExecutableCommand{Kind: "inline", Arg: "sleep 5; echo done"}
+	start := time.Now()
 	out, err := hooks.Run(context.Background(), ec, hooks.Input{Timeout: 100 * time.Millisecond})
-	if err == nil {
-		t.Fatal("expected timeout error")
+	elapsed := time.Since(start)
+	if err == nil || !strings.Contains(err.Error(), "timed out") {
+		t.Fatalf("err = %v, want a timeout error", err)
 	}
-	if out != nil && !out.TimedOut {
-		t.Fatalf("expected TimedOut=true, err=%v", err)
+	if out == nil || !out.TimedOut {
+		t.Fatalf("output = %+v, want TimedOut", out)
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("a 100ms timeout returned after %v", elapsed)
 	}
 }
 

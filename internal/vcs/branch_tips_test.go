@@ -4,9 +4,9 @@ import (
 	"testing"
 )
 
-func TestAddLabelLines_OverwriteAndSkip(t *testing.T) {
+func TestAddLabelLines_Overwrites(t *testing.T) {
 	result := make(map[string]string)
-	addLabelLinesForTest(result, "abc123 feat-x\ndef456 feat-y", true)
+	addLabelLinesForTest(result, "abc123 feat-x\ndef456 feat-y")
 	if result["abc123"] != "feat-x" {
 		t.Errorf("abc123 = %q, want feat-x", result["abc123"])
 	}
@@ -14,20 +14,15 @@ func TestAddLabelLines_OverwriteAndSkip(t *testing.T) {
 		t.Errorf("def456 = %q, want feat-y", result["def456"])
 	}
 
-	addLabelLinesForTest(result, "abc123 newer-name", false)
-	if result["abc123"] != "feat-x" {
-		t.Errorf("overwrite=false should keep first label, got %q", result["abc123"])
-	}
-
-	addLabelLinesForTest(result, "abc123 replaced", true)
+	addLabelLinesForTest(result, "abc123 replaced")
 	if result["abc123"] != "replaced" {
-		t.Errorf("overwrite=true should replace label, got %q", result["abc123"])
+		t.Errorf("a later label should replace the earlier one, got %q", result["abc123"])
 	}
 }
 
 func TestAddLabelLines_SkipsMalformedLines(t *testing.T) {
 	result := make(map[string]string)
-	addLabelLinesForTest(result, "nospaces\nonlyonetoken\n  \n", true)
+	addLabelLinesForTest(result, "nospaces\nonlyonetoken\n  \n")
 	if len(result) != 0 {
 		t.Errorf("malformed lines should be skipped, got %v", result)
 	}

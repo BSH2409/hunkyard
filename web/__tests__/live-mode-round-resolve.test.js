@@ -20,26 +20,14 @@ test('pinsToResolveAtRoundStart skips already-resolved this round', () => {
   assert.deepEqual(r.pinsToResolveAtRoundStart(pins, '/'), ['b']);
 });
 
-test('classifyPinForRound: resolved → not drifted', () => {
-  const c = r.classifyPinForRound({ drifted: false }, { status: 'resolved' }, 3);
-  assert.deepEqual(c, { driftedOnRound: null, drifted: false });
+test('pinStatusToReport: a status the server has not seen this round is reported', () => {
+  assert.equal(r.pinStatusToReport({ pin_status: 'current', pin_checked_round: 2 }, { pin_status: 'current' }, 3), 'current');
+  assert.equal(r.pinStatusToReport({ pin_status: 'current', pin_checked_round: 3 }, { pin_status: 'outdated' }, 3), 'outdated');
+  assert.equal(r.pinStatusToReport({}, { pin_status: 'outdated' }, 1), 'outdated');
 });
 
-test('classifyPinForRound: newly drifted this round stamps driftedOnRound', () => {
-  const c = r.classifyPinForRound({ drifted: false }, { status: 'drifted' }, 3);
-  assert.deepEqual(c, { driftedOnRound: 3, drifted: true });
-});
-
-test('classifyPinForRound: drifted-recoverable does not stamp round', () => {
-  const c = r.classifyPinForRound(
-    { drifted: false }, { status: 'drifted-recoverable' }, 3,
-  );
-  assert.deepEqual(c, { driftedOnRound: null, drifted: false });
-});
-
-test('classifyPinForRound: previously drifted stays drifted, no round overwrite', () => {
-  const c = r.classifyPinForRound(
-    { drifted: true, drifted_on_round: 1 }, { status: 'drifted' }, 3,
-  );
-  assert.deepEqual(c, { driftedOnRound: null, drifted: true });
+test('pinStatusToReport: nothing to report when unchanged this round or no status', () => {
+  assert.equal(r.pinStatusToReport({ pin_status: 'outdated', pin_checked_round: 3 }, { pin_status: 'outdated' }, 3), null);
+  assert.equal(r.pinStatusToReport({ pin_status: 'current', pin_checked_round: 1 }, { status: 'resolved' }, 3), null);
+  assert.equal(r.pinStatusToReport(null, { pin_status: 'current' }, 3), null);
 });

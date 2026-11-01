@@ -2,25 +2,18 @@
 //
 // Marker overlay — coordinate-system reasoning (load-bearing; do not delete).
 //
-//   * Markers live INSIDE the proxied iframe's document, mounted under a root
-//     anchored at the document origin (position:absolute; top:0; left:0).
+//   * The overlay root is `position: fixed` at the viewport origin and is
+//     attached to <html>, outside <body>: a positioned, offset or transformed
+//     body would otherwise move the origin markers are measured from.
 //
-//   * Markers are `position: absolute` and positioned in DOCUMENT coords:
-//        x = rect.left + scrollX
-//        y = rect.top  + scrollY
-//     With document-coord placement we don't need a scroll listener — when
-//     the user scrolls, the marker scrolls naturally with the document.
+//   * Markers are placed at the element's viewport rect
+//     (`getBoundingClientRect`), with no scroll offsets. That holds whatever
+//     scrolls — the window, the body or a panel inside the page.
 //
-//   * Why not `position: fixed`? Fixed markers stay glued to the viewport.
-//     `getBoundingClientRect()` returns viewport coords, so as the page
-//     scrolls the rect moves but our recompute only fires on mutations.
-//     The marker drifts away from the element it annotates. That was Bug B.
-//
-//   * Transformed ancestors are still handled correctly by
-//     `getBoundingClientRect` — we just add scroll offsets after.
-//
-// In short: `position: absolute` + `getBoundingClientRect` + scroll offsets
-// is the entire model.
+//   * Viewport rects change on any scroll, so the agent re-measures on scroll
+//     (capture phase, which also sees inner panels), resize and DOM changes,
+//     once per frame. A marker whose element is clipped by a scrolling panel
+//     or not found is hidden.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -35,14 +28,15 @@
     const root = doc.createElement('div');
     root.setAttribute('id', 'hunkyard-marker-root');
     root.setAttribute('aria-hidden', 'true');
-    // Anchor at document origin so absolute-positioned children resolve
-    // against page coords (not viewport coords). See top-of-file comment.
-    root.style.position = 'absolute';
+    // Fixed at the viewport origin, outside <body>. See top-of-file comment.
+    root.style.position = 'fixed';
     root.style.top = '0';
     root.style.left = '0';
+    root.style.width = '0';
+    root.style.height = '0';
     root.style.pointerEvents = 'none';
     root.style.zIndex = '2147483600';
-    doc.body.appendChild(root);
+    doc.documentElement.appendChild(root);
     // markersById: pin_id -> { el, anchor, status, element, rect }
     const markersById = new Map();
     return { root, markersById };
@@ -71,23 +65,70 @@
   // from tests. Scroll offsets convert viewport coords (rect.left/top) into
   // document coords, so absolute-positioned markers stay anchored to the
   // element they annotate as the page scrolls.
-  function applyRects(markers, win) {
-    if (typeof win === 'undefined') {
-      win = (typeof window !== 'undefined') ? window : { scrollX: 0, scrollY: 0 };
+  // clippedOut reports whether rect lies outside the visible area of an
+  // ancestor that clips its content (a panel that scrolls on its own).
+  function clippedOut(target, rect, win) {
+    if (!win || typeof win.getComputedStyle !== 'function') return false;
+    for (let node = target.parentElement; node; node = node.parentElement) {
+      const style = win.getComputedStyle(node);
+      const clipsX = style.overflowX !== 'visible';
+      const clipsY = style.overflowY !== 'visible';
+      if (!clipsX && !clipsY) continue;
+      const box = node.getBoundingClientRect();
+      if (clipsY && (rect.bottom <= box.top || rect.top >= box.bottom)) return true;
+      if (clipsX && (rect.right <= box.left || rect.left >= box.right)) return true;
     }
-    const sx = (win && typeof win.scrollX === 'number') ? win.scrollX : 0;
-    const sy = (win && typeof win.scrollY === 'number') ? win.scrollY : 0;
+    return false;
+  }
+
+  // topPageElement is the topmost element at (x, y) that is not part of
+  // Hunkyard's own overlays: in Browse mode markers are hit-testable.
+  function topPageElement(doc, x, y) {
+    const hits = typeof doc.elementsFromPoint === 'function' ? doc.elementsFromPoint(x, y) : [doc.elementFromPoint(x, y)];
+    for (const hit of hits) {
+      if (!hit) continue;
+      if (typeof hit.closest === 'function' && hit.closest('#hunkyard-marker-root, #hunkyard-agent-overlay')) continue;
+      return hit;
+    }
+    return null;
+  }
+
+  // covered reports whether something else is on top of the element where
+  // its marker sits and at its centre (a panel, modal or dropdown), so the
+  // marker does not float over it.
+  function covered(target, rect, win) {
+    const doc = win && win.document;
+    if (!doc || (typeof doc.elementFromPoint !== 'function' && typeof doc.elementsFromPoint !== 'function')) return false;
+    const width = rect.width != null ? rect.width : (rect.right - rect.left) || 0;
+    const height = rect.height != null ? rect.height : (rect.bottom - rect.top) || 0;
+    const points = [
+      [rect.left + Math.min(6, width / 2), rect.top + Math.min(6, height / 2)],
+      [rect.left + width / 2, rect.top + height / 2],
+    ];
+    let sampled = false;
+    for (const [x, y] of points) {
+      const hit = topPageElement(doc, x, y);
+      if (!hit) continue;
+      sampled = true;
+      if (hit === target || (typeof target.contains === 'function' && target.contains(hit)) ||
+          (typeof hit.contains === 'function' && hit.contains(target))) return false;
+    }
+    return sampled;
+  }
+
+  function applyRects(markers, win) {
     const reads = markers.map(m => {
       if (!m.target) return null;
       if (typeof m.target.isConnected !== 'undefined' && !m.target.isConnected) return null;
-      return m.target.getBoundingClientRect();
+      const rect = m.target.getBoundingClientRect();
+      return clippedOut(m.target, rect, win) || covered(m.target, rect, win) ? null : rect;
     });
     for (let i = 0; i < markers.length; i++) {
       const m = markers[i];
       const r = reads[i];
       if (!r) { m.el.style.display = 'none'; continue; }
       m.el.style.display = '';
-      m.el.style.transform = `translate(${Math.round(r.left + sx)}px, ${Math.round(r.top + sy)}px)`;
+      m.el.style.transform = `translate(${Math.round(r.left)}px, ${Math.round(r.top)}px)`;
     }
   }
 
@@ -100,5 +141,17 @@
     });
   }
 
-  return { createOverlay, makeMarker, applyRects, setMarkersTabindex };
+  // While the reviewer is picking an element, markers are dimmed and let the
+  // pointer through so the element underneath can be picked. Set inline so it
+  // holds before the marker stylesheet has loaded.
+  function setMarkersPassThrough(markersById, on) {
+    if (!markersById || !markersById.forEach) return;
+    markersById.forEach(m => {
+      if (!m || !m.el || !m.el.style) return;
+      m.el.style.pointerEvents = on ? 'none' : 'auto';
+      m.el.style.opacity = on ? '0.45' : '';
+    });
+  }
+
+  return { createOverlay, makeMarker, applyRects, setMarkersTabindex, setMarkersPassThrough };
 });

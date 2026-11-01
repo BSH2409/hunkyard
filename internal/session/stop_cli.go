@@ -95,11 +95,11 @@ func RunStop(args []string) error {
 	_, foundKey, matchCount := daemon.FindSessionForCWDBranch(cwd, branch)
 	if matchCount > 1 {
 		fmt.Fprintf(os.Stderr, "Error: multiple daemons running on branch %q. Use 'hunkyard stop --all' or specify file args.\n", branch)
-		return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+		return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 	}
 	if matchCount == 0 {
 		fmt.Fprintln(os.Stderr, "Error: no running daemon found for current directory and branch.")
-		return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+		return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 	}
 
 	if err := stopDaemonByKey(foundKey); err != nil {

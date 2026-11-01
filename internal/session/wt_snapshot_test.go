@@ -65,20 +65,26 @@ func TestSnapshotInvalidatesOnHeadAndIndex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Contains(snapshotPaths(before), "src/file50.go") && len(before) == 0 {
-		t.Fatalf("unexpected starting changes %v", snapshotPaths(before))
+	if len(before) == 0 {
+		t.Fatal("precondition: the branch should start with changes against main")
 	}
 	// Staging a new file moves the index.
 	writeFile(t, filepath.Join(dir, "staged.go"), "package p\n")
 	gitT(t, dir, "add", "staged.go")
-	staged, _ := s.snapshotChanges(context.Background(), vc, dir, "main", false)
+	staged, err := s.snapshotChanges(context.Background(), vc, dir, "main", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !slices.Contains(snapshotPaths(staged), "staged.go") {
 		t.Fatalf("staged file missing after index moved: %v", snapshotPaths(staged))
 	}
 	// Committing everything moves HEAD and clears the changes.
 	gitT(t, dir, "add", "-A")
 	gitT(t, dir, "commit", "-qm", "all in")
-	after, _ := s.snapshotChanges(context.Background(), vc, dir, "main", false)
+	after, err := s.snapshotChanges(context.Background(), vc, dir, "main", false)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(after) != 0 {
 		t.Fatalf("changes after commit: %v", snapshotPaths(after))
 	}
@@ -96,9 +102,14 @@ func TestFreshSnapshotSeesReviewerEdit(t *testing.T) {
 	}
 	// An untracked file moves neither HEAD nor the index.
 	writeFile(t, filepath.Join(dir, "later.go"), "package p\n")
-	cached, _ := s.snapshotChanges(context.Background(), vc, dir, "main", false)
+	cached, err := s.snapshotChanges(context.Background(), vc, dir, "main", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// HEAD and the index did not move, so the cached reading is reused: it
+	// cannot know about the new file yet. Seeing it means the cache was skipped.
 	if slices.Contains(snapshotPaths(cached), "later.go") {
-		t.Skip("filesystem timing made the cached reading current already")
+		t.Fatal("a non-fresh reading bypassed the snapshot cache")
 	}
 	fresh, _ := s.snapshotChanges(context.Background(), vc, dir, "main", true)
 	if !slices.Contains(snapshotPaths(fresh), "later.go") {

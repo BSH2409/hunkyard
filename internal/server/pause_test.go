@@ -1,6 +1,9 @@
 package server
 
 import (
+	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"sync/atomic"
@@ -103,5 +106,60 @@ func TestPausedMarkerRecordsHowToResume(t *testing.T) {
 	marker, _ := session.ReadPausedMarker(s.reviewPath)
 	if marker.CWD != sess.CWD || len(marker.CliArgs) != 2 || marker.CliArgs[1] != "a..b" {
 		t.Fatalf("paused marker = %+v", marker)
+	}
+}
+
+func TestRunIdleMonitorPausesOnceAndStops(t *testing.T) {
+	s, _, stops, _ := pausableServer(t)
+	done := make(chan struct{})
+	go func() {
+		s.RunIdleMonitor(context.Background(), 20*time.Millisecond, 5*time.Millisecond)
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the idle monitor never paused the idle review")
+	}
+	if stops.Load() != 1 {
+		t.Fatalf("daemon stopped %d times, want 1", stops.Load())
+	}
+}
+
+func TestRunIdleMonitorReturnsWhenTheDaemonStops(t *testing.T) {
+	s, _, stops, _ := pausableServer(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() {
+		s.RunIdleMonitor(ctx, time.Hour, 5*time.Millisecond)
+		close(done)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("the idle monitor kept running after the daemon stopped")
+	}
+	if stops.Load() != 0 {
+		t.Fatal("a busy review paused")
+	}
+}
+
+// Once the pause is decided, a request that slips in is refused instead of
+// being served by a daemon that is about to stop.
+func TestPauseRefusesRequestDuringDecision(t *testing.T) {
+	s, _, stops, _ := pausableServer(t)
+	var late int
+	s.SetStopFunc(func() {
+		stops.Add(1)
+		rec := httptest.NewRecorder()
+		s.ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/api/activity", nil))
+		late = rec.Code
+	})
+	if !s.pauseIfIdle(30*time.Minute, time.Now().Add(31*time.Minute)) {
+		t.Fatal("idle review did not pause")
+	}
+	if late != http.StatusServiceUnavailable {
+		t.Errorf("request during the pause = %d, want 503", late)
 	}
 }

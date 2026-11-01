@@ -16,15 +16,11 @@ type Config struct {
 	explicitRoot bool
 }
 
-// resolveConfig defaults the root to $HUNKYARD_PREFERENCES_HOME, then the
-// pre-v1.0.3 $LEARN_PREFERENCES_HOME, then ~/.agents.
+// resolveConfig defaults the root to $HUNKYARD_PREFERENCES_HOME, then ~/.agents.
 func resolveConfig(config Config) (Config, error) {
 	config.explicitRoot = config.Root != ""
 	if config.Root == "" {
 		config.Root = os.Getenv("HUNKYARD_PREFERENCES_HOME")
-		if strings.TrimSpace(config.Root) == "" {
-			config.Root = os.Getenv("LEARN_PREFERENCES_HOME")
-		}
 		if strings.TrimSpace(config.Root) == "" {
 			home, err := os.UserHomeDir()
 			if err != nil || strings.TrimSpace(home) == "" {

@@ -45,7 +45,7 @@ All custom JS uses the IIFE + dual-export pattern:
 | `hunkyard-comment-card-helpers.js` | `window.hunkyard.commentCardHelpers` | Author colors, timestamps, markdown rendering |
 | `hunkyard-settings-overlay.js` | `window.hunkyard.settingsOverlay` | Settings dialog lifecycle |
 | `hunkyard-settings-panes.js` | `window.hunkyard.settingsPanes` | Settings tab content |
-| `hunkyard-yard.js` | `window.hunkyard.yard` | Preference Yard views (Settings Yard tab and standalone `/yard` page via `yard.html`); reads `/api/yard/*` |
+| `hunkyard-yard.js` | `window.hunkyard.yard` | Preference Yard views (Settings Preferences tab); reads `/api/preferences/*` |
 
 ## Code-Review Modules (used only by code-review mode)
 
@@ -63,6 +63,17 @@ All custom JS uses the IIFE + dual-export pattern:
 | `hunkyard-diff-renderer.js` | `window.hunkyard.diffRenderer` | Word-level diff for the rendered markdown diff (files mode rounds) |
 | `hunkyard-pierre-adapter.js` | `window.hunkyard.pierreAdapter` | Pure mapping: Hunkyard hunks/comments/forms → Pierre diffs, annotations, themes |
 | `hunkyard-pierre-view.js` | `window.hunkyard.pierreView` | The review list on Pierre CodeView (items, lazy hydration, annotation cache, jumps) |
+
+## Injected Frame Scripts (live and preview)
+
+Served from the API port and injected by the proxy, in `AgentScriptFiles` order (`internal/server/server.go`, mirrored in `internal/live/proxy.go`):
+
+| File | Namespace | Purpose |
+|------|-----------|---------|
+| `snapdom.min.js` | `window.snapdom` | Vendored SnapDOM: DOM → canvas capture |
+| `agent-pin-marker.js` | `window.hunkyard.agent.pinMarker` | `MARKER_STYLE` (mirrored by `feedback.PinMarker`) and drawing the box |
+| `agent-capture.js` | `window.hunkyard.agent.capture` | Full-page capture around a pinned element, band crop, size cap |
+| `agent-anchor-utils.js` | `window.hunkyard.agent.anchorUtils` | Anchors, resolution, element fingerprint and `comparePin` |
 
 ## ContentRenderer Interface
 
@@ -111,6 +122,7 @@ Live-mode splits into focused files under `window.hunkyard.live.<name>`:
 | `live-mode.queue.js` | `.live.queue` | Batched pin push queue |
 | `live-mode.origin.js` | `.live.origin` | Origin/proxy URL resolution |
 | `live-mode.row.js` | `.live.row` | Per-route section rendering |
+| `live-mode-pin-shot.js` | `.live.pinShot` | Holds the frame's screenshot for the pin being composed, uploads it, builds the pin's screenshot fields |
 
 ## Adding a New Module
 

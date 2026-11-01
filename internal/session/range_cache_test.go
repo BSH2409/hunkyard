@@ -21,8 +21,14 @@ func TestRangeCacheHitOnRepick(t *testing.T) {
 	ctx := context.Background()
 	calls := countGitCalls(t)
 	first := sess.GetSessionInfoScoped(ctx, "", shas[0])
+	if len(first.Files) == 0 {
+		t.Fatal("precondition: the commit should change files")
+	}
 	sess.GetSessionInfoScoped(ctx, "", shas[1])
 	sess.GetFileDiffSnapshotScoped(first.Files[0].Path, "", shas[0], false)
+	if log := gitCallLog(t); !strings.Contains(log, " diff") {
+		t.Fatalf("precondition: the first pick should run git diff:\n%s", log)
+	}
 	calls(true)
 	again := sess.GetSessionInfoScoped(ctx, "", shas[0])
 	sess.GetFileDiffSnapshotScoped(first.Files[0].Path, "", shas[0], false)

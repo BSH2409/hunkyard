@@ -92,7 +92,7 @@ func RunReview(args []string) error {
 			if len(sc.Files) == 0 && sc.Focus == nil && sc.PlanDir == "" && PreflightCheckFn != nil {
 				if msg := PreflightCheckFn(sc); msg != "" {
 					fmt.Fprint(os.Stderr, msg)
-					return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+					return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 				}
 			}
 			entry, err = startDaemonForReview(key, args)

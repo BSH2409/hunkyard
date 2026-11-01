@@ -25,6 +25,31 @@ const ContentSecurityPolicy = "default-src 'self'; script-src 'self' 'unsafe-inl
 // PreviewContentSecurityPolicy allows the local preview to load the local agent bundle.
 var PreviewContentSecurityPolicy = strings.Replace(ContentSecurityPolicy, "script-src 'self'", "script-src 'self' http://127.0.0.1:* http://localhost:*", 1)
 
+// PagePolicy is the policy for a page under review (live proxy or HTML
+// preview). By default there is none, so the page loads its own fonts,
+// scripts and images as it does when opened directly; Hunkyard itself still
+// connects to nothing outside this machine. HUNKYARD_BLOCK_EXTERNAL=1 keeps the
+// page to local resources.
+func PagePolicy() string {
+	if os.Getenv("HUNKYARD_BLOCK_EXTERNAL") == "1" {
+		return PreviewContentSecurityPolicy
+	}
+	return ""
+}
+
+// ReviewPolicy is the review page's policy for a request to host. The page
+// frames the live proxy on the host it was opened by, which may be a LAN or
+// container address when the review listens on every interface.
+func ReviewPolicy(host string) string {
+	if host == "" || host == "localhost" || host == "127.0.0.1" {
+		return ContentSecurityPolicy
+	}
+	if strings.Contains(host, ":") {
+		host = "[" + host + "]"
+	}
+	return strings.Replace(ContentSecurityPolicy, "frame-src 'self'", "frame-src 'self' http://"+host+":*", 1)
+}
+
 func loopback(host string) bool {
 	if host == "localhost" {
 		return true
@@ -130,22 +155,20 @@ func ValidateArgs(args []string) error {
 		}
 	}
 	switch args[0] {
-	case "live", "preview":
-		return fmt.Errorf("local-only Hunkyard reviews source diffs; executable page previews are disabled")
 	case "pr", "pull", "push", "update":
 		return fmt.Errorf("local-only build: %s is unavailable; use a local --range comparison", args[0])
 	}
 	for i, arg := range args {
 		flag, value, hasValue := strings.Cut(arg, "=")
 		switch flag {
-		case "--pr", "--remote", "--public-url", "--live-origin", "--preview-file":
+		case "--pr", "--remote", "--public-url":
 			return fmt.Errorf("local-only build: %s is unavailable", flag)
 		case "--vcs":
 			if !hasValue && i+1 < len(args) {
 				value = args[i+1]
 			}
 			if value != "git" {
-				return fmt.Errorf("local-only build supports the Git backend; use --vcs git in colocated repositories")
+				return fmt.Errorf("local-only build supports only the Git backend; use --vcs git")
 			}
 		case "--host":
 			if !hasValue && i+1 < len(args) {

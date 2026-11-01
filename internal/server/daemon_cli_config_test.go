@@ -804,3 +804,35 @@ func TestResolveDaemonCLIConfig_NotifyOnRoundReady(t *testing.T) {
 		t.Fatal("NotifyOnRoundReady should be true when set in global config")
 	}
 }
+
+func TestResolveServerConfig_PortDefaulted(t *testing.T) {
+	defer resetBranchOverride(t)
+	for _, tt := range []struct {
+		name, config, env string
+		args              []string
+		want              bool
+	}{
+		{"nothing set uses the default", ``, "", nil, true},
+		{"config port", `{"port": 4000}`, "", nil, false},
+		{"env port", ``, "4100", nil, false},
+		{"flag port", ``, "", []string{"--port", "4200"}, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			vcs.SetDefaultBranchOverride("")
+			dir := t.TempDir()
+			if tt.config != "" {
+				os.WriteFile(filepath.Join(dir, ".hunkyard.config.json"), []byte(tt.config), 0644)
+			}
+			testutil.SetHome(t, t.TempDir())
+			t.Setenv("HUNKYARD_PORT", tt.env)
+			t.Chdir(dir)
+			sc, err := ResolveDaemonCLIConfig(tt.args)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if sc.PortDefaulted != tt.want {
+				t.Fatalf("PortDefaulted = %v (port %d), want %v", sc.PortDefaulted, sc.Port, tt.want)
+			}
+		})
+	}
+}

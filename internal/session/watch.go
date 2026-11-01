@@ -330,7 +330,7 @@ const slowFingerprintInterval = 30 * time.Second
 
 // waitingFingerprintInterval is the fallback while the agent works: edits
 // are counted for the waiting screen, so the walk runs more often.
-const waitingFingerprintInterval = 3 * time.Second
+const waitingFingerprintInterval = time.Second
 
 // fingerprintIntervals returns the tree-walk intervals for reviewing and
 // waiting; tests shorten them per session.
@@ -378,6 +378,7 @@ func (s *Session) watchGit(stop <-chan struct{}) { //nolint:gocyclo // one loop 
 		case <-stop:
 			return
 		case <-ticker.C:
+			s.gitWatchTicks.Add(1)
 			// Check for external review file changes (e.g. hunkyard comment).
 			s.mergeExternalHunkyardJSON()
 
@@ -581,6 +582,12 @@ func carryForwardComment(old Comment, now string) Comment {
 		// on round bump.
 		DOMAnchor: old.DOMAnchor,
 		PinNumber: old.PinNumber,
+
+		PinScreenshot:    old.PinScreenshot,
+		ScreenshotStatus: old.ScreenshotStatus,
+		ScreenshotReason: old.ScreenshotReason,
+		PinStatus:        old.PinStatus,
+		PinCheckedRound:  old.PinCheckedRound,
 	}
 	// Drift fields are carried forward only for code-review comments. Live
 	// pins (DOMAnchor != nil) are never drifted: the live DOM can change

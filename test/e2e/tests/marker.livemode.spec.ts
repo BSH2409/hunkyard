@@ -33,6 +33,8 @@ test.describe('marker â€” rendering, click handoff, MO reposition (Scenarios 6â€
     await expect(page.locator('.hunkyard-live-composer')).toHaveCount(0);
 
     await expect(getIframe(page).locator('.hunkyard-live-marker')).toHaveCount(2);
+    // Markers are click targets in Browse mode; in Comment mode clicks pass through.
+    await page.locator('#liveModeToggle button[data-mode="navigate"]').click();
     // Click the 2nd marker.
     await getIframe(page).locator('.hunkyard-live-marker').nth(1).click();
     // Its corresponding row should be the focused / scrolled-to one.

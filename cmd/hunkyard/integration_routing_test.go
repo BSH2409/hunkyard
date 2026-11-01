@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -870,11 +871,25 @@ func assertCodexPluginEnabled(t *testing.T, path, pluginKey string) {
 }
 
 func TestPrintUniqueHints_Dedups(t *testing.T) {
-	// printUniqueHints prints to stdout; we just verify it doesn't panic on
-	// duplicates and empty input. Output ordering and dedup logic are simple
-	// enough that visual inspection during integration use covers the rest.
-	printUniqueHints(nil)
-	printUniqueHints([]string{"a", "b", "a", "c", "b"})
+	capture := func(hints []string) string {
+		r, w, err := os.Pipe()
+		if err != nil {
+			t.Fatal(err)
+		}
+		old := os.Stdout
+		os.Stdout = w
+		printUniqueHints(hints)
+		os.Stdout = old
+		w.Close()
+		data, _ := io.ReadAll(r)
+		return string(data)
+	}
+	if got := capture(nil); got != "" {
+		t.Fatalf("no hints printed %q", got)
+	}
+	if got := capture([]string{"a", "b", "a", "c", "b"}); got != "  a\n  b\n  c\n" {
+		t.Fatalf("hints = %q, want each once in first-seen order", got)
+	}
 }
 
 func TestInstallOneFile_NeverWritesThroughSymlinkedSkillFolder(t *testing.T) {

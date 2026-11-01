@@ -93,12 +93,15 @@ func (s *Session) snapshotFor(ctx context.Context, vc vcs.VCS, root, baseRef str
 		}
 	}
 	value, err := s.snapFlight.Do(ctx, key.String(), func() (any, error) {
+		s.snapMu.Lock()
+		gen := s.snapGen
+		s.snapMu.Unlock()
 		snap, err := readWorkingTree(vc, root, baseRef, key)
 		if err != nil {
 			return nil, err
 		}
 		s.snapMu.Lock()
-		s.snap, s.snapStale = snap, false
+		s.snap, s.snapStale = snap, s.snapGen != gen
 		s.snapMu.Unlock()
 		return snap, nil
 	})
@@ -161,6 +164,7 @@ func (s *Session) seedSnapshotScopes(vc vcs.VCS, root, baseRef string, scopes []
 func (s *Session) invalidateWorkingTreeSnapshot() {
 	s.snapMu.Lock()
 	s.snapStale = true
+	s.snapGen++
 	s.lastProbeAt = time.Time{}
 	s.snapMu.Unlock()
 }

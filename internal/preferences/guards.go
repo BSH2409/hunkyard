@@ -150,7 +150,7 @@ func (s *Store) writeOverrides(overrides []override) error {
 // consumeOverride removes and reports an unexpired override for ruleID.
 func (s *Store) consumeOverride(ruleID string) bool {
 	consumed := false
-	_ = withFileLock(s.dataPath("overrides.json")+".lock", false, func() error {
+	err := withFileLock(s.dataPath("overrides.json")+".lock", false, func() error {
 		now := s.config.Clock()
 		kept := []override{}
 		for _, o := range s.loadOverrides() {
@@ -166,7 +166,7 @@ func (s *Store) consumeOverride(ruleID string) bool {
 		}
 		return s.writeOverrides(kept)
 	})
-	return consumed
+	return consumed && err == nil
 }
 
 func gitLines(dir string, args ...string) []string {

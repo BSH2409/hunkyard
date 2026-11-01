@@ -12,24 +12,6 @@ import (
 	"github.com/BSH2409/hunkyard/internal/testutil"
 )
 
-func isolateWireTest(t *testing.T, cwd string) string {
-	t.Helper()
-	homeDir := t.TempDir()
-	testutil.SetHome(t, homeDir)
-	if cwd == "" {
-		cwd = t.TempDir()
-	}
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := os.Chdir(cwd); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(origDir) })
-	return homeDir
-}
-
 func TestWire_ResolveServerConfigPassesSessionID(t *testing.T) {
 	dir := t.TempDir()
 	homeDir := t.TempDir()

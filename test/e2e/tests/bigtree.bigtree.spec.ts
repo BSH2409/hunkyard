@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { readFileSync } from 'node:fs';
-import { clearAllComments, loadPage, realCommitItems } from './helpers';
+import { clearAllComments, countRequests, loadPage, realCommitItems } from './helpers';
 import { stateFilePath } from './state-file';
 
 // A 5,000-file tree with 300 untracked and 30,000 ignored files, reviewed
@@ -9,21 +9,14 @@ import { stateFilePath } from './state-file';
 // Go tests.
 
 const PORT = process.env.HUNKYARD_TEST_BIGTREE_PORT || '3138';
+// Shared CI runners are several times slower than a laptop; the ceiling is
+// there to catch a regression to full-tree walks, not to time the runner.
+const CEILING_MS = process.env.CI ? 15_000 : 5_000;
 
 function fixtureValue(key: string): string {
   const line = readFileSync(stateFilePath(PORT), 'utf8').split('\n').find(l => l.startsWith(key + '='));
   if (!line) throw new Error(`${key} missing from the bigtree state file`);
   return line.slice(key.length + 1);
-}
-
-// Count review commit-list requests (the base picker's ?scope=compare list is not one).
-function countCommitLists(page: Page) {
-  const counter = { n: 0 };
-  page.on('request', request => {
-    const url = new URL(request.url());
-    if (url.pathname === '/api/commits' && url.search === '') counter.n++;
-  });
-  return counter;
 }
 
 const treeFiles = (page: Page) => page.locator('.tree-file[data-tree-path]');
@@ -39,23 +32,23 @@ test.beforeEach(async ({ request }) => {
   await clearAllComments(request);
 });
 
-test('the review opens within 5 seconds', async ({ page }) => {
+test('the review opens within 5 seconds (15 on CI)', async ({ page }) => {
   const start = Date.now();
   await loadPage(page);
-  await expect(treeFiles(page).first()).toBeVisible({ timeout: 5_000 });
+  await expect(treeFiles(page).first()).toBeVisible({ timeout: CEILING_MS });
   test.info().annotations.push({ type: 'open-ms', description: String(Date.now() - start) });
 });
 
-test('Working changes lists the untracked package within 5 seconds', async ({ page }) => {
+test('Working changes lists the untracked package within 5 seconds (15 on CI)', async ({ page }) => {
   await loadPage(page);
   await page.click('#commitDropdownBtn');
   const start = Date.now();
   await page.locator('#commitDropdownList .commit-picker-item.is-virtual').click();
   const untracked = page.locator('.tree-file[data-tree-path^="newpkg/"]').first();
-  await expect(untracked).toBeVisible({ timeout: 5_000 });
+  await expect(untracked).toBeVisible({ timeout: CEILING_MS });
   test.info().annotations.push({ type: 'working-changes-ms', description: String(Date.now() - start) });
   const path = await untracked.getAttribute('data-tree-path');
-  const diff = await (await page.request.get(`/api/file/diff?path=${encodeURIComponent(path!)}&commit=WT`)).json();
+  const diff = await (await page.request.get(`/api/file/diff?path=${encodeURIComponent(path!)}&commit=__hunkyard_virtual_working_tree__`)).json();
   const lines = (diff.hunks ?? diff).flatMap((h: { Lines?: { Type: string }[]; lines?: { type: string }[] }) => h.Lines ?? h.lines ?? []);
   expect(lines.some((l: { Type?: string; type?: string }) => (l.Type ?? l.type) === 'add')).toBe(true);
 });
@@ -64,7 +57,8 @@ test('a base change and its revert each load the commit list once', async ({ pag
   const original = (await (await request.get('/api/session')).json()).base_branch_name;
   try {
     await loadPage(page);
-    const commitLists = countCommitLists(page);
+    // The base picker's own ?scope=compare list is not the review's commit list.
+    const commitLists = countRequests(page, '/api/commits', '');
     // The picker takes a SHA, not main~2, as a typed revision.
     const base2 = fixtureValue('BASE2_SHA');
     await chooseBase(page, async p => {

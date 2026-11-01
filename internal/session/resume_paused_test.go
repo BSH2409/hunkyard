@@ -23,11 +23,20 @@ func freePort(t *testing.T) int {
 
 func TestResumeReusesPausedPort(t *testing.T) {
 	dir := t.TempDir()
-	port := freePort(t)
-	if err := WritePausedMarker(dir, PausedMarker{PausedAt: time.Now(), Port: port, Host: "127.0.0.1"}); err != nil {
-		t.Fatal(err)
+	// The "free" case cannot hold the port, so another process may take it
+	// between the probe and the check; try a few ports before failing.
+	var port int
+	var args []string
+	var stale daemon.SessionEntry
+	for range 5 {
+		port = freePort(t)
+		if err := WritePausedMarker(dir, PausedMarker{PausedAt: time.Now(), Port: port, Host: "127.0.0.1"}); err != nil {
+			t.Fatal(err)
+		}
+		if stale, args = pausedResumeArgs(dir, daemon.SessionEntry{}, nil); slices.Equal(args, []string{"--port", strconv.Itoa(port)}) {
+			break
+		}
 	}
-	stale, args := pausedResumeArgs(dir, daemon.SessionEntry{}, nil)
 	if !slices.Equal(args, []string{"--port", strconv.Itoa(port)}) || stale.Host != "127.0.0.1" {
 		t.Fatalf("free paused port: args=%v host=%q", args, stale.Host)
 	}

@@ -625,6 +625,21 @@ func (s *Session) buildFilesForWorkingTree(v vcs.VCS, repoRoot string) ([]*FileE
 
 const virtualWorkingTreeCommitSHA = "__hunkyard_virtual_working_tree__"
 
+// ValidCommitSelection reports whether commit is a selection the review
+// understands: none, Working changes, a SHA or a SHA range. Anything else
+// must never reach git, where a leading "-" is read as an option.
+func ValidCommitSelection(commit string) bool {
+	return commit == "" || commit == virtualWorkingTreeCommitSHA || vcs.ValidCommitParam(commit)
+}
+
+// validCommitOrNone drops a selection that is not valid, so it never reaches git.
+func validCommitOrNone(commit string) string {
+	if ValidCommitSelection(commit) {
+		return commit
+	}
+	return ""
+}
+
 // hasWorkingTreeChanges reports whether there are uncommitted local changes,
 // from the shared snapshot.
 func (s *Session) hasWorkingTreeChanges(vc vcs.VCS, repoRoot, baseRef string) bool {
@@ -864,6 +879,7 @@ func countHunkStats(hunks []vcs.DiffHunk) (additions, deletions int) {
 // ctx ends the wait for the working-tree reading and the batched counts when
 // the browser has moved on; the shared reading itself keeps running.
 func (s *Session) GetSessionInfoScoped(ctx context.Context, scope, commit string) SessionInfo {
+	commit = validCommitOrNone(commit)
 	if commit == "" && (scope == "" || scope == "all" || s.Mode == "files" || s.Mode == "plan") {
 		return s.GetSessionInfo()
 	}
@@ -1015,10 +1031,11 @@ func (s *Session) loadScopedFileState(path, scope, commit string) (status, conte
 		return status, content, oldPath, baseRef, repoRoot
 	}
 
-	absPath := filepath.Join(repoRoot, path)
-	if data, err := os.ReadFile(absPath); err == nil {
-		content = string(data)
-		lookupScopedStatus()
+	if absPath, inRepo := resolveInRepo(repoRoot, path); inRepo {
+		if data, err := os.ReadFile(absPath); err == nil {
+			content = string(data)
+			lookupScopedStatus()
+		}
 	}
 	return status, content, oldPath, baseRef, repoRoot
 }
@@ -1048,10 +1065,11 @@ func scopedDiffContents(path, scope, repoRoot, worktreeContent string, v vcs.VCS
 		content, _ = v.FileContentAtRef(path, ":0", repoRoot)
 	case "unstaged":
 		previousContent, _ = v.FileContentAtRef(path, ":0", repoRoot)
-		if data, err := os.ReadFile(filepath.Join(repoRoot, path)); err == nil {
-			content = string(data)
-		} else if os.IsNotExist(err) {
-			content = ""
+		content = ""
+		if absPath, inRepo := resolveInRepo(repoRoot, path); inRepo {
+			if data, err := os.ReadFile(absPath); err == nil {
+				content = string(data)
+			}
 		}
 	default:
 		return "", content, false
@@ -1064,6 +1082,9 @@ func scopedDiffContents(path, scope, repoRoot, worktreeContent string, v vcs.VCS
 // When commit is non-empty, returns the diff for that single commit.
 // When ignoreWhitespace is true, whitespace-only changes collapse to context (code diffs only).
 func (s *Session) GetFileDiffSnapshotScoped(path, scope, commit string, ignoreWhitespace bool) (map[string]any, bool) {
+	if !ValidCommitSelection(commit) {
+		return nil, false
+	}
 	s.mu.RLock()
 	inRange := s.Focus.Kind == FocusRange
 	s.mu.RUnlock()

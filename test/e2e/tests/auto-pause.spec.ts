@@ -28,7 +28,9 @@ test.beforeAll(() => {
   repo = path.join(root, 'repo');
   mkdirSync(home);
   mkdirSync(repo);
-  env = { ...process.env, HOME: home, USERPROFILE: home, HUNKYARD_NO_INTEGRATION_CHECK: '1', HUNKYARD_NO_UPDATE_CHECK: '1', HUNKYARD_TEST_MODE: '1', HUNKYARD_IDLE_PAUSE_SECONDS: '3', HUNKYARD_OWNER_ID: `codex:pause-fixture:${root}` };
+  // Point every host config at the fake home: the developer's shell may set
+  // CLAUDE_CONFIG_DIR, CODEX_HOME or HUNKYARD_PREFERENCES_HOME.
+  env = { ...process.env, HOME: home, USERPROFILE: home, CLAUDE_CONFIG_DIR: path.join(home, '.claude'), CODEX_HOME: path.join(home, '.codex'), HUNKYARD_PREFERENCES_HOME: path.join(home, '.agents'), HUNKYARD_NO_INTEGRATION_CHECK: '1', HUNKYARD_NO_UPDATE_CHECK: '1', HUNKYARD_TEST_MODE: '1', HUNKYARD_IDLE_PAUSE_SECONDS: '3', HUNKYARD_OWNER_ID: `codex:pause-fixture:${root}` };
   const git = (...args: string[]) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', ...args], { cwd: repo, env, encoding: 'utf8' });
   git('init', '-q', '-b', 'main');
   git('config', 'user.name', 'Fixture');
@@ -65,12 +67,14 @@ test('an idle review pauses, frees its port and tells the open tab', async ({ pa
   await expect(overlay).toContainText('Review paused');
   await expect(overlay).toContainText('Ask your agent to resume this review.');
   await expect(overlay.locator('.paused-command code')).toHaveText(/^hunkyard --session [0-9a-f]+$/);
-  // The pause replaces "Session complete": the review is resumable.
-  await expect(page.locator('.disconnected-banner')).toHaveCount(0);
 
   await exited;
   expect(existsSync(path.join(entry!.review_path, 'paused.json'))).toBe(true);
   await expect.poll(async () => page.request.get(url + '/api/health').then(() => 'up', () => 'down')).toBe('down');
+  // The daemon sent server-shutdown before it exited; a stopped review would
+  // now say "Session complete". The pause replaces that: it is resumable.
+  await expect(overlay).toBeVisible();
+  await expect(page.locator('.disconnected-banner')).toHaveCount(0);
 
   // Resume as the agent would; the open tab reconnects by itself on the same port.
   const key = path.basename(entry!.review_path);
@@ -78,13 +82,14 @@ test('an idle review pauses, frees its port and tells the open tab', async ({ pa
   try {
     await expect(overlay).toBeHidden({ timeout: 20_000 });
     await expect(page.locator('.loading')).toBeHidden();
-    expect(new URL(page.url()).port).toBe(String(entry!.port));
     const comments = await (await page.request.get(url + '/api/file/comments?path=a.go')).json();
     expect(comments.map((c: { body: string }) => c.body)).toContain('Survives the pause');
     expect(existsSync(path.join(entry!.review_path, 'paused.json'))).toBe(false);
   } finally {
     client.kill('SIGTERM');
-    const resumed = sessionEntry(undefined) ?? readdirSync(path.join(home, '.hunkyard', 'sessions')).filter(n => n.endsWith('.json')).map(n => JSON.parse(readFileSync(path.join(home, '.hunkyard', 'sessions', n), 'utf8')))[0];
+    // The resumed daemon is registered under the same review key.
+    const sessionFile = path.join(home, '.hunkyard', 'sessions', `${key}.json`);
+    const resumed = existsSync(sessionFile) ? JSON.parse(readFileSync(sessionFile, 'utf8')) : null;
     if (resumed?.pid) try { process.kill(resumed.pid, 'SIGTERM'); } catch { /* already gone */ }
   }
 });

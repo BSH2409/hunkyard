@@ -28,7 +28,6 @@ func SetHome(t *testing.T, dir string) {
 	t.Setenv("HOME", dir)
 	t.Setenv("CODEX_HOME", "")
 	t.Setenv("HUNKYARD_PREFERENCES_HOME", "")
-	t.Setenv("LEARN_PREFERENCES_HOME", "")
 	if runtime.GOOS == "windows" {
 		t.Setenv("USERPROFILE", dir)
 		t.Setenv("HOMEDRIVE", "")
@@ -107,14 +106,6 @@ func WriteFile(t *testing.T, path, content string) {
 	}
 }
 
-// MustMkdirAll ensures the parent directory of path exists, then returns path.
-func MustMkdirAll(path string) string {
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		panic(err)
-	}
-	return path
-}
-
 // RunWithTempHome runs a package's tests with a throwaway HOME, for use from
 // TestMain. Review sessions, config and auth live under ~/.hunkyard; a hunkyard daemon
 // running in the same checkout (or the developer's own config) must not change
@@ -133,16 +124,12 @@ func RunWithTempHome(m *testing.M) int {
 	}
 	os.Setenv("HUNKYARD_NO_INTEGRATION_CHECK", "1")
 	os.Setenv("HUNKYARD_NO_UPDATE_CHECK", "1")
-	home, err := os.MkdirTemp("", "hunkyard-test-home-")
-	if err != nil {
-		panic(err)
-	}
-	defer os.RemoveAll(home)
+	home, cleanup := isolatedHome()
+	defer cleanup()
 	os.Setenv("HOME", home)
 	os.Setenv("USERPROFILE", home)
 	os.Setenv("CODEX_HOME", "")
 	os.Setenv("HUNKYARD_PREFERENCES_HOME", "")
-	os.Setenv("LEARN_PREFERENCES_HOME", "")
 	return m.Run()
 }
 
@@ -186,6 +173,9 @@ func PinGoEnvBeforeHomeChange() {
 // real CLI or reaching the network. For use from TestMain; tests that need a
 // specific gh behaviour still install their own stub via t.Setenv("PATH").
 func PrependFailingForgeCLIs() func() {
+	if dir := os.Getenv(forgeStubsEnv); dir != "" {
+		return func() {} // a helper child: the parent's stubs are already on PATH
+	}
 	dir, err := os.MkdirTemp("", "hunkyard-test-forge-stubs-")
 	if err != nil {
 		panic(err)
@@ -193,8 +183,34 @@ func PrependFailingForgeCLIs() func() {
 	if err := writeFailingForgeCLIs(dir); err != nil {
 		panic(err)
 	}
+	os.Setenv(forgeStubsEnv, dir)
 	os.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return func() { os.RemoveAll(dir) }
+}
+
+// Test processes re-run their own binary as helper children, which exit with
+// os.Exit and skip deferred cleanup. The first process records the folders it
+// created in these variables; children inherit and reuse them, and only the
+// creator removes them.
+const (
+	isolatedHomeEnv = "HUNKYARD_TEST_ISOLATED_HOME"
+	forgeStubsEnv   = "HUNKYARD_TEST_FORGE_STUBS"
+)
+
+// isolatedHome returns the test HOME and its cleanup: a new temporary folder
+// in the first test process, the inherited one in a helper child.
+func isolatedHome() (string, func()) {
+	if home := os.Getenv(isolatedHomeEnv); home != "" {
+		if info, err := os.Stat(home); err == nil && info.IsDir() {
+			return home, func() {}
+		}
+	}
+	home, err := os.MkdirTemp("", "hunkyard-test-home-")
+	if err != nil {
+		panic(err)
+	}
+	os.Setenv(isolatedHomeEnv, home)
+	return home, func() { os.RemoveAll(home) }
 }
 
 // FailingForgeCLIsPathEnv returns a "PATH=..." entry with a failing `gh`

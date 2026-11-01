@@ -33,7 +33,66 @@ type Comment struct {
 	// ClaimUnchanged marks a comment the agent replied to without changing
 	// the commented code; Hunkyard reopened it.
 	ClaimUnchanged bool `json:"claim_unchanged,omitempty"`
+	// Pin describes a comment pinned to an element of a live page or HTML
+	// preview; its Path is empty because the route is not a file.
+	Pin *PinContext `json:"pin,omitempty"`
 }
+
+// PinContext is what the agent needs to find a pinned element and see it.
+type PinContext struct {
+	Route    string `json:"route"`
+	Selector string `json:"selector"`
+	// Status is "current" (the element looks as it did when pinned),
+	// "outdated" (it changed or is gone) or "unchecked" (its route has not
+	// been loaded since the last round).
+	Status string `json:"status"`
+	// Screenshot is the page with the element boxed; when capture failed it
+	// is nil and ScreenshotStatus/ScreenshotReason say why.
+	Screenshot       *PinShot    `json:"screenshot,omitempty"`
+	ScreenshotStatus string      `json:"screenshot_status,omitempty"`
+	ScreenshotReason string      `json:"screenshot_reason,omitempty"`
+	MarkerRect       Rect        `json:"marker_rect"`
+	Marker           MarkerStyle `json:"marker"`
+	Viewport         Viewport    `json:"viewport"`
+}
+
+// PinShot locates a pin screenshot; URL serves its raw PNG bytes.
+type PinShot struct {
+	URL         string  `json:"url"`
+	Width       int     `json:"width"`
+	Height      int     `json:"height"`
+	Scale       float64 `json:"scale"`
+	BandOffsetY int     `json:"band_offset_y"`
+}
+
+// Rect is the pinned element's box in screenshot pixels.
+type Rect struct {
+	X      int `json:"x"`
+	Y      int `json:"y"`
+	Width  int `json:"width"`
+	Height int `json:"height"`
+}
+
+// Viewport is the page's viewport and scroll position when it was captured.
+type Viewport struct {
+	Width   int `json:"width"`
+	Height  int `json:"height"`
+	ScrollX int `json:"scroll_x"`
+	ScrollY int `json:"scroll_y"`
+}
+
+// MarkerStyle is how the box around a pinned element is drawn.
+type MarkerStyle struct {
+	Color     string `json:"color"`
+	Stroke    int    `json:"stroke"`
+	Halo      string `json:"halo"`
+	HaloWidth int    `json:"halo_width"`
+	Padding   int    `json:"padding"`
+	Label     string `json:"label"`
+}
+
+// PinMarker mirrors MARKER_STYLE in web/agent-pin-marker.js.
+var PinMarker = MarkerStyle{Color: "#FF0000", Stroke: 4, Halo: "#FFFFFF", HaloWidth: 2, Padding: 6, Label: "1"}
 
 type Batch struct {
 	Version         int        `json:"version"`

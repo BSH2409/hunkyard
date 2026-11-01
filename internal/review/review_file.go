@@ -316,15 +316,6 @@ func SaveSnapshotsFile(snapshotsPath string, sf SnapshotsFile) error {
 	return config.AtomicWriteFile(snapshotsPath, append(data, '\n'), 0o644)
 }
 
-// writeHunkyardJSON resolves the review path and writes a HunkyardJSON via saveHunkyardJSON.
-func writeHunkyardJSON(cj HunkyardJSON, outputDir string) error {
-	path, err := ResolveReviewPath(outputDir)
-	if err != nil {
-		return err
-	}
-	return SaveHunkyardJSON(path, cj)
-}
-
 // LoadHunkyardJSON reads the review file from disk (folder layout
 // <identity>/review.json), or returns a fresh HunkyardJSON if it doesn't exist.
 // Triggers v3->v4 migration on read for any pre-existing flat-file review.

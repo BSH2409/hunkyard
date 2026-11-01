@@ -93,7 +93,9 @@ test('whenIdle waits for the latest run and is immediate when idle', async () =>
   let idle = false;
   reloader.start('k');
   const waiting = reloader.whenIdle().then(function () { idle = true; });
-  await Promise.resolve();
+  // A full turn of the event loop, not one microtask: a whenIdle that
+  // resolved a few ticks late would still be caught.
+  await new Promise(function (r) { setImmediate(r); });
   assert.equal(idle, false);
   gate.resolve();
   await waiting;

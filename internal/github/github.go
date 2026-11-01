@@ -447,16 +447,6 @@ func EnsureSHAFetched(vcsInst vcs.VCS, sha, repoRoot, forkURL string) error {
 	return vcs.EnsureSHAFetched(vcsInst, sha, repoRoot, forkURL)
 }
 
-// EnsureSHAFetchedJJ delegates to vcs.EnsureSHAFetchedJJ.
-func EnsureSHAFetchedJJ(vcsInst vcs.VCS, sha, repoRoot, forkURL string) error {
-	return vcs.EnsureSHAFetchedJJ(vcsInst, sha, repoRoot, forkURL)
-}
-
-// EnsureSHAFetchedSapling delegates to vcs.EnsureSHAFetchedSapling.
-func EnsureSHAFetchedSapling(vcsInst vcs.VCS, sha, repoRoot, forkURL string) error {
-	return vcs.EnsureSHAFetchedSapling(vcsInst, sha, repoRoot, forkURL)
-}
-
 // fetchPRComments fetches all review comments for a PR.
 func fetchPRComments(id ChangeID) ([]ghComment, error) {
 	if ghSupportsAPISlurp() {

@@ -9,16 +9,17 @@
   }
 })(typeof window !== 'undefined' ? window : globalThis, function () {
   function composeRoundTooltip({ round, pins } = {}) {
-    let resolved = 0, drifted = 0, driftedThisRound = 0;
+    let resolved = 0, outdated = 0, unchecked = 0;
     const list = pins || [];
     for (const p of list) {
-      if (p && p.resolved) resolved++;
-      if (p && p.drifted) drifted++;
-      if (p && p.drifted_on_round === round) driftedThisRound++;
+      if (!p) continue;
+      if (p.resolved) { resolved++; continue; }
+      if ((p.pin_checked_round || 0) < round) unchecked++;
+      else if (p.pin_status === 'outdated') outdated++;
     }
     const total = list.length;
     const carried = total - resolved;
-    return { round, total, resolved, drifted, driftedThisRound, carried };
+    return { round, total, resolved, outdated, unchecked, carried };
   }
   return { composeRoundTooltip };
 });

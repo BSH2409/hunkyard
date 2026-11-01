@@ -24,6 +24,19 @@ func waitForEvent(events chan SSEEvent, kind string, d time.Duration) bool {
 	}
 }
 
+// waitWatchTicks waits until the git watcher has started n ticks, so tick n-1
+// (the first one takes the baseline) has finished.
+func waitWatchTicks(t *testing.T, s *Session, n int64) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for s.gitWatchTicks.Load() < n {
+		if time.Now().After(deadline) {
+			t.Fatalf("watcher reached %d ticks, want %d", s.gitWatchTicks.Load(), n)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 func watchedReview(t *testing.T, slowWalk time.Duration) (*Session, string, chan SSEEvent) {
 	t.Helper()
 	dir := newBudgetRepo(t, 25, 2)
@@ -42,17 +55,20 @@ func watchedReview(t *testing.T, slowWalk time.Duration) (*Session, string, chan
 }
 
 func TestWatcherMarksReviewStaleWhenHeadMoves(t *testing.T) {
-	_, dir, events := watchedReview(t, 0)
-	time.Sleep(200 * time.Millisecond) // let the watcher take its baseline
+	sess, dir, events := watchedReview(t, 0)
+	waitWatchTicks(t, sess, 2)
 	gitT(t, dir, "commit", "--allow-empty", "-qm", "reviewer commit")
 	if !waitForEvent(events, "review-stale", 3*time.Second) {
 		t.Fatal("no review-stale event after HEAD moved")
+	}
+	if !sess.GetSessionInfo().Stale {
+		t.Fatal("session info does not report the review as stale")
 	}
 }
 
 func TestWatcherSlowFallbackSeesNewUntrackedFile(t *testing.T) {
 	sess, dir, events := watchedReview(t, 100*time.Millisecond)
-	time.Sleep(300 * time.Millisecond)
+	waitWatchTicks(t, sess, 2)
 	writeFile(t, filepath.Join(dir, "newpkg", "late.go"), "package p\n")
 	if !waitForEvent(events, "review-stale", 3*time.Second) {
 		t.Fatal("no review-stale event for a new untracked file")
@@ -76,22 +92,32 @@ func TestWatcherDoesNotMarkUnchangedReviewStale(t *testing.T) {
 }
 
 func TestBaseChangeDoesNotMarkReviewStale(t *testing.T) {
-	sess, _, events := watchedReview(t, 0)
-	time.Sleep(200 * time.Millisecond)
-	if err := sess.ChangeBaseBranch("main"); err != nil {
+	sess, dir, events := watchedReview(t, 0)
+	waitWatchTicks(t, sess, 2)
+	// A real base change: compare against the previous commit.
+	if err := sess.ChangeBaseBranch(gitT(t, dir, "rev-parse", "HEAD~1")); err != nil {
 		t.Fatal(err)
 	}
-	sess.mu.Lock()
-	sess.BaseRef = "different-base" // the watcher reads BaseRef each tick
-	sess.mu.Unlock()
-	if waitForEvent(events, "review-stale", 500*time.Millisecond) {
+	after := sess.gitWatchTicks.Load()
+	waitWatchTicks(t, sess, after+3)
+	if waitForEvent(events, "review-stale", 100*time.Millisecond) || sess.GetSessionInfo().Stale {
 		t.Fatal("changing the base marked the working tree stale")
+	}
+	// Positive control: the same watcher does report a real change.
+	gitT(t, dir, "commit", "--allow-empty", "-qm", "reviewer commit")
+	if !waitForEvent(events, "review-stale", 3*time.Second) {
+		t.Fatal("no review-stale after HEAD moved; the negative above proves nothing")
 	}
 }
 
 func TestIndexRewriteAloneDoesNotMarkReviewStale(t *testing.T) {
 	sess, dir, events := watchedReview(t, time.Hour)
-	time.Sleep(200 * time.Millisecond) // let the watcher take its baseline
+	waitWatchTicks(t, sess, 2)
+	indexPath := filepath.Join(dir, ".git", "index")
+	before, err := os.Stat(indexPath)
+	if err != nil {
+		t.Fatal(err)
+	}
 	// What a shell prompt's `git status` does to a touched, unchanged file:
 	// the index is rewritten with fresh stat data, the tree is the same.
 	path := filepath.Join(dir, "src", "file1.go")
@@ -100,6 +126,9 @@ func TestIndexRewriteAloneDoesNotMarkReviewStale(t *testing.T) {
 		t.Fatal(err)
 	}
 	gitT(t, dir, "update-index", "--really-refresh")
+	if now, err := os.Stat(indexPath); err != nil || now.ModTime().Equal(before.ModTime()) {
+		t.Fatalf("precondition: the index was not rewritten (%v)", err)
+	}
 	if waitForEvent(events, "review-stale", 800*time.Millisecond) {
 		t.Fatal("an index rewrite with no tree change marked the review stale")
 	}

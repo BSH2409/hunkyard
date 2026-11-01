@@ -1,15 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
-import { clearAllComments, loadPage, realCommitItems } from './helpers';
-
-// Count requests to an API path (with no query, or the given one) from now on.
-function countRequests(page: Page, path: string, search?: string) {
-  const counter = { n: 0 };
-  page.on('request', request => {
-    const url = new URL(request.url());
-    if (url.pathname === path && (search === undefined || url.search === search)) counter.n++;
-  });
-  return counter;
-}
+import { clearAllComments, countRequests, loadPage, realCommitItems } from './helpers';
 
 // Record whether the file list was ever blanked to "Loading..." or marked busy.
 async function watchFileList(page: Page) {

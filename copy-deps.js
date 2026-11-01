@@ -12,6 +12,10 @@ cpSync("node_modules/markdown-it/dist/browser/markdown-it.umd.min.js", `${dest}/
 // DOMPurify — used to sanitize HTML enabled in comment Markdown.
 cpSync("node_modules/dompurify/dist/purify.min.js", `${dest}/dompurify.min.js`);
 
+// SnapDOM — captures a page to an image inside live/preview frames for pin
+// screenshots (injected by the live proxy; see agent-capture.js).
+cpSync("node_modules/@zumer/snapdom/dist/snapdom.js", `${dest}/snapdom.min.js`);
+
 // mermaid
 cpSync("node_modules/mermaid/dist/mermaid.min.js", `${dest}/mermaid.min.js`);
 

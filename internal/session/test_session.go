@@ -70,6 +70,9 @@ func NewTestSession(t *testing.T) *Session {
 			},
 		},
 	}
+	// A comment arms a 200ms debounced write; let it finish (or cancel it)
+	// before t.TempDir's cleanup, or it recreates the deleted folder.
+	t.Cleanup(s.QuiesceForTest)
 	return s
 }
 

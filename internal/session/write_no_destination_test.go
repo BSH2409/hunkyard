@@ -21,22 +21,25 @@ func TestScheduleWriteWithoutDestinationDoesNotTouchCWD(t *testing.T) {
 			Comments: []Comment{{ID: "c1", StartLine: 1, EndLine: 1, Body: "Fix this"}},
 		}},
 	}
+	// Positive control: the same debounced write with a destination lands
+	// within the window this test waits, so its absence below means something.
+	withDest := &Session{RepoRoot: t.TempDir(), ReviewRound: 1, Files: s.Files}
+	t.Cleanup(withDest.QuiesceForTest)
 	s.mu.Lock()
 	s.scheduleWrite()
 	s.mu.Unlock()
+	withDest.mu.Lock()
+	withDest.scheduleWrite()
+	withDest.mu.Unlock()
 
 	dir := t.TempDir()
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	defer os.Chdir(origDir)
+	t.Chdir(dir)
 
 	time.Sleep(500 * time.Millisecond)
 
+	if _, err := os.Stat(ReviewPathsFor(withDest.hunkyardJSONPath()).Review); err != nil {
+		t.Fatalf("control: the debounced write did not land within the window: %v", err)
+	}
 	if _, err := os.Stat(filepath.Join(dir, ".hunkyard")); !os.IsNotExist(err) {
 		t.Fatalf("debounced write leaked .hunkyard into the working directory (stat err: %v)", err)
 	}
@@ -50,14 +53,7 @@ func TestPersistActiveDiffScopeWithoutDestinationDoesNotTouchCWD(t *testing.T) {
 	s := &Session{ReviewRound: 1}
 
 	dir := t.TempDir()
-	origDir, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("getwd: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("chdir: %v", err)
-	}
-	defer os.Chdir(origDir)
+	t.Chdir(dir)
 
 	if err := s.persistActiveDiffScope("layer"); err != nil {
 		t.Fatalf("persistActiveDiffScope: %v", err)

@@ -311,3 +311,110 @@ test('resolvePin: no fallback fields → drifted on selector miss', () => {
   const r = u.resolvePin(anchor, doc);
   assert.equal(r.status, 'drifted');
 });
+
+// ---------- fingerprint + comparePin ----------
+function fpEl({ text = 'Pay now', html = '<button class="pay">Pay now</button>', around = 'Total $10. Pay now Terms apply.', w = 120, h = 40 } = {}) {
+  return {
+    textContent: text,
+    outerHTML: html,
+    parentNode: { textContent: around },
+    getBoundingClientRect: () => ({ width: w, height: h }),
+  };
+}
+const win1280 = { innerWidth: 1280 };
+
+test('elementFingerprint captures normalised text, context, size and an html hash', () => {
+  const fp = u.elementFingerprint(fpEl({ text: '  Pay\n  now ' }), win1280);
+  assert.equal(fp.text, 'Pay now');
+  assert.equal(fp.prefix, 'Total $10.');
+  assert.equal(fp.suffix, 'Terms apply.');
+  assert.equal(fp.width, 120);
+  assert.equal(fp.height, 40);
+  assert.equal(fp.viewport_width, 1280);
+  assert.match(fp.html_hash, /^[0-9a-f]{8}$/);
+});
+
+test('elementFingerprint caps text at 500 chars and context at 32', () => {
+  const long = 'x'.repeat(900);
+  const fp = u.elementFingerprint(fpEl({ text: long, around: 'a'.repeat(100) + long + 'b'.repeat(100) }), win1280);
+  assert.equal(fp.text.length, 500);
+  assert.equal(fp.prefix, 'a'.repeat(32));
+  assert.equal(fp.suffix, 'b'.repeat(32));
+});
+
+function anchorFor(el, win) {
+  return { css_selector: '#pay', tag_chain: ['BUTTON'], fingerprint: u.elementFingerprint(el, win) };
+}
+
+test('comparePin: identical element is current', () => {
+  const anchor = anchorFor(fpEl(), win1280);
+  assert.equal(u.comparePin(anchor, { status: 'resolved', element: fpEl() }, win1280), 'current');
+});
+
+test('comparePin: changed text is outdated', () => {
+  const anchor = anchorFor(fpEl(), win1280);
+  const el = fpEl({ text: 'Pay later', html: '<button class="pay">Pay later</button>', around: 'Total $10. Pay later Terms apply.' });
+  assert.equal(u.comparePin(anchor, { status: 'resolved', element: el }, win1280), 'outdated');
+});
+
+test('comparePin: changed surrounding text is outdated', () => {
+  const anchor = anchorFor(fpEl(), win1280);
+  assert.equal(u.comparePin(anchor, { status: 'resolved', element: fpEl({ around: 'Total $99. Pay now Terms apply.' }) }, win1280), 'outdated');
+});
+
+test('comparePin: element found only by role and name is outdated', () => {
+  const anchor = anchorFor(fpEl(), win1280);
+  assert.equal(u.comparePin(anchor, { status: 'drifted-recoverable', element: fpEl() }, win1280), 'outdated');
+});
+
+test('comparePin: missing element is outdated', () => {
+  const anchor = anchorFor(fpEl(), win1280);
+  assert.equal(u.comparePin(anchor, { status: 'drifted', element: null }, win1280), 'outdated');
+});
+
+test('comparePin: size differs at another viewport width is current', () => {
+  const anchor = anchorFor(fpEl(), win1280);
+  assert.equal(u.comparePin(anchor, { status: 'resolved', element: fpEl({ w: 300, h: 60 }) }, { innerWidth: 390 }), 'current');
+});
+
+test('comparePin: size differs at the same viewport width is outdated', () => {
+  const anchor = anchorFor(fpEl(), win1280);
+  assert.equal(u.comparePin(anchor, { status: 'resolved', element: fpEl({ w: 300 }) }, win1280), 'outdated');
+});
+
+test('comparePin: changed HTML attribute is outdated', () => {
+  const anchor = anchorFor(fpEl(), win1280);
+  assert.equal(u.comparePin(anchor, { status: 'resolved', element: fpEl({ html: '<button class="pay" disabled>Pay now</button>' }) }, win1280), 'outdated');
+});
+
+test('comparePin: an anchor without a fingerprint is current when its selector resolves', () => {
+  assert.equal(u.comparePin({ css_selector: '#pay', tag_chain: ['BUTTON'] }, { status: 'resolved', element: fpEl() }, win1280), 'current');
+});
+
+test('comparePin ignores the classes Hunkyard itself adds and an emptied class attribute', () => {
+  const anchor = anchorFor(fpEl({ html: '<button id="pay">Pay now</button>' }), win1280);
+  const highlighted = fpEl({ html: '<button id="pay" class="hunkyard-live-pending-highlight">Pay now</button>' });
+  const cleared = fpEl({ html: '<button id="pay" class="">Pay now</button>' });
+  assert.equal(u.comparePin(anchor, { status: 'resolved', element: highlighted }, win1280), 'current');
+  assert.equal(u.comparePin(anchor, { status: 'resolved', element: cleared }, win1280), 'current');
+  const appClass = fpEl({ html: '<button id="pay" class="busy">Pay now</button>' });
+  assert.equal(u.comparePin(anchor, { status: 'resolved', element: appClass }, win1280), 'outdated', 'an app class still counts');
+});
+
+test('accessibleNameFor separates table cells and lines instead of gluing their text together', () => {
+  const table = { getAttribute: () => null, innerText: 'Site Name\tAlerts\tUpdates\tActions\nNo Screenshot\twpsandbox-61035082', textContent: 'Site NameAlertsUpdatesActionsNo Screenshotwpsandbox-61035082' };
+  assert.equal(u.accessibleNameFor(table), 'Site Name Alerts Updates Actions No Screenshot wpsandbox-61035082');
+  const plain = { getAttribute: () => null, textContent: '  Save\n   changes ' };
+  assert.equal(u.accessibleNameFor(plain), 'Save changes', 'without innerText, whitespace still collapses');
+});
+
+test('resolvePin does not guess when several elements share the role and name', () => {
+  const a = { tagName: 'BUTTON', textContent: 'Update', getAttribute: () => null };
+  const b = { tagName: 'BUTTON', textContent: 'Update', getAttribute: () => null };
+  const main = { tagName: 'MAIN', getAttribute: () => null, querySelectorAll: () => [a, b] };
+  const doc = { querySelector: () => null, querySelectorAll: () => [main] };
+  const anchor = { css_selector: '#gone', tag_chain: ['BUTTON'], role: 'button', accessible_name: 'Update', landmark: 'main' };
+  assert.equal(u.resolvePin(anchor, doc).status, 'drifted');
+  const single = { querySelector: () => null, querySelectorAll: () => [{ tagName: 'MAIN', getAttribute: () => null, querySelectorAll: () => [a] }] };
+  assert.equal(u.resolvePin(anchor, single).status, 'drifted-recoverable', 'a unique match is still recovered');
+});

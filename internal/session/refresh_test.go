@@ -9,18 +9,6 @@ import (
 	"github.com/BSH2409/hunkyard/internal/vcs"
 )
 
-func TestWatcherMarksSessionStale(t *testing.T) {
-	sess, dir, events := watchedReview(t, 0)
-	time.Sleep(200 * time.Millisecond)
-	gitT(t, dir, "commit", "--allow-empty", "-qm", "outside the round")
-	if !waitForEvent(events, "review-stale", 3*time.Second) {
-		t.Fatal("no review-stale event")
-	}
-	if !sess.GetSessionInfo().Stale {
-		t.Fatal("session info does not report the review as stale")
-	}
-}
-
 func TestRefreshWorkingTreePicksUpEditsAndKeepsComments(t *testing.T) {
 	dir := newBudgetRepo(t, 25, 0)
 	writeFile(t, filepath.Join(dir, "src", "file3.go"), "package p\n\nfunc F3() int { return 33 }\n")

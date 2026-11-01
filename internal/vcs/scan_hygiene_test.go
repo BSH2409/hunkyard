@@ -127,9 +127,12 @@ func TestBranchListSkipsOriginHEAD(t *testing.T) {
 	if want := []string{"feature", "main"}; !slices.Equal(remote, want) {
 		t.Errorf("remote branches = %v, want %v", remote, want)
 	}
-	entries, err := remoteBranchTipsGit(dir, "none")
+	entries, err := RemoteBranchTips(&GitVCS{}, dir, "none")
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(entries, func(e BranchEntry) bool { return strings.HasSuffix(e.Name, "main") }) {
+		t.Fatalf("precondition: remote tips should list origin/main, got %+v", entries)
 	}
 	for _, e := range entries {
 		if e.Name == "origin" || strings.HasSuffix(e.Name, "/HEAD") {
@@ -153,7 +156,7 @@ func TestWorkingTreeFingerprintSeesEditsToDirtyFilesAndNestedUntracked(t *testin
 	writeFile(t, filepath.Join(dir, "a.go"), "package a\n\nvar X = 1\n")
 	writeFile(t, filepath.Join(dir, "newpkg", "one.go"), "package b\n")
 	for _, vc := range []*GitVCS{{}, (&GitVCS{}).ForPaths([]string{"a.go", "newpkg"})} {
-		withCwd(t, dir)
+		t.Chdir(dir)
 		first := vc.WorkingTreeFingerprint()
 		writeFile(t, filepath.Join(dir, "a.go"), "package a\n\nvar X = 22\n")
 		second := vc.WorkingTreeFingerprint()

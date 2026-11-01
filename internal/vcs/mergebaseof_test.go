@@ -1,9 +1,6 @@
 package vcs
 
 import (
-	"os"
-	"path/filepath"
-	"strings"
 	"testing"
 )
 
@@ -48,72 +45,5 @@ func TestMergeBaseOf_Git(t *testing.T) {
 	}
 	if mbSwapped != forkpoint {
 		t.Errorf("MergeBaseOf(prHead, baseTip) = %s, want forkpoint %s", mbSwapped, forkpoint)
-	}
-}
-
-// TestJJVCS_MergeBaseOf covers the two-arg merge-base where neither side is @:
-// two siblings off main must resolve to their common ancestor (the fork point),
-// not the divergent base-branch tip. This is the jj path of the `hunkyard --pr` fix.
-func TestJJVCS_MergeBaseOf(t *testing.T) {
-	dir := initTestJJRepoWithLocalMain(t)
-	j := &JJVCS{}
-
-	forkpoint := runJJ(t, dir, "log", "-r", "bookmarks(exact:\"main\")", "--no-graph", "-T", "commit_id")
-
-	// PR head: a child of main.
-	runJJ(t, dir, "new", "main", "-m", "pr work")
-	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feat\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	prHead := runJJ(t, dir, "log", "-r", "@", "--no-graph", "-T", "commit_id")
-
-	// Base drift: a second child of main, diverging from the PR.
-	runJJ(t, dir, "new", "main", "-m", "base drift")
-	if err := os.WriteFile(filepath.Join(dir, "drift.txt"), []byte("drift\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	baseTip := runJJ(t, dir, "log", "-r", "@", "--no-graph", "-T", "commit_id")
-
-	mb, err := j.MergeBaseOf(baseTip, prHead, dir)
-	if err != nil {
-		t.Fatalf("MergeBaseOf: %v", err)
-	}
-	if mb != forkpoint {
-		t.Errorf("MergeBaseOf(baseTip, prHead) = %q, want forkpoint %q (got base tip %q?)",
-			mb, forkpoint, baseTip)
-	}
-}
-
-// TestSaplingVCS_MergeBaseOf is the sapling path of the `hunkyard --pr` fix: two
-// siblings off the seed must resolve to their common ancestor, not the drifted
-// base tip. ancestor() is symmetric, so order does not matter.
-func TestSaplingVCS_MergeBaseOf(t *testing.T) {
-	dir := initTestSaplingRepo(t)
-	s := &SaplingVCS{}
-
-	forkpoint := strings.TrimSpace(runSL(t, dir, "log", "-r", ".", "-T", "{node}"))
-
-	// PR head: a child of the seed.
-	if err := os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feat\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runSL(t, dir, "commit", "-A", "-m", "pr work")
-	prHead := strings.TrimSpace(runSL(t, dir, "log", "-r", ".", "-T", "{node}"))
-
-	// Base drift: move the working parent back to the seed and branch off again.
-	runSL(t, dir, "goto", forkpoint)
-	if err := os.WriteFile(filepath.Join(dir, "drift.txt"), []byte("drift\n"), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	runSL(t, dir, "commit", "-A", "-m", "base drift")
-	baseTip := strings.TrimSpace(runSL(t, dir, "log", "-r", ".", "-T", "{node}"))
-
-	mb, err := s.MergeBaseOf(baseTip, prHead, dir)
-	if err != nil {
-		t.Fatalf("MergeBaseOf: %v", err)
-	}
-	if strings.TrimSpace(mb) != forkpoint {
-		t.Errorf("MergeBaseOf(baseTip, prHead) = %q, want forkpoint %q (got base tip %q?)",
-			strings.TrimSpace(mb), forkpoint, baseTip)
 	}
 }

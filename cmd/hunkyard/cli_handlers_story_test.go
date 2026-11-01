@@ -58,6 +58,9 @@ func storySessionKey(t *testing.T, scopeArgs []string) string {
 
 func setupStoryRepo(t *testing.T) (dir, baseSHA, headSHA string) {
 	t.Helper()
+	// Saving a story starts a review daemon; in a test that would re-run
+	// this test binary in the background.
+	stubPostIngest(t)
 	dir = testutil.InitTestRepo(t)
 	testutil.SetHome(t, dir)
 	baseSHA = testutil.Git(t, dir, "rev-parse", "HEAD")

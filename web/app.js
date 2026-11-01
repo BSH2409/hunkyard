@@ -5684,12 +5684,14 @@
     const file = getFileByPath(filePath);
     if (!file) return;
     try {
-      await fetch('/api/comment/' + id + '?path=' + enc(filePath), { method: 'DELETE' });
+      const res = await fetch('/api/comment/' + id + '?path=' + enc(filePath), { method: 'DELETE' });
+      if (!res.ok) throw new Error('Server returned ' + res.status);
       file.comments = file.comments.filter(c => c.id !== id);
       pendingAgentRequests.delete(id);
       userActedThisRound = true;
     } catch (err) {
       console.error('Error deleting comment:', err);
+      showMiniToast('Failed to delete comment');
     }
     if (navCommentId === id) navCommentId = null;
     renderFileByPath(filePath);
@@ -7043,32 +7045,33 @@
   }
 
   async function resolveAllAndFinish() {
-    // Resolve all unresolved file comments
+    // Resolve every unresolved file and review comment; finish only if all of
+    // them resolved, so a failure never ships comments the reviewer meant to close.
+    const requests = [];
     for (let fi = 0; fi < files.length; fi++) {
-      const fileComments = files[fi].comments || [];
-      for (let ci = 0; ci < fileComments.length; ci++) {
-        if (!fileComments[ci].resolved) {
-          try {
-            await fetch('/api/comment/' + fileComments[ci].id + '/resolve?path=' + enc(files[fi].path), {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ resolved: true }),
-            });
-          } catch {}
-        }
+      for (const c of files[fi].comments || []) {
+        if (!c.resolved) requests.push('/api/comment/' + c.id + '/resolve?path=' + enc(files[fi].path));
       }
     }
-    // Resolve all unresolved review comments
-    for (let ri = 0; ri < reviewComments.length; ri++) {
-      if (!reviewComments[ri].resolved) {
-        try {
-          await fetch('/api/review-comment/' + reviewComments[ri].id + '/resolve', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ resolved: true }),
-          });
-        } catch {}
+    for (const c of reviewComments) {
+      if (!c.resolved) requests.push('/api/review-comment/' + c.id + '/resolve');
+    }
+    let failed = 0;
+    for (const url of requests) {
+      try {
+        const res = await fetch(url, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ resolved: true }),
+        });
+        if (!res.ok) failed++;
+      } catch {
+        failed++;
       }
+    }
+    if (failed > 0) {
+      showMiniToast('Could not resolve ' + failed + (failed === 1 ? ' comment' : ' comments') + '; the review was not finished.');
+      return;
     }
     await doFinishReview();
   }
@@ -7156,6 +7159,78 @@
   function connectSSE() {
     let sseErrorCount = 0;
 
+    // Comment refreshes never overlap: events during one share a follow-up,
+    // so a slow response cannot overwrite a newer one.
+    const refreshCommentsOnce = window.hunkyard.sse.coalesced(async function() {
+      try {
+        // Only re-fetch comments data, not file content or diffs (those only
+        // change on file-changed events), in one request for all files.
+        const previousCommentSignatures = new Map();
+        for (let i = 0; i < files.length; i++) {
+          previousCommentSignatures.set(files[i].path, JSON.stringify(files[i].comments || []));
+        }
+        const previousReviewSignature = JSON.stringify(reviewComments || []);
+        applyAllFileComments(await fetchAllFileComments());
+        // Also refresh review-level comments
+        try {
+          const rcRes = await fetch('/api/comments');
+          if (rcRes.ok) reviewComments = await rcRes.json();
+        } catch {}
+        // Save form drafts and focused element before re-render
+        let focusedFormKey = null;
+        let focusedReplyCommentId = null;
+        let focusedSelStart = 0;
+        let focusedSelEnd = 0;
+        const activeEl = document.activeElement;
+        if (activeEl && activeEl.tagName === 'TEXTAREA') {
+          const formEl = activeEl.closest('.comment-form');
+          // A reply draft lives in .reply-form, outside any .comment-form, so it is keyed by its comment card.
+          const replyCard = activeEl.classList.contains('reply-textarea') ? activeEl.closest('.comment-card') : null;
+          if (formEl) {
+            focusedFormKey = formEl.dataset.formKey;
+          } else if (replyCard && replyCard.dataset.commentId) {
+            focusedReplyCommentId = replyCard.dataset.commentId;
+          }
+          focusedSelStart = activeEl.selectionStart;
+          focusedSelEnd = activeEl.selectionEnd;
+        }
+        for (let i = 0; i < files.length; i++) {
+          checkAgentReplies(files[i].comments);
+          saveOpenFormContent(files[i].path);
+        }
+        checkAgentReplies(reviewComments);
+        // Re-render only the files whose comments actually changed.
+        const inStory = storyActive();
+        for (let i = 0; i < files.length; i++) {
+          const before = previousCommentSignatures.get(files[i].path) || '[]';
+          const after = JSON.stringify(files[i].comments || []);
+          if (before === after) continue;
+          if (inStory) renderStoryFileByPath(files[i].path);
+          else renderFileByPath(files[i].path);
+        }
+        if (!inStory && JSON.stringify(reviewComments || []) !== previousReviewSignature) {
+          renderReviewConversation();
+        }
+        updateCommentCount();
+        updateTreeCommentBadges();
+        renderCommentsPanel();
+        // Restore focus. Without it, keys typed after the re-render land on the page and fire
+        // single-key shortcuts (d deletes a comment, Shift+F finishes the review).
+        let focusTarget = null;
+        if (focusedFormKey) {
+          focusTarget = document.querySelector('.comment-form[data-form-key="' + focusedFormKey + '"] textarea');
+        } else if (focusedReplyCommentId) {
+          focusTarget = document.querySelector('.comment-card[data-comment-id="' + focusedReplyCommentId + '"] .reply-textarea');
+        }
+        if (focusTarget) {
+          focusTarget.focus();
+          focusTarget.selectionStart = focusedSelStart;
+          focusTarget.selectionEnd = focusedSelEnd;
+        }
+      } catch (err) {
+        console.error('Error handling comments-changed:', err);
+      }
+    });
     const conn = window.hunkyard.sse.createSSE('/api/events', {
       'preferences-updated': function (event) {
         const status = document.getElementById('preferenceStatus');
@@ -7279,76 +7354,7 @@
         }
       } catch {}
       },
-      'comments-changed': async function() {
-      try {
-        // Only re-fetch comments data, not file content or diffs (those only
-        // change on file-changed events), in one request for all files.
-        const previousCommentSignatures = new Map();
-        for (let i = 0; i < files.length; i++) {
-          previousCommentSignatures.set(files[i].path, JSON.stringify(files[i].comments || []));
-        }
-        const previousReviewSignature = JSON.stringify(reviewComments || []);
-        applyAllFileComments(await fetchAllFileComments());
-        // Also refresh review-level comments
-        try {
-          const rcRes = await fetch('/api/comments');
-          if (rcRes.ok) reviewComments = await rcRes.json();
-        } catch {}
-        // Save form drafts and focused element before re-render
-        let focusedFormKey = null;
-        let focusedReplyCommentId = null;
-        let focusedSelStart = 0;
-        let focusedSelEnd = 0;
-        const activeEl = document.activeElement;
-        if (activeEl && activeEl.tagName === 'TEXTAREA') {
-          const formEl = activeEl.closest('.comment-form');
-          // A reply draft lives in .reply-form, outside any .comment-form, so it is keyed by its comment card.
-          const replyCard = activeEl.classList.contains('reply-textarea') ? activeEl.closest('.comment-card') : null;
-          if (formEl) {
-            focusedFormKey = formEl.dataset.formKey;
-          } else if (replyCard && replyCard.dataset.commentId) {
-            focusedReplyCommentId = replyCard.dataset.commentId;
-          }
-          focusedSelStart = activeEl.selectionStart;
-          focusedSelEnd = activeEl.selectionEnd;
-        }
-        for (let i = 0; i < files.length; i++) {
-          checkAgentReplies(files[i].comments);
-          saveOpenFormContent(files[i].path);
-        }
-        checkAgentReplies(reviewComments);
-        // Re-render only the files whose comments actually changed.
-        const inStory = storyActive();
-        for (let i = 0; i < files.length; i++) {
-          const before = previousCommentSignatures.get(files[i].path) || '[]';
-          const after = JSON.stringify(files[i].comments || []);
-          if (before === after) continue;
-          if (inStory) renderStoryFileByPath(files[i].path);
-          else renderFileByPath(files[i].path);
-        }
-        if (!inStory && JSON.stringify(reviewComments || []) !== previousReviewSignature) {
-          renderReviewConversation();
-        }
-        updateCommentCount();
-        updateTreeCommentBadges();
-        renderCommentsPanel();
-        // Restore focus. Without it, keys typed after the re-render land on the page and fire
-        // single-key shortcuts (d deletes a comment, Shift+F finishes the review).
-        let focusTarget = null;
-        if (focusedFormKey) {
-          focusTarget = document.querySelector('.comment-form[data-form-key="' + focusedFormKey + '"] textarea');
-        } else if (focusedReplyCommentId) {
-          focusTarget = document.querySelector('.comment-card[data-comment-id="' + focusedReplyCommentId + '"] .reply-textarea');
-        }
-        if (focusTarget) {
-          focusTarget.focus();
-          focusTarget.selectionStart = focusedSelStart;
-          focusTarget.selectionEnd = focusedSelEnd;
-        }
-      } catch (err) {
-        console.error('Error handling comments-changed:', err);
-      }
-      },
+      'comments-changed': refreshCommentsOnce,
       'base-changed': function() {
       reloadForScope();
       fetchCommits();
@@ -8175,9 +8181,6 @@
   }
 
   function compareTargetGroupLabel(kind) {
-    if (compareTargets.vcs === 'jj') {
-      return kind === 'local' ? 'Bookmarks' : 'Remote bookmarks';
-    }
     return kind === 'local' ? 'Local' : 'Remote';
   }
 
@@ -9017,13 +9020,13 @@
   }
   window.hunkyardOpenBlockingComments = countOpenBlockingComments;
 
-  // The Yard tab shows hunkyard-preferences activity since this page opened.
+  // The Preferences tab (the Yard) shows hunkyard-preferences activity since this page opened.
   const yardSince = new Date().toISOString();
   function renderYardPane() {
     const yard = window.hunkyard && window.hunkyard.yard;
     const pane = document.getElementById('yardPane');
     if (!yard || !pane) return;
-    yard.render(pane, { mode: 'tab', since: yardSince, onAttention: setYardBadge });
+    yard.render(pane, { since: yardSince, onAttention: setYardBadge });
   }
 
   function setYardBadge(count) {
@@ -9031,6 +9034,10 @@
     if (!badge) return;
     badge.hidden = !count;
     badge.textContent = count ? String(count) : '';
+    const label = count ? count + ' preference health ' + (count === 1 ? 'item needs' : 'items need') + ' attention; see Preferences, Health' : '';
+    badge.title = label;
+    if (count) badge.setAttribute('aria-label', label);
+    else badge.removeAttribute('aria-label');
   }
 
   function renderShortcutsPane() {

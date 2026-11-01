@@ -65,3 +65,25 @@ describe('hunkyard-sse', () => {
     assert.equal(opened, true);
   });
 });
+
+it('coalesced runs one refresh at a time and one follow-up for any events that arrived meanwhile', async () => {
+  const { coalesced } = require('../hunkyard-sse.js');
+  let running = 0, maxRunning = 0, runs = 0;
+  const releases = [];
+  const refresh = coalesced(() => new Promise((resolve) => {
+    runs++; running++; maxRunning = Math.max(maxRunning, running);
+    releases.push(() => { running--; resolve(); });
+  }));
+  const first = refresh();
+  refresh();
+  refresh();
+  assert.equal(runs, 1, 'second and third events wait for the running refresh');
+  releases.shift()();
+  await first;
+  await new Promise((r) => setImmediate(r));
+  assert.equal(runs, 2, 'one follow-up covers both queued events');
+  releases.shift()();
+  await new Promise((r) => setImmediate(r));
+  assert.equal(runs, 2);
+  assert.equal(maxRunning, 1);
+});

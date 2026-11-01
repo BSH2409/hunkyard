@@ -308,7 +308,17 @@ func (s *Session) writeFilesErr() error {
 	if s.handleExternalDeletion(hunkyardPath) {
 		return nil
 	}
+	// The lock keeps a concurrent `hunkyard comment` from interleaving with
+	// this read-merge-write; anything it already wrote is merged in first.
+	return WithReviewLock(hunkyardPath, func() error {
+		s.absorbExternalReviewChanges(hunkyardPath)
+		return s.writeReviewFile(hunkyardPath)
+	})
+}
 
+// writeReviewFile builds and writes review.json from memory and disk.
+// Callers hold the review lock.
+func (s *Session) writeReviewFile(hunkyardPath string) error {
 	snap := s.snapshotForWrite(hunkyardPath)
 	cj := buildHunkyardJSON(snap)
 
@@ -343,6 +353,7 @@ func (s *Session) writeFilesErr() error {
 	if info, err := os.Stat(paths.Review); err == nil {
 		s.mu.Lock()
 		s.lastHunkyardJSONMtime = info.ModTime()
+		s.lastWritten = newWrittenState(cj)
 		s.pendingWrite = false
 		s.clearWrittenDeletedCommentIDs(snap.deletedCommentIDs)
 		// Sync in-memory pending-delete state to what we just wrote, so the
@@ -628,6 +639,7 @@ func (s *Session) mergeExternalHunkyardJSON() bool {
 
 	s.mu.Lock()
 	s.lastHunkyardJSONMtime = info.ModTime()
+	s.lastWritten = newWrittenState(cj)
 	// Disk is authoritative for external edits — clear deleted tracking
 	s.deletedCommentIDs = nil
 

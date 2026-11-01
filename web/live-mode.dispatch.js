@@ -20,7 +20,8 @@
       switch (msg.type) {
         case A2C.AGENT_READY: if (handlers.onAgentReady) handlers.onAgentReady(); break;
         case A2C.AGENT_ERROR: if (handlers.onAgentError) handlers.onAgentError({ kind: msg.kind, message: msg.message }); break;
-        case A2C.SELECTION: if (handlers.onSelection) handlers.onSelection(msg.dom_anchor, msg.pointer, msg.reanchor_for); break;
+        case A2C.SELECTION: if (handlers.onSelection) handlers.onSelection(msg.dom_anchor, msg.pointer, msg.reanchor_for, msg.selection_id); break;
+        case A2C.PIN_SCREENSHOT: if (handlers.onPinScreenshot) handlers.onPinScreenshot(msg); break;
         case A2C.REQUEST_ANCESTOR_MENU: if (handlers.onRequestAncestorMenu) handlers.onRequestAncestorMenu(msg.options, msg.pointer); break;
         case A2C.FOCUS_STATE: if (handlers.onFocusState) handlers.onFocusState(msg.in_input); break;
         case A2C.SHORTCUT_KEY: if (handlers.onShortcutKey) handlers.onShortcutKey(msg); break;

@@ -11,7 +11,7 @@ import (
 var publicCommandNames = []string{
 	"preferences",
 	"feedback",
-	"install", "config", "yard", "check", "pr", "pull",
+	"install", "config", "check", "pr", "pull",
 	"push", "comment", "comments", "review", "live", "preview", "plan", "story",
 	"stop", "status", "resume", "stats", "cleanup",
 }

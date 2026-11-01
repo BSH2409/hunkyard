@@ -42,7 +42,7 @@ hunkyard/
 12. **Headless CLI comment** — `hunkyard comment` writes directly to the review file without starting the server; SSE notifies any running server
 13. **Comment threading** — comments support nested replies and a `resolved` boolean. Review file schema nests replies inside each comment's `replies` array.
 14. **Centralized review storage** — `~/.hunkyard/reviews/<key>.json` keyed by cwd + branch (git mode) or cwd + args (file mode)
-15. **VCS abstraction** — `vcs.go` defines a backend interface; `git_vcs.go`, `sapling.go`, and `jj.go` are the implementations. Auto-detected, overridable via `--vcs` flag or `vcs` config key. Subcommands not yet threaded through (see TODO at `main.go:1826`).
+15. **VCS abstraction** — `vcs.go` defines a backend interface; `git_vcs.go` is the only implementation (Sapling and Jujutsu were removed in v1.0.3). `--vcs` and the `vcs` config key accept only `git`. Subcommands not yet threaded through (see TODO at `main.go:1826`).
 16. **Pluggable renderers** — `web/hunkyard-renderers.js` registry; two registration kinds: `kind: 'fence'` (by info string, `langs`) and `kind: 'file'` (by glob, `paths`, `<label> / Source` toggle, `viewMode: 'rendered'`). Built-in mermaid (`hunkyard-renderer-mermaid.js`) covers ```` ```mermaid ````, `*.mermaid`, `*.mmd`, and injects `mermaid.min.js` only on the first diagram (not in `index.html`). New renderers ship in `web/` (no external script loading). See `docs/renderers.md`.
 17. **Focus mode** — sub-views over the file list: file focus, range focus (`--range A..B`), stacked focus (range layer in a stacked PR). Lives in `focus_*.go` and `/api/focus`.
 
@@ -78,9 +78,9 @@ hunkyard stop [--all]             # Stop daemon for current directory; --all sto
 hunkyard status [--json]          # Show review file path, daemon status, comment stats
 hunkyard resume [--list | <id>]   # Pick a stored review to reopen (interactive list of ~/.hunkyard/reviews)
 hunkyard cleanup [--days N] [--force]  # Delete stale review files from ~/.hunkyard/reviews/
-hunkyard pull [pr-number]         # Fetch GitHub PR comments into the review file
-hunkyard push [--dry-run] [--event <type>] [-m <msg>] [pr]  # Post review comments as a GitHub PR review
-hunkyard pr <num|url>             # Thin shim — forwards to `hunkyard review --pr <n>`
+hunkyard pull [pr-number]         # Fetch GitHub PR comments into the review file (disabled in the local-only build)
+hunkyard push [--dry-run] [--event <type>] [-m <msg>] [pr]  # Post review comments as a GitHub PR review (disabled in the local-only build)
+hunkyard pr <num|url>             # Thin shim — forwards to `hunkyard review --pr <n>` (disabled in the local-only build)
 hunkyard comment <path>:<line[-end]> <body>         # Add a comment (no server needed)
 hunkyard comment --selector <css> [--route <path>] <body>  # Pin a DOM element (live or HTML preview)
 hunkyard comment --reply-to <id> [--resolve] <body> # Reply to a comment
@@ -90,7 +90,6 @@ hunkyard install <agent>          # Install integration config for an AI tool
 hunkyard plan [...]               # Plan-file workflow
 hunkyard plan-hook [--mode claude|codex]  # Internal hook used by agent plan flows
 hunkyard check                    # Self-check (env, git, gh availability)
-hunkyard yard [--port N] [--host H] [--no-open]  # Preference Yard: rules, loads, activity, health (no review session)
 hunkyard _serve                   # Internal: foreground server (used by daemon spawn)
 hunkyard --version | -v           # Version
 hunkyard help | --help | -h       # Show help
@@ -119,13 +118,15 @@ Config keys: `port`, `host`, `no_open`, `quiet`, `output`, `author`, `base_branc
 - `ignore_patterns` are unioned (global + project both apply); types: `*.ext`, `dir/`, `exact.file`, `path/*.ext`
 - `auto_viewed_patterns` are unioned (global + project both apply); matched client-side against file paths and applied once per launch to auto-mark matching files viewed (collapsed). No runtime default (empty). Plumbed through `/api/config` only — Go does no glob matching.
 - `default_markdown_view` (`"diff"` | `"document"`, default unset = diff in git mode) — initial view for markdown files (Document/Diff toggle) in git mode. Project **overrides** global (scalar, not unioned). Invalid values are ignored with a stderr warning. No CLI flag. Plumbed through `/api/config` only.
-- `vcs` selects backend: `"git"` (default), `"sl"` (sapling), or `"jj"` (Jujutsu)
+- `vcs` selects the backend; `"git"` is the only value (Sapling and Jujutsu were removed in v1.0.3). Any other value is ignored with a stderr warning and git is used
 - `live_cookie` / `live_cookie_file` forward session cookies to the upstream app in live mode (global or project; prefer gitignored `live_cookie_file` e.g. `.hunkyard/live-cookies.txt`). CLI: `hunkyard live --cookie`, `--cookie-file`
 - `live_cdp_url` reuses cookies from a local Chrome DevTools endpoint (global or project). CLI: `hunkyard live --cdp-url`. Explicit `--cookie` values override CDP cookies with the same name.
 - CLI flags override config file values
 </important>
 
 <important if="you are working with hunkyard pull, hunkyard push, or GitHub PR sync">
+
+The local-only build rejects `pull`, `push`, `pr` and `--pr` (exit 2, "local-only build: … is unavailable"). The GitHub sync code is kept for a build that allows network access; change it only with that build in mind.
 
 Requires `gh` CLI installed and authenticated.
 
@@ -154,7 +155,7 @@ make e2e-report                                       # View HTML report with sc
 
 ### Projects
 
-Ten Playwright projects. Test naming convention determines which project runs which file:
+Eleven Playwright projects. Test naming convention determines which project runs which file:
 
 | Project | Port | Fixture | Test glob |
 | --- | --- | --- | --- |
@@ -164,10 +165,11 @@ Ten Playwright projects. Test naming convention determines which project runs wh
 | `single-file-mode` | 3125 | `setup-fixtures-singlefile.sh` (one markdown file) | `*.singlefile.spec.ts` |
 | `multi-file-mode` | 3127 | `setup-fixtures-multifile.sh` (code + markdown files) | `*.multifile.spec.ts` |
 | `range-mode` | 3128 | `setup-fixtures-range-mode.sh` (`--range A..B` stacked git) | `*.rangemode.spec.ts` |
-| `live-mode` | 3129 | `setup-fixtures-livemode.sh` (Go upstream + hunkyard live) | `*.livemode.spec.ts` |
+| `live-mode` | 3129 | `setup-fixtures-livemode.sh` (Go upstream + hunkyard live; the proxy listens on 3130) | `*.livemode.spec.ts` |
 | `perf` | 3134 | `setup-fixtures-perf.sh` (300 files + large markdown) | `*.perf.spec.ts` |
 | `huge` | 3136 | `setup-fixtures-huge.sh` (~2,500 files; document taller than 2^22px) | `*.huge.spec.ts` |
 | `bigtree` | 3138 | `setup-fixtures-bigtree.sh` (5,000 tracked, 300 untracked and 30,000 ignored files; 200 remote refs; served with code paths `src newpkg`) | `*.bigtree.spec.ts` |
+| `yard` | 3137 | `setup-fixtures-yard.sh` (small git review with a seeded preference store) | `*.yard.spec.ts` |
 
 The `mobile` project shares a git-mode fixture. `run.sh` runs git-mode as two shards on two fixtures (3123, 3131) and starts mobile on the 3131 fixture only after git shard 2/2 finishes, so the two never race on shared comment state (both `DELETE /api/comments` in `beforeEach`).
 
@@ -215,6 +217,7 @@ Session-scoped:
 - `POST /api/round-complete` — agent signals all edits done; triggers new round
 - `POST /api/activity` — the page reports reviewer activity (throttled), which postpones the idle pause
 - `POST /api/refresh` — reload the working tree against the current base after `review-stale` (the Refresh banner)
+- `…/api/preferences/*` — Preferences tab: `GET rules|persona|pipeline|loads|activity|health`, `POST rules`, `POST rules/{id}/{retire,promote}`, `POST maintenance` (no readiness gate; POSTs require same-origin)
 - `…/api/focus` — set/clear focus (file or range scope)
 - `…/api/picker` — file-picker UI backend
 - `POST /api/agent/request` — send comment to configured `agent_cmd`

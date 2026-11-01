@@ -28,6 +28,7 @@
           '<span class="hunkyard-live-composer-chip">' + escapeHTML(label) + '</span>',
         '</div>',
         '<textarea class="hunkyard-live-composer-body" placeholder="Leave a live comment… (Ctrl+Enter to submit, Escape to cancel)" rows="4"></textarea>',
+        '<div class="hunkyard-live-composer-shot" role="status" hidden>Screenshot unavailable</div>',
         '<div class="hunkyard-live-composer-error" hidden></div>',
         '<div class="hunkyard-live-composer-actions">',
           '<button type="button" class="btn btn-sm hunkyard-live-composer-cancel">Cancel</button>',

@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"strings"
@@ -63,8 +64,9 @@ func TestWaiterErrorsWithoutPausedMarker(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	var alive atomic.Bool
 	fakeLiveness(t, &alive)
-	if _, err := resumedSession(context.Background(), pausedKey, true); err == nil {
-		t.Fatal("a stopped review without a paused marker should be an error")
+	_, err := resumedSession(context.Background(), pausedKey, true)
+	if err == nil || !strings.Contains(err.Error(), "is not running") {
+		t.Fatalf("err = %v, want the review reported as not running", err)
 	}
 }
 
@@ -92,8 +94,8 @@ func TestFollowWaiterStopsWhenTheSameDaemonKeepsFailing(t *testing.T) {
 	defer cancel()
 	var output bytes.Buffer
 	err := feedbackCommand(ctx, []string{"await", "--session", key, "--timeout", "1ms", "--follow", "--json"}, &output)
-	if err == nil || ctx.Err() != nil {
-		t.Fatalf("follow error = %v (ctx %v), want the request error without retrying the same daemon", err, ctx.Err())
+	if err == nil || ctx.Err() != nil || errors.Is(err, context.DeadlineExceeded) || !strings.Contains(err.Error(), "127.0.0.1:1") {
+		t.Fatalf("follow error = %v (ctx %v), want the transport error from the same daemon, without retrying", err, ctx.Err())
 	}
 }
 

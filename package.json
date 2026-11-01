@@ -4,6 +4,7 @@
   "dependencies": {
     "@pierre/diffs": "1.5.2",
     "@sanity/diff-match-patch": "3.2.1",
+    "@zumer/snapdom": "3.3.5",
     "dompurify": "3.4.16",
     "gemoji": "8.1.0",
     "katex": "0.19.0",

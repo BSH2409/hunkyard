@@ -926,7 +926,7 @@ func TestBindProxyServer_PortIsAPIPlusOne(t *testing.T) {
 		}
 		apiPort := apiLn.Addr().(*net.TCPAddr).Port
 
-		ln, srv, err := BindProxyServer("http://127.0.0.1:19997", apiPort, "")
+		ln, srv, err := BindProxyServer("127.0.0.1", "http://127.0.0.1:19997", apiPort, "")
 		if err != nil {
 			apiLn.Close()
 			if attempt < maxAttempts-1 && strings.Contains(err.Error(), "already in use") {
@@ -1087,5 +1087,35 @@ func TestProxyModifyResponse_InjectsRouteAnnouncer(t *testing.T) {
 				t.Errorf("expected announcer to wrap pushState/replaceState and listen for popstate; got body=%q", body)
 			}
 		})
+	}
+}
+
+// The proxy listens where the review does: in Docker the review binds
+// 0.0.0.0, and a loopback-only proxy would be unreachable through the
+// published port.
+func TestBindProxyServer_ListensOnTheReviewHost(t *testing.T) {
+	for _, tc := range []struct {
+		host         string
+		wantLoopback bool
+	}{
+		{"127.0.0.1", true},
+		{"0.0.0.0", false},
+		{"", false},
+	} {
+		apiLn, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		apiPort := apiLn.Addr().(*net.TCPAddr).Port
+		apiLn.Close()
+		ln, _, err := BindProxyServer(tc.host, "http://127.0.0.1:19997", apiPort, "")
+		if err != nil {
+			t.Skipf("port %d taken: %v", apiPort+1, err)
+		}
+		ip := ln.Addr().(*net.TCPAddr).IP
+		ln.Close()
+		if ip.IsLoopback() != tc.wantLoopback {
+			t.Errorf("host %q: proxy listens on %v", tc.host, ip)
+		}
 	}
 }

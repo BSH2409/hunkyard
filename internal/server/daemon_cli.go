@@ -5,7 +5,6 @@ import (
 	"flag"
 	"fmt"
 	"os"
-	"strconv"
 
 	"github.com/BSH2409/hunkyard/internal/clicmd"
 	"github.com/BSH2409/hunkyard/internal/config"
@@ -25,6 +24,7 @@ type DaemonCLIConfig struct {
 	Port                        int
 	Host                        string
 	PortExplicit                bool // --port flag or HUNKYARD_PORT
+	PortDefaulted               bool // nothing chose a port; 5000 is the default
 	HostExplicit                bool // --host flag or HUNKYARD_HOST
 	PublicURL                   string
 	AllowUnauthenticatedNetwork bool
@@ -57,6 +57,7 @@ type DaemonCLIConfig struct {
 
 type daemonFlagSet struct {
 	portSet                     bool
+	portDefaulted               bool
 	hostSet                     bool
 	port                        int
 	host                        string
@@ -100,7 +101,7 @@ func parseDaemonFlags(args []string) daemonFlagSet {
 	fs.BoolVar(quiet, "q", false, "On success, suppress connect/start status, tips, and session summary (shorthand)")
 	noIgnore := fs.Bool("no-ignore", false, "Disable all ignore patterns from config files")
 	baseBranch := fs.String("base-branch", "", "Base branch to diff against (overrides auto-detection)")
-	vcsFlag := fs.String("vcs", "", "VCS backend to use: git, sl/sapling, jj/jujutsu (default: auto-detect)")
+	vcsFlag := fs.String("vcs", "", "VCS backend to use: git (the only backend; default: auto-detect)")
 	planDir := fs.String("plan-dir", "", "")
 	planName := fs.String("name", "", "")
 	prSpec := fs.String("pr", "", "Review a GitHub pull request by number or URL")
@@ -179,6 +180,7 @@ func applyDaemonConfigDefaults(sf *daemonFlagSet, cfg config.Config) { //nolint:
 		sf.port = config.ResolvePort(sf.port, cfg.Port)
 		if sf.port == 0 && os.Getenv("HUNKYARD_PORT") == "" {
 			sf.port = 5000
+			sf.portDefaulted = true
 		}
 	}
 	sf.host = config.ResolveHost(sf.host, cfg.Host)
@@ -275,6 +277,7 @@ func ResolveDaemonCLIConfig(args []string) (*DaemonCLIConfig, error) { //nolint:
 		Port:                        sf.port,
 		Host:                        sf.host,
 		PortExplicit:                sf.portSet || os.Getenv("HUNKYARD_PORT") != "",
+		PortDefaulted:               sf.portDefaulted,
 		HostExplicit:                sf.hostSet || os.Getenv("HUNKYARD_HOST") != "",
 		PublicURL:                   sf.publicURL,
 		AllowUnauthenticatedNetwork: allowUnauthNet && config.NeedsUnauthenticatedNetworkAck(sf.host, sf.publicURL),
@@ -315,7 +318,7 @@ func PreflightCheck(sc *DaemonCLIConfig) string {
 	v := vcs.DetectVCS(sc.VCSOverride)
 	if v == nil {
 		return "Not in a version-controlled repository.\n\n" +
-			"  hunkyard              review changed files (run inside a git/sapling/jj repo)\n" +
+			"  hunkyard              review changed files (run inside a git repo)\n" +
 			"  hunkyard <file...>    review specific file(s)\n"
 	}
 	if sc.BaseBranch != "" {
@@ -332,17 +335,4 @@ func PreflightCheck(sc *DaemonCLIConfig) string {
 	return "No changed files found.\n\n" +
 		"  hunkyard              review changed files (needs changes against the base branch)\n" +
 		"  hunkyard <file...>    review specific file(s)\n"
-}
-
-// ResolvePortFromEnv mirrors config.ResolvePort for tests that assemble DaemonCLIConfig manually.
-func ResolvePortFromEnv(flagPort, cfgPort int) int {
-	if flagPort != 0 {
-		return flagPort
-	}
-	if envPort := os.Getenv("HUNKYARD_PORT"); envPort != "" {
-		if p, err := strconv.Atoi(envPort); err == nil {
-			return p
-		}
-	}
-	return cfgPort
 }

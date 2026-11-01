@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/BSH2409/hunkyard/internal/feedback"
@@ -65,6 +66,17 @@ func checkStaleIntegrations(sc *server.DaemonCLIConfig, srv *Server, cwd string)
 		}
 	}
 	srv.SetIntegrationWarnings(warnings, checkMissingIntegrations(cwd, home))
+}
+
+// bindReviewListener binds the review's port. When the port is only the
+// default (5000) and another review holds it, it takes a free port instead:
+// a second review should start, not fail. A port someone chose is kept.
+func bindReviewListener(host string, port int, defaulted bool) (net.Listener, error) {
+	listener, err := bindListener(host, port)
+	if err != nil && defaulted && port != 0 && errors.Is(err, syscall.EADDRINUSE) {
+		return bindListener(host, 0)
+	}
+	return listener, err
 }
 
 func bindListener(host string, port int) (net.Listener, error) {
@@ -126,7 +138,7 @@ func runServe(args []string) {
 		}
 	}
 
-	listener, err := bindListener(sc.Host, sc.Port)
+	listener, err := bindReviewListener(sc.Host, sc.Port, sc.PortDefaulted)
 	if err != nil {
 		daemonFatal(pipe, "Error starting server: %v", err)
 	}
@@ -213,7 +225,7 @@ func runServe(args []string) {
 	var proxyLn net.Listener
 	var proxySrv *http.Server
 	if sc.LiveOrigin != "" {
-		pl, ps, err := bindProxyServer(sc.LiveOrigin, addr.Port, sc.LiveCookie)
+		pl, ps, err := bindProxyServer(sc.Host, sc.LiveOrigin, addr.Port, sc.LiveCookie)
 		if err != nil {
 			daemonFatal(pipe, "Error starting proxy server: %v", err)
 		}
@@ -376,7 +388,11 @@ func runServe(args []string) {
 		log.Printf("Warning: background goroutines did not drain within 30s; proceeding with shutdown")
 	}
 
-	sess.WriteFiles()
+	// Synchronous: a debounce timer armed just before shutdown may be
+	// writing the same file, and two atomic replaces race on Windows.
+	if err := sess.SyncWriteFiles(); err != nil {
+		log.Printf("Warning: final review write failed: %v", err)
+	}
 
 	if srv.ShouldRecordStatsOnShutdown() {
 		recordSessionStats(sess, srv.Author(), sessionStartedAt)

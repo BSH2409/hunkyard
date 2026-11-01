@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"sync"
 	"testing"
 	"time"
 
@@ -9,15 +10,25 @@ import (
 )
 
 // slowListingVCS takes delay to list working-tree changes, like a large tree.
+// When entered is set it is closed as the listing starts, and the listing
+// then waits for release instead of the delay.
 type slowListingVCS struct {
 	vcs.VCS
-	delay time.Duration
+	delay   time.Duration
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
 }
 
 func (v *slowListingVCS) Name() string         { return "slow" }
 func (v *slowListingVCS) HasStagingArea() bool { return false }
 func (v *slowListingVCS) ChangedFilesOnDefaultInDir(string) ([]vcs.FileChange, error) {
-	time.Sleep(v.delay)
+	if v.entered != nil {
+		v.once.Do(func() { close(v.entered) })
+		<-v.release
+	} else {
+		time.Sleep(v.delay)
+	}
 	return []vcs.FileChange{{Path: "a.go", Status: "modified"}}, nil
 }
 
@@ -35,15 +46,28 @@ func slowSession(t *testing.T, delay time.Duration) *Session {
 }
 
 func TestCommentPostNotBlockedBySlowScopeProbe(t *testing.T) {
-	s := slowSession(t, 1500*time.Millisecond)
-	go s.GetSessionInfo()
-	time.Sleep(100 * time.Millisecond) // the probe is now reading the tree
-	start := time.Now()
-	if _, ok := s.AddComment("a.go", 1, 1, "", "body", "", ""); !ok {
-		t.Fatal("comment rejected")
+	s := slowSession(t, 0)
+	lister := s.VCS.(*slowListingVCS)
+	lister.entered, lister.release = make(chan struct{}), make(chan struct{})
+	probeDone := make(chan struct{})
+	go func() { s.GetSessionInfo(); close(probeDone) }()
+	t.Cleanup(func() { close(lister.release); <-probeDone })
+	select {
+	case <-lister.entered: // the probe is now inside the tree read
+	case <-time.After(5 * time.Second):
+		t.Fatal("the session probe never listed the tree")
 	}
-	if took := time.Since(start); took > 200*time.Millisecond {
-		t.Fatalf("adding a comment waited %v behind the tree read", took)
+	// The tree read is held open until cleanup, so a comment that waits
+	// behind it would never finish: bound the wait instead of hanging.
+	added := make(chan bool, 1)
+	go func() { _, ok := s.AddComment("a.go", 1, 1, "", "body", "", ""); added <- ok }()
+	select {
+	case ok := <-added:
+		if !ok {
+			t.Fatal("comment rejected")
+		}
+	case <-time.After(500 * time.Millisecond):
+		t.Fatal("adding a comment waited behind the tree read")
 	}
 }
 

@@ -68,6 +68,19 @@ export async function clearAllComments(request: APIRequestContext) {
   await expect(response).toBeOK();
 }
 
+/**
+ * Count the page's requests to an API path from now on: all of them, or only
+ * those whose query string is exactly `search` ('' for none).
+ */
+export function countRequests(page: Page, path: string, search?: string): { n: number } {
+  const counter = { n: 0 };
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === path && (search === undefined || url.search === search)) counter.n++;
+  });
+  return counter;
+}
+
 /** Commit picker rows excluding the virtual working-tree entry. */
 export function realCommitItems(page: Page): Locator {
   return page.locator('#commitDropdownList .commit-picker-item:not(.is-virtual)');

@@ -123,31 +123,9 @@ func assignStackBases(v vcs.VCS, entries []StackEntry, repoRoot string) []StackE
 			entries[i].BaseSHA = entries[i+1].HeadSHA
 			continue
 		}
-		switch v.Name() {
-		case "git":
-			out, err := vcs.RunGitInDir(repoRoot, "merge-base", defaultBranch, entries[i].HeadSHA)
-			if err == nil {
-				entries[i].BaseSHA = strings.TrimSpace(out)
-			}
-		case "jj":
-			baseForMerge := defaultSHA
-			if baseForMerge == "" {
-				if sha, err := vcs.ResolveJJRevisionToCommitID(repoRoot, defaultBranch); err == nil {
-					baseForMerge = sha
-				}
-			}
-			if baseForMerge != "" {
-				if mb, err := vcs.JJMergeBase(repoRoot, entries[i].HeadSHA, baseForMerge); err == nil {
-					entries[i].BaseSHA = strings.TrimSpace(mb)
-				}
-			}
-		default:
-			out, err := vcs.SLCommandInDir(repoRoot, "log", "-r",
-				fmt.Sprintf("ancestor(%s, %s)", entries[i].HeadSHA, defaultBranch),
-				"-T", "{node}")
-			if err == nil {
-				entries[i].BaseSHA = strings.TrimSpace(out)
-			}
+		out, err := vcs.RunGitInDir(repoRoot, "merge-base", defaultBranch, entries[i].HeadSHA)
+		if err == nil {
+			entries[i].BaseSHA = strings.TrimSpace(out)
 		}
 	}
 	return entries

@@ -748,7 +748,26 @@ func TestCheckLiveSmoke_WarnsOnNon2xx(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	checkLiveSmoke(srv.URL, "")
+	out := captureSmokeStderr(t, func() { checkLiveSmoke(srv.URL, "") })
+	if !strings.Contains(out, "[hunkyard] warning:") || !strings.Contains(out, "401") {
+		t.Fatalf("no non-2xx warning on stderr:\n%s", out)
+	}
+}
+
+// captureSmokeStderr returns what fn writes to os.Stderr.
+func captureSmokeStderr(t *testing.T, fn func()) string {
+	t.Helper()
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	old := os.Stderr
+	os.Stderr = w
+	defer func() { os.Stderr = old }()
+	fn()
+	w.Close()
+	data, _ := io.ReadAll(r)
+	return string(data)
 }
 
 func TestCheckLiveSmoke_NotesFrameworkAndCSP(t *testing.T) {
@@ -759,7 +778,10 @@ func TestCheckLiveSmoke_NotesFrameworkAndCSP(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	checkLiveSmoke(srv.URL, "")
+	out := captureSmokeStderr(t, func() { checkLiveSmoke(srv.URL, "") })
+	if !strings.Contains(out, "frame-ancestors CSP") || !strings.Contains(out, "[hunkyard] note:") {
+		t.Fatalf("framework and CSP notes missing on stderr:\n%s", out)
+	}
 }
 
 func TestRunLive_OriginNormalisedToSchemeHost(t *testing.T) {
@@ -1477,5 +1499,31 @@ func TestConnectToLiveDaemon_QuietSuppressesStatus(t *testing.T) {
 	}
 	if buf.Len() != 0 {
 		t.Fatalf("quiet connect should print nothing, got %q", buf.String())
+	}
+}
+
+// A dev server busy compiling assets answers late; it is running, so the
+// review starts with a warning instead of refusing.
+func TestSmokeSlowServerWarnsInsteadOfFailing(t *testing.T) {
+	release := make(chan struct{})
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		<-release
+	}))
+	defer upstream.Close()
+	defer close(release)
+	orig := smokeClient
+	smokeClient = &http.Client{Timeout: 50 * time.Millisecond}
+	defer func() { smokeClient = orig }()
+
+	got := runSmokeTest(upstream.URL, "")
+	if got.fatal || got.kind != smokeSlow {
+		t.Fatalf("slow server = %+v, want a non-fatal slow warning", got)
+	}
+
+	closed := httptest.NewServer(http.NotFoundHandler())
+	url := closed.URL
+	closed.Close()
+	if got := runSmokeTest(url, ""); !got.fatal || got.kind != smokeConnRefused {
+		t.Fatalf("refused connection = %+v, want fatal", got)
 	}
 }

@@ -8,11 +8,13 @@
     root.hunkyard.live.reanchorPut = api;
   }
 })(typeof window !== 'undefined' ? window : globalThis, function () {
-  function buildReanchorRequest(pinId, domAnchor) {
+  // shotFields: the screenshot fields for the new element (pin_screenshot,
+  // or screenshot_status/screenshot_reason when capture failed).
+  function buildReanchorRequest(pinId, domAnchor, shotFields) {
     return {
       method: 'PUT',
       url: `/api/comment/${encodeURIComponent(pinId)}?path=${encodeURIComponent(domAnchor.pathname)}`,
-      body: JSON.stringify({ dom_anchor: domAnchor }),
+      body: JSON.stringify(Object.assign({ dom_anchor: domAnchor }, shotFields || {})),
       headers: { 'Content-Type': 'application/json' },
     };
   }

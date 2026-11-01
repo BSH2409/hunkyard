@@ -61,8 +61,30 @@
   };
   window.__hunkyardAgentState = state;
 
-  function postToParent(msg) {
-    try { window.parent.postMessage(msg, expectedApiOrigin); } catch (_) { /* noop */ }
+  function postToParent(msg, transfer) {
+    try { window.parent.postMessage(msg, expectedApiOrigin, transfer || []); } catch (_) { /* noop */ }
+  }
+
+  // Captures the page as it was when the element was picked; the review page
+  // matches the result to its composer by selection_id.
+  function capturePinScreenshot(selectionId, target) {
+    var capture = window.hunkyard && window.hunkyard.agent && window.hunkyard.agent.capture;
+    var marker = window.hunkyard && window.hunkyard.agent && window.hunkyard.agent.pinMarker;
+    if (!capture || !marker || typeof window.snapdom !== 'function') {
+      postToParent({ type: A2C.PIN_SCREENSHOT, selection_id: selectionId, ok: false, reason: 'capture-unavailable' });
+      return;
+    }
+    capture.capturePin(target, {
+      snapdom: window.snapdom,
+      doc: document,
+      win: window,
+      drawMarker: marker.drawMarker,
+      style: marker.MARKER_STYLE,
+      exclude: ['#hunkyard-marker-root', '#hunkyard-agent-overlay'],
+    }).then(function (shot) {
+      var msg = Object.assign({ type: A2C.PIN_SCREENSHOT, selection_id: selectionId }, shot);
+      postToParent(msg, shot.ok ? [shot.bytes] : []);
+    });
   }
 
   // Interaction inside the app keeps the review from pausing. The parent
@@ -97,8 +119,9 @@
       document.head.appendChild(style);
     }
     try {
-      loadMarkerCss('/agent-marker.css')
-        .catch(function () { return loadMarkerCss(expectedApiOrigin + '/agent-marker.css'); })
+      // From Hunkyard itself: asking the reviewed app first put a failed
+      // request in its logs on every page load.
+      loadMarkerCss(expectedApiOrigin + '/agent-marker.css')
         .then(injectMarkerCss)
         .catch(function () { /* non-fatal */ });
     } catch (_) { /* ignore */ }
@@ -109,13 +132,31 @@
 
   function repositionResolvedPins() {
     if (!state.overlay || !markersAPI) return;
+    // An app that re-renders replaces the pinned element with a new one; find
+    // the pins again by selector instead of hiding their markers.
+    var replaced = false;
+    state.overlay.markersById.forEach(function (m) {
+      if (m.element && m.element.isConnected === false) replaced = true;
+    });
+    if (replaced) { resolveAllPins(); return; }
+    // Every marker is placed or hidden: one whose element was not found has no
+    // position and must not sit at the overlay's origin.
     var markers = [];
     state.overlay.markersById.forEach(function (m) {
-      if (m.status === 'resolved' || m.status === 'drifted-recoverable') {
-        markers.push({ target: m.element || null, el: m.el });
-      }
+      var found = m.status === 'resolved' || m.status === 'drifted-recoverable';
+      markers.push({ target: found ? m.element || null : null, el: m.el });
     });
     markersAPI.applyRects(markers, window);
+  }
+
+  // Pins not found yet, typically on a page that renders its content after
+  // load; a DOM change may have brought their elements.
+  function hasUnfoundPins() {
+    var unfound = false;
+    if (state.overlay) {
+      state.overlay.markersById.forEach(function (m) { if (!m.element) unfound = true; });
+    }
+    return unfound;
   }
 
   function resolveAllPins() {
@@ -124,6 +165,7 @@
       pins: state.pins,
       pathname: window.location.pathname,
       document: document,
+      win: window,
       utils: utils,
       post: postToParent,
       onResolved: function (pinId, element, status) {
@@ -134,11 +176,33 @@
     repositionResolvedPins();
   }
 
+  // Markers sit in page coordinates. Scrolling a panel inside the page or
+  // resizing moves elements without changing the DOM, so re-measure then too,
+  // once per frame. Capture catches scrolls of inner panels, which do not bubble.
+  var repositionQueued = false;
+  function queueReposition() {
+    if (repositionQueued) return;
+    repositionQueued = true;
+    window.requestAnimationFrame(function () {
+      repositionQueued = false;
+      repositionResolvedPins();
+    });
+  }
+  document.addEventListener('scroll', queueReposition, { capture: true, passive: true });
+  window.addEventListener('resize', queueReposition, { passive: true });
+  // Panels, menus and modals often open by toggling a class or attribute,
+  // which the DOM observer does not watch; check again after a click and once
+  // a transition or animation settles, so a marker hides under a panel that
+  // now covers its element.
+  ['click', 'transitionend', 'animationend'].forEach(function (type) {
+    document.addEventListener(type, queueReposition, { capture: true, passive: true });
+  });
+
   function startMutationLoop() {
     if (!batcherAPI || !batcherAPI.MutationBatcher) return;
     var batcher = new batcherAPI.MutationBatcher({
       onDrain: function (count, fullReresolve) {
-        if (fullReresolve) resolveAllPins();
+        if (fullReresolve || hasUnfoundPins()) resolveAllPins();
         else repositionResolvedPins();
       },
     });
@@ -179,6 +243,7 @@
         el: el, anchor: pin.dom_anchor, status: 'resolved', element: null,
       });
     });
+    if (markersAPI.setMarkersPassThrough) markersAPI.setMarkersPassThrough(state.overlay.markersById, state.mode === 'pin');
     resolveAllPins();
   }
 
@@ -398,6 +463,9 @@
     if (state.overlay && state.overlay.root && state.overlay.root.classList) {
       state.overlay.root.classList.toggle('hunkyard-marker-root--pin-mode', value === 'pin');
     }
+    if (state.overlay && markersAPI && markersAPI.setMarkersPassThrough) {
+      markersAPI.setMarkersPassThrough(state.overlay.markersById, value === 'pin');
+    }
   }
 
   function updateCursor() {
@@ -493,6 +561,7 @@
       outer_html: utils.truncateOuterHTML(el.outerHTML || '', 2048),
       viewport_width: window.innerWidth,
       viewport_height: window.innerHeight,
+      fingerprint: utils.elementFingerprint(el, window),
     };
   }
 
@@ -580,8 +649,10 @@
   function emitSelection() {
     if (!state.pendingSelection) return;
     var sel = state.pendingSelection;
+    var selectionId = 'sel_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
     var msg = {
       type: A2C.SELECTION,
+      selection_id: selectionId,
       dom_anchor: sel.anchor,
       pointer: sel.pointer,
     };
@@ -598,6 +669,7 @@
       }
     }
     postToParent(msg);
+    capturePinScreenshot(selectionId, sel.target);
   }
 
   // ---------- Right-click ancestor menu ----------

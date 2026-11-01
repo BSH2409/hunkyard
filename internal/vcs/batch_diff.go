@@ -24,7 +24,7 @@ type DiffSpec struct {
 }
 
 // BatchDiffer computes diffs and counts for many files in one VCS call.
-// Backends without it (sapling, jj) keep the per-file path.
+// Backends without it keep the per-file path.
 type BatchDiffer interface {
 	DiffAll(ctx context.Context, dir string, spec DiffSpec, changes []FileChange) (map[string][]DiffHunk, error)
 	NumstatAll(ctx context.Context, dir string, spec DiffSpec, changes []FileChange) (map[string]NumstatEntry, error)

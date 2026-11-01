@@ -6008,9 +6008,8 @@ func TestHunkyardJSON_LegacyNoReviewType(t *testing.T) {
 
 func TestComment_DriftedOnRound_RoundTrip(t *testing.T) {
 	in := Comment{
-		ID:             "p1",
+		ID:             "c1",
 		Body:           "hi",
-		DOMAnchor:      &DOMAnchor{Pathname: "/", CSSSelector: "h2"},
 		Drifted:        true,
 		DriftedOnRound: 3,
 	}

@@ -13,7 +13,7 @@ import (
 func TestExplicitEmptyPreferenceRoot(t *testing.T) {
 	home := t.TempDir()
 	setHome(t, home)
-	t.Setenv("LEARN_PREFERENCES_HOME", filepath.Join(home, "canonical"))
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", filepath.Join(home, "canonical"))
 	for _, root := range []string{" ", string(filepath.Separator)} {
 		if _, err := Open(Config{Root: root}); err == nil {
 			t.Fatal("invalid root accepted")
@@ -31,7 +31,7 @@ func TestExplicitEmptyPreferenceRoot(t *testing.T) {
 func TestConfigRoot(t *testing.T) {
 	home := t.TempDir()
 	setHome(t, home)
-	t.Setenv("LEARN_PREFERENCES_HOME", "")
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", "")
 	config, err := resolveConfig(Config{})
 	if err != nil || config.Root != filepath.Join(home, ".agents") || config.Clock == nil {
 		t.Fatalf("default configuration: %#v, %v", config, err)
@@ -39,12 +39,12 @@ func TestConfigRoot(t *testing.T) {
 	if _, err := os.Stat(config.Root); !os.IsNotExist(err) {
 		t.Fatal("configuration resolution wrote state")
 	}
-	t.Setenv("LEARN_PREFERENCES_HOME", filepath.Join(home, "custom"))
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", filepath.Join(home, "custom"))
 	config, err = resolveConfig(Config{})
 	if err != nil || config.Root != filepath.Join(home, "custom") {
-		t.Fatalf("LEARN_PREFERENCES_HOME precedence: %#v, %v", config, err)
+		t.Fatalf("HUNKYARD_PREFERENCES_HOME precedence: %#v, %v", config, err)
 	}
-	t.Setenv("LEARN_PREFERENCES_HOME", "")
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", "")
 	t.Setenv("CODEX_HOME", filepath.Join(home, "codex"))
 	config, err = resolveConfig(Config{})
 	if err != nil || config.Root != filepath.Join(home, ".agents") {
@@ -60,7 +60,7 @@ func TestConfigRoot(t *testing.T) {
 func TestDefaultPreferenceRootAndPrivateModes(t *testing.T) {
 	home := t.TempDir()
 	setHome(t, home)
-	t.Setenv("LEARN_PREFERENCES_HOME", "")
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", "")
 	s, err := Open(Config{})
 	if err != nil || s.config.Root != filepath.Join(home, ".agents") {
 		t.Fatal("default root differs", err)
@@ -77,7 +77,7 @@ func TestDefaultPreferenceRootAndPrivateModes(t *testing.T) {
 			t.Fatalf("private mode differs for %s: %v", item.path, err)
 		}
 	}
-	t.Setenv("LEARN_PREFERENCES_HOME", filepath.Join(home, "custom"))
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", filepath.Join(home, "custom"))
 	custom, err := resolveConfig(Config{})
 	if err != nil || custom.Root != filepath.Join(home, "custom") {
 		t.Fatal("explicit canonical root ignored", err)
@@ -86,7 +86,7 @@ func TestDefaultPreferenceRootAndPrivateModes(t *testing.T) {
 
 func TestBlankHomeUsesAccountHomeWithoutWriting(t *testing.T) {
 	setHome(t, "")
-	t.Setenv("LEARN_PREFERENCES_HOME", "")
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", "")
 	account, err := user.Current()
 	if err != nil {
 		t.Skip("account home lookup unavailable")

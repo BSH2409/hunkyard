@@ -55,8 +55,3 @@ func ParseLineSpec(spec string) (start, end int, err error) {
 func ListCommentsFromHunkyardJSON(cj HunkyardJSON, unresolvedOnly bool) []ListedComment {
 	return listCommentsFromHunkyardJSON(cj, unresolvedOnly)
 }
-
-// FormatCommentsText renders listed comments as human-readable text.
-func FormatCommentsText(entries []ListedComment, unresolvedOnly bool) string {
-	return formatCommentsText(entries, unresolvedOnly)
-}

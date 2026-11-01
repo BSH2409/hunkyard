@@ -40,6 +40,13 @@ func (s *Server) pauseIfIdle(idle time.Duration, now time.Time) bool {
 	if now.Sub(sess.LastActivity()) < idle || sess.AgentTurnActive(now, 3*idle) {
 		return false
 	}
+	// A request counts itself before checking pausing, and the pause is set
+	// before this re-check, so a request is either seen here or refused.
+	s.pausing.Store(true)
+	if s.inFlight.Load() > 0 {
+		s.pausing.Store(false)
+		return false
+	}
 	payload, _ := json.Marshal(map[string]string{
 		"review_id": sess.SessionKey,
 		"command":   "hunkyard --session " + sess.SessionKey,

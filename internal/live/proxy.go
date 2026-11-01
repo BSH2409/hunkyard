@@ -14,6 +14,7 @@ import (
 	"net/http/httputil"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -27,6 +28,9 @@ var agentScriptFiles = []string{
 	"agent-mutation-batcher.js",
 	"agent-resolution.js",
 	"agent-reanchor-state.js",
+	"snapdom.min.js",
+	"agent-pin-marker.js",
+	"agent-capture.js",
 	"hunkyard-agent.js",
 }
 
@@ -171,23 +175,23 @@ const swShim = `<script>
 // text/html response.
 const maxHTMLBodyBytes = 25 << 20
 
+// setPagePolicy applies localonly.PagePolicy, dropping any policy when it is empty.
+func setPagePolicy(h http.Header) {
+	if policy := localonly.PagePolicy(); policy != "" {
+		h.Set("Content-Security-Policy", policy)
+		return
+	}
+	h.Del("Content-Security-Policy")
+}
+
 //nolint:gocyclo // Response rewriting handles status, content encoding, and local resource policy together.
 func makeModifyResponse(apiPort int, upstream *url.URL) func(*http.Response) error {
 	return func(resp *http.Response) error {
 		if localonly.Enabled() {
-			resp.Header.Set("Content-Security-Policy", localonly.PreviewContentSecurityPolicy)
+			setPagePolicy(resp.Header)
 			resp.Header.Set("Referrer-Policy", "no-referrer")
-			if location := resp.Header.Get("Location"); location != "" {
-				parsed, err := url.Parse(location)
-				if err != nil {
-					return err
-				}
-				if parsed.IsAbs() || parsed.Host != "" {
-					if err := localonly.CheckURL(upstream.ResolveReference(parsed).String()); err != nil {
-						return err
-					}
-				}
-			}
+			// An off-site Location never reaches the frame: rewriteRedirect
+			// replaces it with the notice stub, so the proxy follows nothing.
 		}
 		if resp.StatusCode >= 300 && resp.StatusCode < 400 {
 			return rewriteRedirect(resp, upstream)
@@ -199,7 +203,7 @@ func makeModifyResponse(apiPort int, upstream *url.URL) func(*http.Response) err
 		}
 		resp.Header.Del("Content-Security-Policy")
 		if localonly.Enabled() {
-			resp.Header.Set("Content-Security-Policy", localonly.PreviewContentSecurityPolicy)
+			setPagePolicy(resp.Header)
 		}
 		resp.Header.Del("X-Frame-Options")
 		resp.Header.Del("Content-Length")
@@ -447,13 +451,13 @@ func rewriteCookies(resp *http.Response) {
 	resp.Header["Set-Cookie"] = out
 }
 
-// bindProxyServer creates a TCP listener on 127.0.0.1:(apiPort+1) and
-// returns (listener, *http.Server, error). The server is not yet started;
-// caller calls srv.Serve(ln).
-// BindProxyServer creates a TCP listener on 127.0.0.1:(apiPort+1) and returns a proxy server.
-func BindProxyServer(upstreamOrigin string, apiPort int, upstreamCookies string) (net.Listener, *http.Server, error) {
+// BindProxyServer listens on host:(apiPort+1), the review's own listen host,
+// so a proxy for a review bound to 0.0.0.0 (Docker) is reachable through its
+// published port. An empty host means every interface, as for the review.
+// The server is not started; the caller runs srv.Serve(ln).
+func BindProxyServer(host, upstreamOrigin string, apiPort int, upstreamCookies string) (net.Listener, *http.Server, error) {
 	proxyPort := apiPort + 1
-	ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", proxyPort))
+	ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(proxyPort)))
 	if err != nil {
 		return nil, nil, fmt.Errorf("proxy port %d already in use: %w", proxyPort, err)
 	}

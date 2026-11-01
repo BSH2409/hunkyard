@@ -127,12 +127,10 @@ func stopDaemonOnApproval(approved bool, entry daemon.SessionEntry, key string, 
 			}
 		}
 	}
-	if !cleanup {
-		return
-	}
 	// A stopping daemon can still write the review, and a daemon started
-	// meanwhile under the same key has loaded it, so the review goes only once
-	// the daemon has exited and nobody took the key over.
+	// meanwhile under the same key has loaded it, so the review (or, with
+	// cleanup off, its pin screenshots) goes only once the daemon has exited
+	// and nobody took the key over.
 	if !waitForDaemonExit(entry.PID) {
 		return
 	}
@@ -184,11 +182,18 @@ func removeStaleReviewPath(path string) bool {
 	return true
 }
 
+// cleanupOnApproval removes an approved review when cleanup_on_approve is on.
+// Pin screenshots are deleted on approval either way: they are captures of
+// the reviewed app, kept only while the review is open.
 func cleanupOnApproval(approved bool, reviewPath string, cleanupEnabled bool) {
-	if !(approved && cleanupEnabled && reviewPath != "") {
+	if !approved || reviewPath == "" {
 		return
 	}
-	_ = removeStaleReviewPath(reviewPath)
+	// First: a folder kept for its published feedback keeps nothing else.
+	removePinScreenshots(reviewPath)
+	if cleanupEnabled {
+		_ = removeStaleReviewPath(reviewPath)
+	}
 }
 
 func dirArgs(paths []string) []string {

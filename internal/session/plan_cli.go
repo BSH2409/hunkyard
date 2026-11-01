@@ -3,7 +3,6 @@ package session
 import (
 	"bytes"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -81,24 +80,24 @@ func readPlanContent(pc planConfig) ([]byte, error) {
 		content, err = os.ReadFile(pc.filePath)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", pc.filePath, err)
-			return nil, clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+			return nil, clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 		}
 	} else if pc.stdinExpected {
 		if !IsStdinPipe() {
 			fmt.Fprintln(os.Stderr, "Error: no file specified and stdin is not a pipe")
 			fmt.Fprintln(os.Stderr, "Usage: hunkyard plan --name <slug> <file>  or  echo \"content\" | hunkyard plan --name <slug>")
-			return nil, clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+			return nil, clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 		}
 		content, err = io.ReadAll(os.Stdin)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error reading stdin: %v\n", err)
-			return nil, clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+			return nil, clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 		}
 	}
 
 	if len(strings.TrimSpace(string(content))) == 0 {
 		fmt.Fprintln(os.Stderr, "Error: plan content is empty")
-		return nil, clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+		return nil, clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 	}
 	return content, nil
 }
@@ -135,7 +134,7 @@ func RunPlan(args []string) error {
 	ver, err := SavePlanVersion(storageDir, content)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error saving plan: %v\n", err)
-		return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+		return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 	}
 
 	cwd, _ := daemon.ResolvedCWD()
@@ -187,7 +186,7 @@ func savePlanWithoutReview(stdout, stderr io.Writer, storageDir, slug string, co
 	ver, err := SavePlanVersion(storageDir, content)
 	if err != nil {
 		fmt.Fprintf(stderr, "Error saving plan: %v\n", err)
-		return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+		return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 	}
 	if !quiet {
 		fmt.Fprintf(stderr, "Plan '%s' saved as v%03d (%d bytes)\n", slug, ver, len(content))

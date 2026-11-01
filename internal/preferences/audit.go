@@ -66,8 +66,7 @@ func (s *Store) audit(duplicates bool) auditResult {
 		SchemaVersion int            `yaml:"schema_version"`
 		Packs         map[string]any `yaml:"packs"`
 	}
-	body, generated := sourceMirrorBody(data)
-	if err != nil || !generated || decodeYAML(body, &mirror) != nil || mirror.SchemaVersion != schemaVersion || !sameValue(mirror.Packs, current.SourcePacks) {
+	if err != nil || !bytes.HasPrefix(data, []byte(sourceMirrorHeader)) || decodeYAML(bytes.TrimPrefix(data, []byte(sourceMirrorHeader)), &mirror) != nil || mirror.SchemaVersion != schemaVersion || !sameValue(mirror.Packs, current.SourcePacks) {
 		add("source_mirror_mismatch")
 	}
 	if current.SourcePacks["code-like-him"] != nil {

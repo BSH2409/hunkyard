@@ -32,12 +32,12 @@ import (
 //     TestLoadConfigFile_AutoViewedPatterns*, TestMergeConfigs_AutoViewedPatternsUnion);
 //     base_branch likewise (TestBaseBranchConfig). This file only adds the
 //     LoadConfig-level union/no-default check for auto_viewed_patterns.
-//   author: project non-empty wins; empty -> VCS-specific fallback in
-//     LoadConfig step 5 ("sl"/"sapling" -> slUserName then git, "jj"/"jujutsu"
-//     -> jjUserName then git, default git then sl), each shelling out
-//     (sl strips the " <email>" suffix). Consumer: DaemonCLIConfig.Author.
-//   vcs: project non-empty wins. Consumers: LoadConfig author fallback and
-//     server daemon_cli.go resolveVCSOverride(flag, cfg.VCS) -> vcs.DetectVCS.
+//   author: project non-empty wins; empty -> `git config user.name` in
+//     LoadConfig step 5. Consumer: DaemonCLIConfig.Author.
+//   vcs: only "git" is valid; any other value is cleared with a stderr warning
+//     per file at load (Sapling and Jujutsu were removed in v1.0.3). Project
+//     non-empty wins on merge. Consumer: server daemon_cli.go
+//     resolveVCSOverride(flag, cfg.VCS) -> vcs.DetectVCS.
 //   default_markdown_view: invalid values cleared with a stderr warning per
 //     file at load (validDefaultMarkdownView); preferProjectString on merge.
 //     Consumer: /api/config (server.go) -> frontend initial markdown view.
@@ -432,12 +432,12 @@ func TestAuditReviewAuthorEndToEnd(t *testing.T) {
 	}
 }
 
-// TestAuditReviewAuthorVCSFallback exercises LoadConfig step 5: the author
-// fallback chain is selected by the merged vcs key. Shims replace git/sl/jj on
-// PATH so the fallback order and the sl email-stripping are deterministic.
+// TestAuditReviewAuthorVCSFallback exercises LoadConfig step 5: an unset author
+// falls back to the git user name, whatever the vcs key says. Shims replace
+// git and jj on PATH so the result is deterministic.
 func TestAuditReviewAuthorVCSFallback(t *testing.T) {
 	if runtime.GOOS == "windows" {
-		t.Skip("fake git/sl/jj shims are POSIX shell scripts")
+		t.Skip("fake git/jj shims are POSIX shell scripts")
 	}
 	tests := []struct {
 		name        string
@@ -446,57 +446,27 @@ func TestAuditReviewAuthorVCSFallback(t *testing.T) {
 		want        string
 	}{
 		{
-			name:        "default prefers git",
+			name:        "default uses git",
 			projectJSON: `{}`,
-			shims:       map[string]string{"git": "echo 'Git Shim User'", "sl": "echo 'Sl Shim User <sl@example.com>'"},
+			shims:       map[string]string{"git": "echo 'Git Shim User'"},
 			want:        "Git Shim User",
 		},
 		{
-			name:        "default falls back to sl when git fails",
-			projectJSON: `{}`,
-			shims:       map[string]string{"git": "exit 1", "sl": "echo 'Sl Shim User <sl@example.com>'"},
-			want:        "Sl Shim User",
-		},
-		{
-			name:        "jj preferred when vcs=jj",
+			name:        "removed vcs value still uses git",
 			projectJSON: `{"vcs": "jj"}`,
 			shims:       map[string]string{"jj": "echo 'JJ Shim User'", "git": "echo 'Git Shim User'"},
-			want:        "JJ Shim User",
-		},
-		{
-			name:        "jj falls back to git when jj missing",
-			projectJSON: `{"vcs": "jj"}`,
-			shims:       map[string]string{"jj": "exit 1", "git": "echo 'Git Shim User'"},
 			want:        "Git Shim User",
 		},
 		{
-			name:        "jujutsu alias selects jj",
-			projectJSON: `{"vcs": "jujutsu"}`,
-			shims:       map[string]string{"jj": "echo 'JJ Shim User'"},
-			want:        "JJ Shim User",
-		},
-		{
-			name:        "sl strips email suffix",
-			projectJSON: `{"vcs": "sl"}`,
-			shims:       map[string]string{"sl": "echo 'Sl Shim User <sl@example.com>'"},
-			want:        "Sl Shim User",
-		},
-		{
-			name:        "sapling alias selects sl",
-			projectJSON: `{"vcs": "sapling"}`,
-			shims:       map[string]string{"sl": "echo 'Sl Shim User <sl@example.com>'"},
-			want:        "Sl Shim User",
-		},
-		{
-			name:        "sl falls back to git when sl missing",
-			projectJSON: `{"vcs": "sl"}`,
-			shims:       map[string]string{"sl": "exit 1", "git": "echo 'Git Shim User'"},
-			want:        "Git Shim User",
+			name:        "git failure leaves author empty",
+			projectJSON: `{}`,
+			shims:       map[string]string{"git": "exit 1"},
+			want:        "",
 		},
 		{
 			name:        "explicit author skips fallback entirely",
-			projectJSON: `{"vcs": "jj", "author": "Configured Author"}`,
-			shims:       map[string]string{"jj": "echo 'JJ Shim User'", "git": "echo 'Git Shim User'"},
+			projectJSON: `{"author": "Configured Author"}`,
+			shims:       map[string]string{"git": "echo 'Git Shim User'"},
 			want:        "Configured Author",
 		},
 	}
@@ -530,9 +500,8 @@ func TestAuditReviewVCSMerge(t *testing.T) {
 		project string
 		want    string
 	}{
-		{"project overrides global", "git", "sl", "sl"},
-		{"global kept when project empty", "jj", "", "jj"},
-		{"project sets when global empty", "", "jj", "jj"},
+		{"global kept when project empty", "git", "", "git"},
+		{"project sets when global empty", "", "git", "git"},
 		{"both empty stays empty (auto-detect)", "", "", ""},
 	}
 	for _, tt := range tests {
@@ -551,8 +520,8 @@ func TestAuditReviewVCSEndToEnd(t *testing.T) {
 	writeAuditReviewConfig(t, homeDir, `{"vcs": "git", "author": "A"}`)
 	projectDir := t.TempDir()
 	writeAuditReviewConfig(t, projectDir, `{"vcs": "jj", "author": "A"}`)
-	if got := LoadConfig(projectDir).VCS; got != "jj" {
-		t.Errorf("VCS = %q, want jj (project wins end-to-end)", got)
+	if got := LoadConfig(projectDir).VCS; got != "git" {
+		t.Errorf("VCS = %q, want git (removed project value is cleared at load)", got)
 	}
 
 	// No project config: global value stands.

@@ -105,7 +105,7 @@ func TestClientExitsOnFinish(t *testing.T) {
 	port := entry.Port
 
 	// Whatever happens, don't leave the client (or its daemon, or any of the
-	// daemon's git/gh/sl children) running. On Windows the Job Object set up
+	// daemon's git/gh children) running. On Windows the Job Object set up
 	// above lets us terminate the entire tree atomically; on Unix we fall
 	// back to terminateProcess on the known daemon PID plus killing the
 	// parent client. This Cleanup runs before the t.TempDir RemoveAll

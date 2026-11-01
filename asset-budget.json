@@ -2,6 +2,11 @@
   "$comment": "Perf budgets for embedded frontend assets and the Go binary (which embeds web/ via embed.FS). Sizes are gzip bytes for JS, raw bytes for the binary. Caps sit ~15-20% above 2026-09 main so legitimate growth has room but accidental bloat (unminified vendor, new heavy dep, committed fixture) fails CI. Recalibrate quarterly or after intentional vendor bumps: run scripts/check-asset-budget.sh, verify the growth is intended, then update caps here. Files ending in .gz are stored precompressed (web/pierre, served with Content-Encoding: gzip) and are measured as stored. pierreDirBytes caps the whole web/pierre directory (entry + worker + every Shiki grammar chunk) since all of it is embedded in the binary.",
   "files": [
     {
+      "path": "web/snapdom.min.js",
+      "gzipBytes": 100000,
+      "note": "SnapDOM 3.3.5 for pin screenshots; injected only into live/preview frames"
+    },
+    {
       "path": "web/mermaid.min.js",
       "gzipBytes": 1900000,
       "note": "largest vendor dep (~70% of shipped JS); any mermaid bump shows here"

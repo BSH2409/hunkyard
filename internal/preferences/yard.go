@@ -135,7 +135,7 @@ func (s *Store) YardPromote(id string) error {
 			if record(r["scope"])["kind"] == "global" {
 				return fmt.Errorf("rule is already global")
 			}
-			_, err := s.YardCreateRule(textField(r["directive"]), "global", "", stringValues(r["surfaces"]), "Promoted to global in the Preference Yard")
+			_, err := s.YardCreateRule(textField(r["directive"]), "global", "", "", stringValues(r["surfaces"]), "Promoted to global in the Preference Yard")
 			return err
 		}
 	}
@@ -144,8 +144,10 @@ func (s *Store) YardPromote(id string) error {
 
 // YardCreateRule records an explicit rule the user created in the Yard, for
 // example from a review comment that was ignored as too vague.
-func (s *Store) YardCreateRule(directive, scope, repoKey string, surfaces []string, feedback string) (CaptureResult, error) {
-	return s.Capture(CaptureInput{Feedback: feedback, Directive: directive, Scope: scope, RepoKey: repoKey, Surfaces: surfaces, Explicit: true, Source: "cli", SessionID: "yard", TurnID: randomID()})
+// cwd names the repository a repository-scoped rule belongs to when repoKey
+// is empty.
+func (s *Store) YardCreateRule(directive, scope, repoKey, cwd string, surfaces []string, feedback string) (CaptureResult, error) {
+	return s.Capture(CaptureInput{Feedback: feedback, Directive: directive, Scope: scope, RepoKey: repoKey, CWD: cwd, Surfaces: surfaces, Explicit: true, Source: "cli", SessionID: "yard", TurnID: randomID()})
 }
 
 // YardRunMaintenance starts automatic maintenance in the background.

@@ -216,6 +216,8 @@ func TestListedCommentJSONIncludesAllCommentFields(t *testing.T) {
 		Resolved: true, ResolvedRound: 2, Live: true, CarriedForward: true,
 		ReviewRound: 1, GitHubID: 99, HeadSHA: "abc", DiffScope: "layer",
 		PinNumber: 5, FocusKey: "pr:42",
+		PinStatus: "outdated", PinCheckedRound: 2, ScreenshotStatus: "failed", ScreenshotReason: "blank",
+		PinScreenshot: &PinScreenshot{File: "a.png"},
 		DOMAnchor: &DOMAnchor{
 			Pathname: "/preview-content/", CSSSelector: "#main", TagChain: []string{"MAIN"},
 			AccessibleName: "title", OuterHTML: "<main/>", ViewportWidth: 100, ViewportHeight: 200,
@@ -540,5 +542,36 @@ func TestRunCommentsSession(t *testing.T) {
 	}
 	if !strings.Contains(string(out), "from session") {
 		t.Fatalf("output = %q, want session comment body", out)
+	}
+}
+
+func TestCommentHeaderMarksOutdatedPin(t *testing.T) {
+	scope := "/"
+	pin := ListedComment{Scope: "file", Path: &scope}
+	pin.ID, pin.PinNumber, pin.PinStatus = "p1", 2, "outdated"
+	if got := formatCommentHeader(pin); !strings.HasSuffix(got, " (outdated)") {
+		t.Errorf("outdated pin header = %q", got)
+	}
+	pin.PinStatus = "current"
+	if got := formatCommentHeader(pin); strings.Contains(got, "outdated") {
+		t.Errorf("current pin header = %q", got)
+	}
+}
+
+func TestListedCommentDecodesItsOwnFields(t *testing.T) {
+	path := "/settings"
+	in := ListedComment{Scope: "file", Path: &path}
+	in.ID, in.Body = "p1", "pay"
+	in.DOMAnchor = &DOMAnchor{Pathname: "/settings", CSSSelector: "#pay"}
+	data, err := json.Marshal(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out ListedComment
+	if err := json.Unmarshal(data, &out); err != nil {
+		t.Fatal(err)
+	}
+	if out.Scope != "file" || out.Path == nil || *out.Path != path || out.ID != "p1" || out.DOMAnchor == nil {
+		t.Errorf("decoded %+v (path %v)", out, out.Path)
 	}
 }

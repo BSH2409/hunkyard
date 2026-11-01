@@ -53,25 +53,6 @@ type testServerConfig struct {
 	remoteFiles bool
 }
 
-func focusKeyArgsFromServerConfig(sc *testServerConfig) []string {
-	if sc == nil {
-		return nil
-	}
-	return FocusKeyArgs(&CLIReviewConfig{Files: sc.files, Focus: sc.focus})
-}
-
-func withDaemonFocus(t *testing.T, f *Focus) {
-	t.Helper()
-	restore := SetProbeDaemonFocusFnForTest(func() *Focus {
-		if f == nil {
-			return nil
-		}
-		out := *f
-		return &out
-	})
-	t.Cleanup(restore)
-}
-
 func captureStderr(t *testing.T, fn func()) string {
 	t.Helper()
 	old := os.Stderr

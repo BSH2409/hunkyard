@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { execFileSync } from 'child_process';
 import * as fs from 'fs';
 import * as path from 'path';
-import { clearAllComments, loadPage, sessionCwd } from './helpers';
+import { clearAllComments, countRequests, loadPage, sessionCwd } from './helpers';
 
 const PROBE = 'banner-probe.txt';
 
@@ -18,17 +18,23 @@ test('changes outside a round show a Refresh banner instead of redrawing', async
   await loadPage(other);
   const banner = page.locator('#reviewUpdatesBanner');
   await expect(banner).toBeHidden();
+  const reloads = countRequests(page, '/api/session');
   try {
     fs.writeFileSync(path.join(dir, PROBE), 'staged outside the round\n');
     git('add', PROBE); // moves the index, which the watcher probes every second
     await expect(banner).toBeVisible({ timeout: 10_000 });
     await expect(banner).toContainText('This review has updates');
     await expect(other.locator('#reviewUpdatesBanner')).toBeVisible();
-    // Nothing redrew: the new file is not in the list until Refresh.
+    // Nothing redrew. The watcher sends its other events on the same tick, so
+    // wait past the next tick (1 s) before checking that nothing reloaded.
+    await page.waitForTimeout(1500); // a negative is only observable over time
+    expect(reloads.n).toBe(0);
     await expect(page.locator(`.tree-file[data-tree-path="${PROBE}"]`)).toHaveCount(0);
     await page.locator('#reviewUpdatesRefresh').click();
     await expect(banner).toBeHidden();
     await expect(page.locator(`.tree-file[data-tree-path="${PROBE}"]`)).toHaveCount(1);
+    // Positive control: the counter does see the reload Refresh makes.
+    expect(reloads.n).toBeGreaterThan(0);
     // A fresh load does not show the banner once refreshed.
     await page.reload();
     await expect(page.locator('.loading')).toBeHidden();

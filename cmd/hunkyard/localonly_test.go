@@ -19,8 +19,19 @@ func TestLocalRuntimeDoesNotProbeForgeOrOtherAgents(t *testing.T) {
 		if err := os.WriteFile(html, []byte("<html><body>synthetic preview</body></html>"), 0600); err != nil {
 			t.Fatal(err)
 		}
-		if routePositionalArgs([]string{html}) != positionalRouteReview {
-			t.Fatal("HTML source was routed to executable preview")
+		for _, tc := range []struct {
+			args []string
+			want positionalRoute
+		}{
+			{[]string{html}, positionalRoutePreview},
+			{[]string{"http://localhost:3000"}, positionalRouteLive},
+			{[]string{"http://127.0.0.1:3000/app"}, positionalRouteLive},
+			{[]string{"https://github.com/o/r/pull/1"}, positionalRouteReview},
+			{[]string{"README.md"}, positionalRouteReview},
+		} {
+			if got := routePositionalArgs(tc.args); got != tc.want {
+				t.Fatalf("local-only route %v = %v, want %v", tc.args, got, tc.want)
+			}
 		}
 		if got := checkForgeCLIs(); len(got) != 0 {
 			t.Fatal("local runtime probed forge authentication")
@@ -34,7 +45,7 @@ func TestLocalRuntimeDoesNotProbeForgeOrOtherAgents(t *testing.T) {
 		}
 		for _, backend := range []string{"jj", "sl"} {
 			if vcs.DetectVCS(backend) != nil {
-				t.Fatal("unvalidated VCS backend is enabled", backend)
+				t.Fatal("removed VCS backend is enabled", backend)
 			}
 		}
 		dir := t.TempDir()
@@ -43,7 +54,7 @@ func TestLocalRuntimeDoesNotProbeForgeOrOtherAgents(t *testing.T) {
 		}
 		t.Chdir(dir)
 		if vcs.DetectVCS("") != nil {
-			t.Fatal("unvalidated VCS backend was auto-detected")
+			t.Fatal("a .jj directory selected a VCS backend outside git")
 		}
 		return
 	}

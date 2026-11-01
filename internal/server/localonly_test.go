@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -39,5 +40,34 @@ func TestLocalServerBlocksOutboundRoutesAndSetsCSP(t *testing.T) {
 	}
 	if s.prList != nil || s.agentCmd != "" {
 		t.Fatal("background provider or agent command remains enabled")
+	}
+}
+
+// The review may be opened by any host it listens on (a LAN or container
+// address); its page must be allowed to frame the proxy on that host.
+func TestReviewPageMayFrameTheProxyOnItsOwnHost(t *testing.T) {
+	s, _ := newTestServer(t)
+	req := httptest.NewRequest(http.MethodGet, "/api/health", nil)
+	req.Host = "172.17.0.2:8000"
+	response := httptest.NewRecorder()
+	s.ServeHTTP(response, req)
+	csp := response.Header().Get("Content-Security-Policy")
+	if !strings.Contains(csp, "frame-src 'self' http://172.17.0.2:*") {
+		t.Errorf("review page policy = %q, want frame-src to allow the proxy on 172.17.0.2", csp)
+	}
+}
+
+func TestPreviewContentLoadsItsOwnResourcesByDefault(t *testing.T) {
+	s, _ := newTestServer(t)
+	response := httptest.NewRecorder()
+	s.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/preview-content/", nil))
+	if csp := response.Header().Get("Content-Security-Policy"); csp != "" {
+		t.Errorf("preview content policy = %q, want none by default", csp)
+	}
+	t.Setenv("HUNKYARD_BLOCK_EXTERNAL", "1")
+	response = httptest.NewRecorder()
+	s.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/preview-content/", nil))
+	if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "connect-src 'self'") {
+		t.Errorf("preview content policy with HUNKYARD_BLOCK_EXTERNAL=1 = %q, want the strict policy", csp)
 	}
 }

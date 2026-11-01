@@ -10,6 +10,7 @@ type (
 	HunkyardJSONFile = session.HunkyardJSONFile
 	Comment          = session.Comment
 	DOMAnchor        = session.DOMAnchor
+	PinScreenshot    = session.PinScreenshot
 	Reply            = session.Reply
 	Focus            = session.Focus
 	inheritedScope   = session.InheritedScope
