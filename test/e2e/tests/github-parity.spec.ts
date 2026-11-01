@@ -27,11 +27,13 @@ test.beforeAll(async () => {
     try { for (const name of readdirSync(sessions)) { if (!name.endsWith('.json')) continue; const entry = JSON.parse(readFileSync(path.join(sessions, name), 'utf8')); if (entry.pid === daemon.pid) { url = `http://localhost:${entry.port}`; return entry.port; } } } catch {}
     return 0;
   }).toBeGreaterThan(0);
+  // The port is bound before the session is ready; endpoints answer 503 until then.
+  await expect.poll(async () => { try { return (await fetch(url + '/api/session')).status; } catch { return 0; } }).toBe(200);
 });
 
 test.afterAll(async () => {
   if (daemon?.exitCode === null && daemon?.signalCode === null) { const exited = once(daemon, 'exit'); daemon.kill('SIGTERM'); await exited; }
-  if (root) rmSync(root, { recursive: true, force: true });
+  if (root) rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 }); // Windows releases the daemon's handles after exit
 });
 
 for (const theme of ['light', 'dark']) {
