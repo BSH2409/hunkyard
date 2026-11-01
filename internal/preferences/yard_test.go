@@ -79,7 +79,7 @@ func TestYardPromoteAndRetire(t *testing.T) {
 			t.Fatal("retired rule still active")
 		}
 	}
-	if _, err := s.YardCreateRule("Prefer early returns.", "global", "", []string{"ruby"}, "Better formatting is required here"); err != nil {
+	if _, err := s.YardCreateRule("Prefer early returns.", "global", "", "", []string{"ruby"}, "Better formatting is required here"); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -58,6 +58,6 @@ func TestPruneRetentionDropsOldSessions(t *testing.T) {
 		t.Fatal("recent session pruned", err)
 	}
 	if filepath.Dir(s.sessionPath("x")) != s.dataPath("sessions") {
-		t.Fatal("session files must live under learn-preferences/sessions")
+		t.Fatal("session files must live under hunkyard-preferences/sessions")
 	}
 }

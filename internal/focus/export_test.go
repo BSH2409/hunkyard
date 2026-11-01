@@ -13,10 +13,6 @@ func setProbeDaemonFocusForTest(fn func() *Focus) (restore func()) {
 	return SetProbeDaemonFocusFnForTest(fn)
 }
 
-func probeDaemonFocusForTest() *Focus {
-	return probeDaemonFocus()
-}
-
 func resolveCommentScopeForTest(override CommentFocusOverride, outputDir string) (InheritedScope, error) {
 	return ResolveCommentScope(override, outputDir)
 }

@@ -89,3 +89,20 @@ test('resolveAllAndEmit calls onResolved with id, element, status', () => {
   resolveAllAndEmit(ctx);
   assert.deepEqual(calls, [['p1', el, 'resolved']]);
 });
+
+test('resolveAllAndEmit reports the pin status it compared', () => {
+  const { resolveAllAndEmit } = require('../agent-resolution.js');
+  const posted = [];
+  const el = { getBoundingClientRect: () => ({ left: 0, top: 0, width: 1, height: 1 }) };
+  resolveAllAndEmit({
+    pins: [{ id: 'p1', dom_anchor: { pathname: '/' } }],
+    pathname: '/',
+    win: { innerWidth: 1280 },
+    utils: {
+      resolvePin: () => ({ status: 'resolved', element: el }),
+      comparePin: (anchor, r, win) => (r.element === el && win.innerWidth === 1280 ? 'outdated' : 'wrong-args'),
+    },
+    post: (m) => posted.push(m),
+  });
+  assert.equal(posted[0].pin_status, 'outdated');
+});

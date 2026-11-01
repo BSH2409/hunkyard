@@ -32,6 +32,7 @@ func main() {
 	registerSlow(mux)
 	registerWidgets(mux)
 	registerShiftMutator(mux)
+	registerPins(mux)
 
 	addr := fmt.Sprintf("127.0.0.1:%d", *port)
 	ln, err := net.Listen("tcp", addr)

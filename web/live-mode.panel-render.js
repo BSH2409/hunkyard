@@ -170,6 +170,7 @@
         c.created_at || '',
         c.updated_at || '',
         c.review_round == null ? '' : c.review_round,
+        c.pin_status || '',
         reviewRound,
         c._replyOpen ? '1' : '0',
         c._replyDraft || '',

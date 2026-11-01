@@ -25,6 +25,24 @@ var (
 	reviewWaiter  func(reviewID string, timeout time.Duration, accept func(batchID string) bool, active func() bool) (batchID, disposition string, ok bool)
 )
 
+// reviewActivity reports the owning agent's turns to its reviews: "turn"
+// while it works, "idle" when it stops. A review never pauses during a turn.
+// cmd/hunkyard wires it; nil means no review integration.
+var reviewActivity func(hostKind, hostSessionID, state string)
+
+// SetReviewActivity wires turn reporting into the preference hooks.
+func SetReviewActivity(report func(hostKind, hostSessionID, state string)) {
+	reviewActivity = report
+}
+
+// reportTurn tells the session's reviews whether its agent is working.
+func (s *Store) reportTurn(sessionID, state string) {
+	if reviewActivity == nil || s.hostKind == "" || sessionID == "" {
+		return
+	}
+	reviewActivity(s.hostKind, sessionID, state)
+}
+
 // SetReviewIntegration wires review lookups into the preference hooks.
 func SetReviewIntegration(notices func(hostKind, hostSessionID string) []ReviewNotice, waiter func(reviewID string, timeout time.Duration, accept func(string) bool, active func() bool) (string, string, bool)) {
 	reviewNotices, reviewWaiter = notices, waiter

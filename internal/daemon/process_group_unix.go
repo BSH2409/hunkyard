@@ -6,7 +6,7 @@ import "os/exec"
 
 // processGroup is a no-op on Unix. The test's existing terminateProcess +
 // processExists path is sufficient: SIGTERM to the daemon brings the whole
-// session down, and child git/sl/gh processes complete fast enough that
+// session down, and child git/gh processes complete fast enough that
 // t.TempDir cleanup never collides with their cwd handles (Unix doesn't
 // hold the directory open the way Windows does anyway).
 type processGroup struct{}

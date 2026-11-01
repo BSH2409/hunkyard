@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -56,33 +57,6 @@ func TestLoadConfigFileMissing(t *testing.T) {
 	}
 	if presence.NoOpen || presence.IgnorePatterns {
 		t.Error("missing file should have no presence flags")
-	}
-}
-
-func TestLoadConfigFile_VCSJJ(t *testing.T) {
-	dir := t.TempDir()
-	configPath := filepath.Join(dir, ".hunkyard.config.json")
-	if err := os.WriteFile(configPath, []byte(`{"vcs": "jj"}`), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	cfg, _, err := LoadConfigFile(configPath)
-	if err != nil {
-		t.Fatalf("loadConfigFile: %v", err)
-	}
-	if cfg.VCS != "jj" {
-		t.Errorf("vcs = %q, want jj", cfg.VCS)
-	}
-}
-
-func TestMergeConfigs_AuthorFallback_JJ_PreservesExplicitAuthor(t *testing.T) {
-	global := Config{VCS: "jj", Author: "Explicit Author"}
-	project := Config{}
-	merged := mergeConfigs(global, project, ConfigPresence{})
-	if merged.VCS != "jj" {
-		t.Errorf("merged.VCS = %q, want jj", merged.VCS)
-	}
-	if merged.Author != "Explicit Author" {
-		t.Errorf("merged.Author = %q, want %q", merged.Author, "Explicit Author")
 	}
 }
 
@@ -1131,5 +1105,53 @@ func TestPreferencesMaintenanceDefaults(t *testing.T) {
 		if got := tt.in.Resolved(); got != tt.want {
 			t.Errorf("Resolved(%+v) = %+v, want %+v", tt.in, got, tt.want)
 		}
+	}
+}
+
+func TestConfigRejectsRemovedVCS(t *testing.T) {
+	tests := []struct {
+		raw         string
+		wantWarning string
+	}{
+		{`{"vcs": "git"}`, ""},
+		{`{}`, ""},
+		{`{"vcs": "jj"}`, `vcs "jj" is no longer supported (Sapling and Jujutsu support was removed in v1.0.3); using git`},
+		{`{"vcs": "jujutsu"}`, `vcs "jujutsu" is no longer supported`},
+		{`{"vcs": "sl"}`, `vcs "sl" is no longer supported`},
+		{`{"vcs": "sapling"}`, `vcs "sapling" is no longer supported`},
+		{`{"vcs": "hg"}`, `unknown vcs "hg"`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.raw, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), ".hunkyard.config.json")
+			if err := os.WriteFile(configPath, []byte(tt.raw), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			old := os.Stderr
+			r, w, err := os.Pipe()
+			if err != nil {
+				t.Fatal(err)
+			}
+			os.Stderr = w
+			cfg, _, loadErr := LoadConfigFile(configPath)
+			_ = w.Close()
+			os.Stderr = old
+			out, _ := io.ReadAll(r)
+			if loadErr != nil {
+				t.Fatalf("LoadConfigFile: %v", loadErr)
+			}
+			if cfg.VCS != "" && cfg.VCS != "git" {
+				t.Errorf("cfg.VCS = %q, want git or unset", cfg.VCS)
+			}
+			if tt.wantWarning == "" {
+				if len(out) != 0 {
+					t.Errorf("unexpected warning: %s", out)
+				}
+				return
+			}
+			if !strings.Contains(string(out), tt.wantWarning) {
+				t.Errorf("warning = %q, want it to contain %q", out, tt.wantWarning)
+			}
+		})
 	}
 }

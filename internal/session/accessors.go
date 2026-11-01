@@ -58,7 +58,11 @@ func (s *Session) Notify(event SSEEvent) { s.notify(event) }
 func (s *Session) LoadHunkyardJSON() { s.loadHunkyardJSON() }
 
 // ClearReviewComments removes all review-level comments from the session.
-func (s *Session) ClearReviewComments() { s.reviewComments = nil }
+func (s *Session) ClearReviewComments() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.reviewComments = nil
+}
 
 // SetLiveRoundStart installs a callback invoked when a live/preview round advances.
 func (s *Session) SetLiveRoundStart(fn func(prevRound, newRound int)) {

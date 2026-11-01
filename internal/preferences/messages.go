@@ -11,9 +11,11 @@ var (
 
 	loadingMessages = []string{"Rummaging for your preferences…", "Checking your stash…", "Loading your nit list…", "Pulling from the yard…"}
 
-	capturingMessages = []string{"Stashing that correction…", "Giving that nit a home…", "Taking the hunk hint…", "Turning scrap into wisdom…"}
+	// Hosts print these under their own hook label ("UserPromptSubmit says:
+	// …"), so each one names Hunkyard as the one doing the work.
+	capturingMessages = []string{"Hunkyard is stashing that correction…", "Hunkyard is giving that nit a home…", "Hunkyard took the hunk hint…", "Hunkyard is turning scrap into wisdom…"}
 
-	afterHookNotes = []string{"Salvaged {n} preferences.", "{n} yard rules aboard.", "{n} lessons out of mothballs.", "{n} nits, freshly picked."}
+	afterHookNotes = []string{"Hunkyard salvaged {n} preferences.", "Hunkyard brought {n} yard rules aboard.", "Hunkyard pulled {n} lessons out of mothballs.", "Hunkyard picked {n} nits, fresh."}
 
 	maintenanceRunningMessages = []string{"Tidying the Preference Yard…", "Taking out the junk…", "Weeding the patch…"}
 

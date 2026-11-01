@@ -90,13 +90,14 @@
 
   function accessibleNameFor(el) {
     // Order: explicit `aria-label` attribute first, then the `ariaLabel` IDL
-    // property, finally fall back to trimmed textContent. All capped at 80.
+    // property, finally the rendered text (innerText keeps table cells and
+    // lines apart; textContent runs them together). All capped at 80.
     const attr = (el.getAttribute && el.getAttribute('aria-label')) || '';
     if (attr) return String(attr).trim().slice(0, 80);
     const idl = el.ariaLabel || '';
     if (idl) return String(idl).trim().slice(0, 80);
-    const text = (el.textContent || '').trim();
-    return text.slice(0, 80);
+    const text = typeof el.innerText === 'string' && el.innerText ? el.innerText : (el.textContent || '');
+    return text.replace(/\s+/g, ' ').trim().slice(0, 80);
   }
 
   function roleFor(el) {
@@ -198,7 +199,9 @@
       const lm = findLandmarkElement(doc, anchor.landmark);
       if (lm) {
         const found = findByRoleAndName(lm, anchor.role, anchor.accessible_name, anchor.tag_chain);
-        if (found.element) {
+        // Several elements share the role and name (the same icon button in
+        // every row): any pick would be a guess, so the pin is not recovered.
+        if (found.element && found.matchCount === 1) {
           return {
             status: 'drifted-recoverable',
             element: found.element,
@@ -211,9 +214,71 @@
     return { status: 'drifted', element: null };
   }
 
+  const FINGERPRINT_TEXT_MAX = 500;
+  const FINGERPRINT_CONTEXT = 32;
+
+  function normaliseText(s) {
+    return String(s || '').replace(/\s+/g, ' ').trim();
+  }
+
+  // FNV-1a, 32-bit, as 8 hex digits.
+  function fnv1a(str) {
+    let h = 0x811c9dc5;
+    for (let i = 0; i < str.length; i++) {
+      h ^= str.charCodeAt(i);
+      h = Math.imul(h, 0x01000193) >>> 0;
+    }
+    return h.toString(16).padStart(8, '0');
+  }
+
+  // The page's own markup: Hunkyard's classes (pick highlight, markers) and
+  // the empty class attribute removing them can leave are not part of it.
+  function withoutHunkyardClasses(html) {
+    return String(html || '').replace(/\sclass="([^"]*)"/g, function (_, value) {
+      var kept = value.split(/\s+/).filter(function (c) { return c && c.indexOf('hunkyard-') !== 0; });
+      return kept.length ? ' class="' + kept.join(' ') + '"' : '';
+    });
+  }
+
+  // What the element looks like now: its text, the text either side of it in
+  // its parent, its size at this viewport width, and a hash of its HTML.
+  function elementFingerprint(el, win) {
+    const full = normaliseText(el.textContent);
+    const around = normaliseText(el.parentNode && el.parentNode.textContent);
+    const at = full ? around.indexOf(full) : -1;
+    const box = typeof el.getBoundingClientRect === 'function' ? el.getBoundingClientRect() : { width: 0, height: 0 };
+    return {
+      text: full.slice(0, FINGERPRINT_TEXT_MAX),
+      prefix: at >= 0 ? around.slice(0, at).trimEnd().slice(-FINGERPRINT_CONTEXT) : '',
+      suffix: at >= 0 ? around.slice(at + full.length).trimStart().slice(0, FINGERPRINT_CONTEXT) : '',
+      width: Math.round(box.width),
+      height: Math.round(box.height),
+      viewport_width: win.innerWidth,
+      html_hash: fnv1a(normaliseText(withoutHunkyardClasses(el.outerHTML))),
+    };
+  }
+
+  // 'current' when the pin's own selector finds an element that still looks
+  // as it did when pinned; 'outdated' otherwise. Size counts only at the
+  // viewport width it was measured at.
+  function comparePin(anchor, resolution, win) {
+    if (!resolution || resolution.status !== 'resolved' || !resolution.element) return 'outdated';
+    const was = anchor && anchor.fingerprint;
+    if (!was) return 'current';
+    const now = elementFingerprint(resolution.element, win);
+    if (now.text !== was.text || now.prefix !== was.prefix || now.suffix !== was.suffix || now.html_hash !== was.html_hash) {
+      return 'outdated';
+    }
+    if (now.viewport_width === was.viewport_width && (now.width !== was.width || now.height !== was.height)) {
+      return 'outdated';
+    }
+    return 'current';
+  }
+
   return {
     implicitRole, findAnchorRoot, cssSelectorFor, tagChainFor,
     accessibleNameFor, roleFor, landmarkFor, truncateOuterHTML, walkAncestors,
     verifyTagChain, findLandmarkElement, findByRoleAndName, resolvePin,
+    elementFingerprint, comparePin,
   };
 });

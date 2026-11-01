@@ -19,6 +19,17 @@ import (
 
 // hook runs one host hook event and returns the process exit code.
 func (s *Store) hook(event string, input io.Reader, output, errorOutput io.Writer) int {
+	// Agent turns keep the session's reviews from pausing: a prompt or a tool
+	// call means the agent is working, Stop means it finished.
+	if state := map[string]string{"UserPromptSubmit": "turn", "PreToolUse": "turn", "Stop": "idle"}[event]; state != "" {
+		data, _ := io.ReadAll(io.LimitReader(input, 1024*1024+1))
+		var payload struct {
+			SessionID string `json:"session_id"`
+		}
+		_ = json.Unmarshal(data, &payload)
+		s.reportTurn(payload.SessionID, state)
+		input = bytes.NewReader(data)
+	}
 	switch event {
 	case "ReviewWake":
 		return s.reviewWakeHook(input, errorOutput)

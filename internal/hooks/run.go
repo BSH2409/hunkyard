@@ -64,6 +64,9 @@ func Run(ctx context.Context, ec ExecutableCommand, in Input) (*Output, error) {
 		cmd = exec.CommandContext(ctx, name, args...)
 	}
 
+	stopWholeHook(cmd)
+	// After a timeout, stop waiting for output a leftover child still holds.
+	cmd.WaitDelay = time.Second
 	cmd.Stdin = bytes.NewReader(in.Stdin)
 	if in.Dir != "" {
 		cmd.Dir = in.Dir

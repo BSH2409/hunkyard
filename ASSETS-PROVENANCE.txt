@@ -11,6 +11,7 @@
 # sha256 path npm-sources path-in-package kind
 2c90a9b46d6463f26038a29b686e82bc91de01fdac9d5229e7cfe3b360134ea2 web/dompurify.min.js dompurify@3.4.16 dist/purify.min.js copy
 635972b985228e8af9f0143647c68616b7a3bb09f6946e7e4a52e43dcf5e7be5 web/markdown-it.min.js markdown-it@15.0.2 dist/browser/markdown-it.umd.min.js copy
+70ca3a3dfc9233de787ef1fc1ca982f717622904321677b75d968144c9b14a9f web/snapdom.min.js @zumer/snapdom@3.3.5 dist/snapdom.js copy
 6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2 web/mermaid.min.js mermaid@12.1.0 dist/mermaid.min.js copy
 e8119d4ccd162c5cd5cc3c58b9229abcd962ddbdbc8e1fcc746ed7ccdd3d426f web/katex katex@0.19.0 - generated
 1377eba51803cd2455c3a048ea9ce8d8a3d38d42a8ac2d3074f752fa5ee510d8 web/gemoji.min.js gemoji@8.1.0 - generated

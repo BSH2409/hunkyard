@@ -2,7 +2,6 @@ package github
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 
@@ -27,7 +26,7 @@ func parsePullFlags(args []string) (pullFlags, error) {
 		if arg == "--output" || arg == "-o" {
 			if i+1 >= len(args) {
 				fmt.Fprintf(os.Stderr, "Error: %s requires a value\n", arg)
-				return f, clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+				return f, clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 			}
 			i++
 			f.outputDir = args[i]
@@ -36,7 +35,7 @@ func parsePullFlags(args []string) (pullFlags, error) {
 		if arg == "--session" {
 			if i+1 >= len(args) {
 				fmt.Fprintln(os.Stderr, "Error: --session requires a value")
-				return f, clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+				return f, clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 			}
 			i++
 			f.sessionID = args[i]
@@ -44,11 +43,11 @@ func parsePullFlags(args []string) (pullFlags, error) {
 		}
 		if f.spec != "" {
 			fmt.Fprintf(os.Stderr, "Usage: hunkyard pull [--session <id>] [--output <dir>] [number|url]\n")
-			return f, clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+			return f, clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 		}
 		if _, err := ParsePRSpec(arg); err != nil {
 			fmt.Fprintf(os.Stderr, "Usage: hunkyard pull [--session <id>] [--output <dir>] [number|url]\n")
-			return f, clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+			return f, clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 		}
 		f.spec = arg
 	}

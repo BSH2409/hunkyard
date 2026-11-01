@@ -60,29 +60,26 @@ func (g *GitVCS) selectedChanges(dir, baseRef, scope string) ([]FileChange, erro
 		args = append(args, baseRef)
 		dirty, untracked = true, true
 	}
+	var untrackedFiles []FileChange
+	if untracked {
+		if dir == "" {
+			var err error
+			if dir, err = g.RepoRoot(); err != nil {
+				return nil, err
+			}
+		}
+		// One listing both checks filters and supplies the untracked files.
+		var err error
+		if untrackedFiles, err = workingTreeListing(dir, g.paths); err != nil {
+			return nil, err
+		}
+		dirty = false
+	}
 	out, err := g.runSelectedGit(dir, dirty, args...)
 	if err != nil {
 		return nil, err
 	}
-	changes := parseNameStatusZ(out)
-	if untracked {
-		out, err = g.runSelectedGit(dir, false, "ls-files", "--others", "--exclude-standard", "-z")
-		if err != nil {
-			return nil, err
-		}
-		changes = append(changes, selectedUntrackedFiles(out)...)
-	}
-	return dedup(changes), nil
-}
-
-func selectedUntrackedFiles(out []byte) []FileChange {
-	var changes []FileChange
-	for _, path := range strings.Split(string(out), "\x00") {
-		if path != "" {
-			changes = append(changes, FileChange{Path: path, Status: "untracked"})
-		}
-	}
-	return changes
+	return dedup(append(parseNameStatusZ(out), untrackedFiles...)), nil
 }
 
 func parseNameStatusZ(out []byte) []FileChange {

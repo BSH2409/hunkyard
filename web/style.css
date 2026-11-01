@@ -2432,11 +2432,11 @@ textarea.drag-active {
   background: var(--hunkyard-bg-card);
   border: 1px solid var(--hunkyard-border);
   border-radius: 12px;
-  max-width: 620px;
-  width: 90vw;
-  /* One height for every tab; the content area scrolls instead of the
-     dialog resizing as tabs switch. */
-  height: min(720px, 80vh);
+  /* One size for every tab, wide enough for the Preferences board and long
+     lists; the content area scrolls instead of the dialog resizing. */
+  max-width: min(1120px, 94vw);
+  width: 94vw;
+  height: min(860px, 88vh);
   display: flex;
   flex-direction: column;
   box-shadow: var(--hunkyard-shadow);
@@ -6589,7 +6589,7 @@ body.hunkyard-story-active #reviewToolbar { display: none; }
 .commit-picker-item-meta .commit-picker-item-time { font-size: 11px; margin-left: 0; overflow: hidden; text-overflow: ellipsis; }
 .compare-commit-item.active { background: var(--hunkyard-brand-subtle); color: var(--hunkyard-editor-fg); }
 
-/* ===== Preference Yard (settings Yard tab and /yard page) ===== */
+/* ===== Preference Yard (settings Preferences tab) ===== */
 .settings-tab-badge {
   display: inline-block;
   min-width: 16px;
@@ -6604,37 +6604,115 @@ body.hunkyard-story-active #reviewToolbar { display: none; }
 }
 /* display above overrides the hidden attribute; a hidden badge takes no room. */
 .settings-tab-badge[hidden] { display: none; }
-.yard { display: flex; flex-direction: column; gap: 12px; font-size: 13px; color: var(--hunkyard-editor-fg); }
-.yard--page { flex-direction: row; align-items: flex-start; }
-.yard-nav { display: flex; gap: 4px; flex-wrap: wrap; }
-.yard--page .yard-nav { flex-direction: column; flex: 0 0 180px; }
+/* Preferences tab. The settings dialog widens for it (see .settings-dialog
+   [data-active-tab="yard"]); the bar with the view tabs and the view's tools
+   stays pinned while the view scrolls under it. */
+.yard { display: flex; flex-direction: column; gap: 14px; font-size: 13px; color: var(--hunkyard-editor-fg); }
+.yard-bar {
+  position: sticky;
+  top: -20px;
+  z-index: 3;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  margin: -20px -20px 0;
+  padding: 14px 20px 12px;
+  background: var(--hunkyard-bg-card);
+  border-bottom: 1px solid var(--hunkyard-border);
+}
+.yard[data-busy="true"] .yard-bar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--hunkyard-brand), transparent);
+  background-size: 200% 100%;
+  animation: files-loading-bar 1s linear infinite;
+}
+.yard-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-self: flex-start;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 8px;
+  background: var(--hunkyard-editor-bg-hover);
+}
 .yard-nav-item {
-  padding: 4px 10px;
+  padding: 5px 12px;
   border: none;
   border-radius: 6px;
   background: none;
   color: var(--hunkyard-editor-fg-secondary);
   font: inherit;
-  text-align: left;
+  font-weight: 500;
   cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
 }
-.yard-nav-item:hover { background: var(--hunkyard-editor-bg-hover); }
-.yard-nav-item.active { background: var(--hunkyard-editor-bg-elevated); color: var(--hunkyard-editor-fg); font-weight: 600; }
-.yard-body { flex: 1; min-width: 0; }
-.yard-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--hunkyard-border); border-radius: 6px; }
-.yard-row { display: flex; gap: 10px; align-items: flex-start; padding: 8px 12px; border-top: 1px solid var(--hunkyard-border); }
+.yard-nav-item:hover { color: var(--hunkyard-editor-fg); }
+.yard-nav-item.active {
+  background: var(--hunkyard-editor-bg);
+  color: var(--hunkyard-editor-fg);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.16);
+}
+.yard-nav-item:focus-visible, .yard-file:focus-visible, .yard-btn:focus-visible, .yard-more:focus-visible { outline: none; box-shadow: var(--hunkyard-focus); }
+.yard-tools { display: flex; flex: 1 1 420px; align-items: center; gap: 8px; flex-wrap: wrap; min-width: 0; }
+.yard-tools .yard-input, .yard-tools .yard-select { box-sizing: border-box; height: 30px; }
+.yard-tools:empty { display: none; }
+.yard-tab-badge {
+  display: inline-block;
+  min-width: 16px;
+  margin-left: 6px;
+  padding: 0 5px;
+  border-radius: 9999px;
+  background: var(--hunkyard-red);
+  color: var(--hunkyard-bg-card);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 16px;
+  text-align: center;
+}
+.yard-health-summary { margin: 0 0 12px; font-weight: 600; color: var(--hunkyard-green); }
+.yard-health-summary.needs-attention { color: var(--hunkyard-red); }
+.yard-tools-count { font-weight: 600; font-variant-numeric: tabular-nums; margin-right: 4px; }
+.yard-tools-status { color: var(--hunkyard-editor-fg-secondary); font-size: 12px; }
+.yard-tools-end { margin-left: auto; display: flex; gap: 8px; }
+.yard-search { flex: 1 1 220px; max-width: 360px; }
+.yard-select { width: auto; }
+.yard-visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.yard-body { flex: 1; min-width: 0; outline: none; }
+/* A view that takes a moment keeps the previous content on screen, dimmed
+   and inert, instead of presenting it under the new tab. The delay keeps
+   cached views from flickering. */
+.yard-body[aria-busy="true"] { opacity: 0.4; pointer-events: none; transition: opacity 0.15s ease 0.12s; }
+
+.yard-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--hunkyard-border); border-radius: 8px; }
+.yard-row { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border-top: 1px solid var(--hunkyard-border); }
 .yard-row:first-child { border-top: none; }
-.yard-row-main { flex: 1; min-width: 0; }
-.yard-row-title { font-weight: 600; overflow-wrap: anywhere; }
+.yard-row:hover { background: var(--hunkyard-editor-bg-hover); }
+.yard-row.is-confirming { background: var(--hunkyard-brand-subtle); }
+.yard-row-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
+.yard-row-title { font-weight: 500; line-height: 1.4; overflow-wrap: anywhere; }
+.yard-row-labels { display: flex; flex-wrap: wrap; gap: 4px; }
+.yard-row-labels:empty { display: none; }
 .yard-row-meta { color: var(--hunkyard-editor-fg-muted); font-size: 12px; }
-.yard-row-actions { display: flex; gap: 6px; flex-shrink: 0; }
+.yard-row-actions { display: flex; gap: 6px; flex-shrink: 0; opacity: 0; transition: opacity 0.12s ease; }
+.yard-row:hover .yard-row-actions, .yard-row:focus-within .yard-row-actions, .yard-row.is-confirming .yard-row-actions { opacity: 1; }
+@media (hover: none) { .yard-row-actions { opacity: 1; } }
 .yard-dot { flex: none; width: 12px; height: 12px; margin-top: 3px; border-radius: 50%; border: 2px solid var(--hunkyard-editor-fg-muted); }
 .yard-dot--active, .yard-dot--core, .yard-dot--ok { border-color: var(--hunkyard-green); }
-.yard-dot--candidate, .yard-dot--warn { border-color: var(--hunkyard-yellow); border-style: dashed; }
+.yard-dot--candidate { border-color: var(--hunkyard-yellow); border-style: dashed; }
+.yard-dot--warn { border-color: var(--hunkyard-yellow); }
 .yard-dot--fail, .yard-dot--conflicted { border-color: var(--hunkyard-red); }
+.yard-dot--none { border-style: dotted; }
 .yard-label {
   display: inline-block;
-  margin-left: 6px;
   padding: 0 7px;
   border: 1px solid var(--hunkyard-border);
   border-radius: 9999px;
@@ -6645,48 +6723,79 @@ body.hunkyard-story-active #reviewToolbar { display: none; }
 .yard-label--global { color: var(--hunkyard-brand); border-color: var(--hunkyard-brand); }
 .yard-label--repo { color: var(--hunkyard-yellow); border-color: var(--hunkyard-yellow); }
 .yard-label--violated { color: var(--hunkyard-red); border-color: var(--hunkyard-red); }
-.yard-btn {
-  padding: 2px 10px;
-  border: 1px solid var(--hunkyard-border);
-  border-radius: 6px;
-  background: var(--hunkyard-editor-bg-elevated);
+.yard-btn--danger { color: var(--hunkyard-red); border-color: var(--hunkyard-red); }
+.yard-more { margin-top: 10px; }
+.yard-make-rule-row { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
+.yard-subhead { margin: 14px 0 8px; font-size: 12px; font-weight: 600; color: var(--hunkyard-editor-fg-secondary); }
+.yard-body > .yard-subhead:first-child { margin-top: 0; }
+.yard-empty { padding: 16px; color: var(--hunkyard-editor-fg-muted); border: 1px dashed var(--hunkyard-border); border-radius: 8px; }
+.yard-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--hunkyard-red);
+  border-radius: 8px;
   color: var(--hunkyard-editor-fg);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
 }
-.yard-btn:hover { background: var(--hunkyard-editor-bg-hover); }
-.yard-btn--primary { background: var(--hunkyard-brand); border-color: var(--hunkyard-brand); color: var(--hunkyard-editor-bg); }
-.yard-filters, .yard-actions, .yard-make-rule-row { display: flex; gap: 8px; margin: 8px 0; flex-wrap: wrap; }
-.yard-subhead { margin: 12px 0 6px; font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--hunkyard-editor-fg-muted); }
-.yard-empty { padding: 16px; color: var(--hunkyard-editor-fg-muted); border: 1px dashed var(--hunkyard-border); border-radius: 6px; }
-.yard-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; }
-.yard-column { padding: 6px; border: 1px solid var(--hunkyard-border); border-radius: 6px; background: var(--hunkyard-editor-bg-elevated); }
-.yard-column-head { display: flex; justify-content: space-between; margin-bottom: 6px; font-weight: 600; }
-.yard-count { padding: 0 6px; border-radius: 9999px; background: var(--hunkyard-editor-bg-hover); font-size: 11px; }
-.yard-card { margin-bottom: 6px; padding: 6px; border: 1px solid var(--hunkyard-border); border-radius: 6px; background: var(--hunkyard-editor-bg); }
-.yard-card-text { overflow-wrap: anywhere; }
-.yard-persona { display: flex; gap: 12px; }
-.yard-tree { display: flex; flex-direction: column; flex: 0 0 220px; }
-.yard-file { padding: 3px 8px; border: none; border-left: 2px solid transparent; background: none; color: var(--hunkyard-editor-fg-secondary); font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
-.yard-file.active { border-left-color: var(--hunkyard-brand); color: var(--hunkyard-editor-fg); font-weight: 600; }
-.yard-file-view { flex: 1; min-width: 0; margin: 0; padding: 8px 12px; border: 1px solid var(--hunkyard-border); border-radius: 6px; white-space: pre-wrap; font-family: var(--hunkyard-font-mono); font-size: 12px; }
-.yard-timeline { margin: 0; padding: 0 0 0 16px; border-left: 2px solid var(--hunkyard-border); list-style: none; }
-.yard-event { display: flex; flex-direction: column; padding: 4px 0; }
+
+.yard-board { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.yard-column { padding: 8px; border-radius: 8px; background: var(--hunkyard-editor-bg-hover); }
+.yard-column-head { display: flex; justify-content: space-between; align-items: center; margin: 2px 4px 8px; font-weight: 600; }
+.yard-count { padding: 0 7px; border-radius: 9999px; background: var(--hunkyard-editor-bg); font-size: 11px; font-variant-numeric: tabular-nums; }
+.yard-card { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-radius: 6px; background: var(--hunkyard-editor-bg); }
+.yard-card + .yard-card { margin-top: 6px; }
+.yard-card-text { overflow-wrap: anywhere; line-height: 1.4; }
+.yard-column-empty, .yard-column-more { margin: 4px; color: var(--hunkyard-editor-fg-muted); font-size: 12px; }
+.yard-clamp { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 3; line-clamp: 3; overflow: hidden; }
+
+.yard-persona { display: flex; gap: 16px; align-items: flex-start; }
+.yard-tree {
+  position: sticky;
+  top: 58px;
+  display: flex;
+  flex-direction: column;
+  flex: 0 0 260px;
+  max-height: calc(100vh - 240px);
+  overflow-y: auto;
+}
+.yard-file { padding: 4px 10px; border: none; border-radius: 6px; background: none; color: var(--hunkyard-editor-fg-secondary); font: inherit; text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.yard-file:hover { background: var(--hunkyard-editor-bg-hover); color: var(--hunkyard-editor-fg); }
+.yard-file.active { background: var(--hunkyard-brand-subtle); color: var(--hunkyard-editor-fg); font-weight: 600; }
+.yard-file-view { flex: 1; min-width: 0; margin: 0; padding: 14px 18px; border: 1px solid var(--hunkyard-border); border-radius: 8px; white-space: pre-wrap; font-family: var(--hunkyard-font-mono); font-size: 12px; }
+.yard-markdown { white-space: normal; font-family: inherit; font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.yard-markdown > * { max-width: 75ch; }
+.yard-markdown h1 { margin: 0 0 12px; font-size: 18px; font-weight: 600; }
+.yard-markdown h2 { margin: 20px 0 8px; font-size: 15px; font-weight: 600; }
+.yard-markdown h3 { margin: 16px 0 6px; font-size: 13px; font-weight: 600; color: var(--hunkyard-editor-fg-secondary); }
+.yard-markdown > :first-child { margin-top: 0; }
+.yard-markdown p { margin: 0 0 8px; }
+.yard-markdown ul, .yard-markdown ol { margin: 0 0 10px; padding-left: 20px; }
+.yard-markdown li { margin: 3px 0; }
+.yard-markdown code, .yard-subhead code { padding: 1px 4px; border-radius: 4px; background: var(--hunkyard-editor-bg-hover); font-family: var(--hunkyard-font-mono); font-size: 12px; font-weight: 400; }
+
+.yard-timeline { margin: 0; padding: 0; list-style: none; }
+.yard-event { position: relative; display: flex; flex-direction: column; gap: 2px; padding: 8px 0 8px 22px; border-bottom: 1px solid var(--hunkyard-border); }
+.yard-event:last-child { border-bottom: none; }
+.yard-event::before { content: ""; position: absolute; left: 4px; top: 13px; width: 8px; height: 8px; border-radius: 50%; background: var(--hunkyard-editor-fg-muted); }
+.yard-event--learned::before, .yard-event--maintenance_succeeded::before { background: var(--hunkyard-green); }
+.yard-event--blocked::before, .yard-event--violated::before, .yard-event--maintenance_failed::before { background: var(--hunkyard-red); }
 .yard-event-kind { font-weight: 600; }
 .yard-event--blocked .yard-event-kind, .yard-event--violated .yard-event-kind, .yard-event--maintenance_failed .yard-event-kind { color: var(--hunkyard-red); }
 .yard-event--learned .yard-event-kind, .yard-event--maintenance_succeeded .yard-event-kind { color: var(--hunkyard-green); }
 .yard-event-detail { overflow-wrap: anywhere; }
-.yard-input { flex: 1; min-width: 160px; padding: 4px 8px; border: 1px solid var(--hunkyard-border); border-radius: 6px; background: var(--hunkyard-editor-bg); color: var(--hunkyard-editor-fg); font: inherit; }
+.yard-input { flex: 1; min-width: 160px; padding: 5px 9px; border: 1px solid var(--hunkyard-border); border-radius: 6px; background: var(--hunkyard-editor-bg); color: var(--hunkyard-editor-fg); font: inherit; }
+.yard-input:focus-visible, .yard-select:focus-visible { outline: none; box-shadow: var(--hunkyard-focus); }
 .yard-make-rule > .yard-input { width: 100%; }
-.yard-page { background: var(--hunkyard-editor-bg); }
-.yard-page-main { max-width: 1100px; margin: 0 auto; padding: 16px; }
-@media (max-width: 768px) {
-  .yard--page { flex-direction: column; }
-  .yard--page .yard-nav { flex-direction: row; flex: none; }
+@media (max-width: 1000px) {
   .yard-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 768px) {
   .yard-persona { flex-direction: column; }
-  .yard-tree { flex: none; }
+  .yard-tree { position: static; flex: none; max-height: none; }
+  .yard-row-actions { opacity: 1; }
 }
 
 /* Comment labels (conventional-comment kinds) and the form picker */
@@ -6720,3 +6829,52 @@ body.hunkyard-story-active #reviewToolbar { display: none; }
 @media (pointer: coarse) {
   .comment-label-chip { min-height: 44px; min-width: 44px; }
 }
+
+/* A reload keeps the current list on screen, dimmed under a thin moving bar,
+   until the new list replaces it. */
+#filesContainer[aria-busy="true"] { opacity: 0.6; transition: opacity 0.15s ease; }
+#filesContainer[aria-busy="true"]::before {
+  content: "";
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  display: block;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--hunkyard-brand), transparent);
+  background-size: 200% 100%;
+  animation: files-loading-bar 1s linear infinite;
+}
+@keyframes files-loading-bar {
+  from { background-position: 100% 0; }
+  to { background-position: -100% 0; }
+}
+
+/* "This review has updates": changes made outside an agent round wait for
+   the reviewer's Refresh instead of redrawing the list. */
+.review-updates-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 12px 24px 0;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--hunkyard-brand) 35%, transparent);
+  border-radius: 8px;
+  background: var(--hunkyard-brand-subtle);
+  color: var(--hunkyard-editor-fg);
+  font-size: 13px;
+}
+.review-updates-banner[hidden] { display: none; }
+
+/* "Review paused": the daemon freed its port after idle_pause_minutes. */
+.paused-dialog .paused-id { color: var(--hunkyard-editor-fg-muted); font-size: 13px; }
+.paused-command {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 6px;
+  background: var(--hunkyard-bg-elevated);
+}
+.paused-command code { flex: 1; font-family: var(--hunkyard-font-mono); font-size: 12px; overflow-wrap: anywhere; }

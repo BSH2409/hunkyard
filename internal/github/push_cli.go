@@ -73,11 +73,11 @@ func parsePushFlags(args []string) (pushFlags, error) {
 func setPushSpec(f *pushFlags, arg string) error {
 	if f.spec != "" {
 		fmt.Fprintf(os.Stderr, "Usage: hunkyard push [--session <id>] [--dry-run] [--event <type>] [--message <msg>] [--output <dir>] [number|url]\n")
-		return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+		return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 	}
 	if _, err := ParsePRSpec(arg); err != nil {
 		fmt.Fprintf(os.Stderr, "Usage: hunkyard push [--session <id>] [--dry-run] [--event <type>] [--message <msg>] [--output <dir>] [number|url]\n")
-		return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+		return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 	}
 	f.spec = arg
 	return nil
@@ -477,7 +477,7 @@ func RunPush(args []string) error {
 	// Full-stack push gate — see fullStackPushGateMessage.
 	if pushBlockedByFullStackScope(ctx.cj.ActiveDiffScope) {
 		fmt.Fprintln(os.Stderr, "Error: "+fullStackPushGateMessage)
-		return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+		return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 	}
 
 	inRange := ctx.cj.ActiveDiffScope != ""

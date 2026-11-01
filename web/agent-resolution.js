@@ -37,6 +37,7 @@
         msg.rect = { x: b.left, y: b.top, w: b.width, h: b.height };
       }
       if (r.recovered_via) msg.recovered_via = r.recovered_via;
+      if (utils.comparePin && ctx.win) msg.pin_status = utils.comparePin(pin.dom_anchor, r, ctx.win);
       if (typeof ctx.post === 'function') ctx.post(msg);
       if (typeof ctx.onResolved === 'function') ctx.onResolved(pin.id, r.element, r.status);
     }

@@ -124,8 +124,20 @@ test.describe('live-mode markers — MutationObserver reposition', () => {
     // childList + subtree only (attributes:false in hunkyard-agent.js), so no
     // pin-resolution-result should be posted in response.
     await expect(getIframe(page).locator('.hunkyard-live-marker')).toHaveCount(1);
-    // Wait briefly for any pending resolution to drain into the message log,
-    // then clear the log.
+    // Wait for the save's own resolution to reach the log, and for the log to
+    // stop growing, before clearing it: a result still in flight would
+    // otherwise land after the clear and look like one caused by the thrash.
+    await expect.poll(() => page.evaluate(() => {
+      const log = (window as unknown as { __hunkyardLiveMessages?: { type: string }[] }).__hunkyardLiveMessages || [];
+      return log.some((m) => m.type === 'pin-resolution-result');
+    }), { timeout: 10_000 }).toBe(true);
+    let settled = -1;
+    await expect.poll(async () => {
+      const n = await page.evaluate(() => ((window as unknown as { __hunkyardLiveMessages?: unknown[] }).__hunkyardLiveMessages || []).length);
+      const quiet = n === settled;
+      settled = n;
+      return quiet;
+    }, { timeout: 10_000, intervals: [250] }).toBe(true);
     await page.evaluate(() => {
       (window as unknown as { __hunkyardLiveMessages?: unknown[] }).__hunkyardLiveMessages = [];
     });

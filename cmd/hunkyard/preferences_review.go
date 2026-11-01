@@ -11,6 +11,11 @@ import (
 
 func init() {
 	preferences.SetReviewIntegration(ownedReviewNotices, waitForReviewPublication)
+	preferences.SetReviewActivity(func(hostKind, hostSessionID, state string) {
+		if root := hunkyardStateRoot(); root != "" {
+			session.TouchOwnedReviewActivity(root, hostKind, hostSessionID, state)
+		}
+	})
 }
 
 func hunkyardStateRoot() string {

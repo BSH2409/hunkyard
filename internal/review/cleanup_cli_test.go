@@ -2,6 +2,8 @@ package review
 
 import (
 	"encoding/json"
+	"errors"
+	"github.com/BSH2409/hunkyard/internal/clicmd"
 	"os"
 	"path/filepath"
 	"testing"
@@ -140,5 +142,13 @@ func TestExportedReviewAPIs(t *testing.T) {
 	}
 	if err := ClearHunkyardJSON(dir); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestCleanupDaysRequiresValue(t *testing.T) {
+	err := RunCleanup([]string{"--days"})
+	var exitErr clicmd.ExitError
+	if !errors.As(err, &exitErr) || exitErr.Code != 1 {
+		t.Fatalf("cleanup --days = %v, want exit code 1", err)
 	}
 }

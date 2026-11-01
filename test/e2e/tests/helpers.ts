@@ -68,6 +68,19 @@ export async function clearAllComments(request: APIRequestContext) {
   await expect(response).toBeOK();
 }
 
+/**
+ * Count the page's requests to an API path from now on: all of them, or only
+ * those whose query string is exactly `search` ('' for none).
+ */
+export function countRequests(page: Page, path: string, search?: string): { n: number } {
+  const counter = { n: 0 };
+  page.on('request', request => {
+    const url = new URL(request.url());
+    if (url.pathname === path && (search === undefined || url.search === search)) counter.n++;
+  });
+  return counter;
+}
+
 /** Commit picker rows excluding the virtual working-tree entry. */
 export function realCommitItems(page: Page): Locator {
   return page.locator('#commitDropdownList .commit-picker-item:not(.is-virtual)');
@@ -705,6 +718,32 @@ export async function selectInLineAndPressC(page: Page, item: Locator, lineNo: n
     await page.mouse.down();
     await page.mouse.move(pts!.end.x, pts!.end.y, { steps: 5 });
     await page.mouse.up();
+    // On Windows runners a mouse drag inside the diff's shadow root can leave
+    // no selection. Set the same characters directly; the comment shortcut
+    // reads whatever is selected when "c" is pressed, so the path under test
+    // is unchanged.
+    await line.evaluate((el, offset) => {
+      const sel = window.getSelection()!;
+      if (sel.rangeCount > 0 && !sel.isCollapsed) return;
+      const nodes: Text[] = [];
+      const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      let n: Node | null;
+      while ((n = walker.nextNode())) nodes.push(n as Text);
+      const text = nodes.map(t => t.data).join('');
+      const from = text.search(/\S/) + offset;
+      const to = Math.min(text.length - 2, from + 20);
+      const locate = (idx: number): [Text, number] | null => {
+        let i = idx;
+        for (const t of nodes) {
+          if (i <= t.data.length) return [t, i];
+          i -= t.data.length;
+        }
+        return null;
+      };
+      const start = locate(from);
+      const end = locate(to);
+      if (start && end) sel.setBaseAndExtent(start[0], start[1], end[0], end[1]);
+    }, 1 + (attempt % 8));
     selected = await page.evaluate(() => {
       const sel = window.getSelection()!;
       const roots = Array.from(document.querySelectorAll('diffs-container'))

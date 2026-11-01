@@ -20,7 +20,10 @@ func TestMain(m *testing.M) {
 	}
 	os.Setenv("HOME", home)
 	os.Setenv("USERPROFILE", home)
-	os.Unsetenv("LEARN_PREFERENCES_HOME")
+	os.Unsetenv("HUNKYARD_PREFERENCES_HOME")
+	// Hook installers read these before HOME; never let a test reach the real ones.
+	os.Unsetenv("CLAUDE_CONFIG_DIR")
+	os.Unsetenv("CODEX_HOME")
 	code := m.Run()
 	os.RemoveAll(home)
 	os.Exit(code)

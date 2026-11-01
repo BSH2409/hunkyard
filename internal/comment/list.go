@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"github.com/BSH2409/hunkyard/internal/session"
 )
 
 // ListedComment is a comment flattened for CLI/finish output. It embeds Comment
@@ -151,6 +153,9 @@ func formatCommentHeader(e ListedComment) string {
 	}
 	if e.Drifted {
 		header += " (drifted)"
+	}
+	if e.PinStatus == session.PinOutdated {
+		header += " (outdated)"
 	}
 	return header
 }

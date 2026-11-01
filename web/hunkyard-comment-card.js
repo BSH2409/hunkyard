@@ -171,6 +171,14 @@
       headerLeft.appendChild(driftedBadge);
     }
 
+    if (comment.dom_anchor && comment.pin_status === 'outdated') {
+      var outdatedBadge = document.createElement('span');
+      outdatedBadge.className = 'outdated-badge';
+      outdatedBadge.textContent = 'Outdated';
+      outdatedBadge.title = 'The pinned element has changed since this comment was made';
+      headerLeft.appendChild(outdatedBadge);
+    }
+
     var actions = document.createElement('div');
     actions.className = 'comment-actions';
 

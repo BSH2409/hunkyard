@@ -6,28 +6,29 @@ const { composeRoundTooltip } = require('../live-mode-round-tooltip.js');
 const pins = (specs) => specs.map((s, i) => ({
   id: 'p' + i,
   resolved: !!s.resolved,
-  drifted: !!s.drifted,
-  drifted_on_round: s.dor || 0,
+  pin_status: s.status,
+  pin_checked_round: s.checked || 0,
 }));
 
-test('composes round / total / resolved / drifted / carried counts', () => {
+test('composes round / total / resolved / outdated / unchecked / carried counts', () => {
   const got = composeRoundTooltip({
     round: 3,
     pins: pins([
-      { resolved: true },
-      { drifted: true, dor: 3 },
-      { drifted: true, dor: 1 },
+      { resolved: true, status: 'outdated', checked: 1 },
+      { status: 'outdated', checked: 3 },
+      { status: 'current', checked: 2 },
+      { status: 'current', checked: 3 },
       {},
     ]),
   });
   assert.deepEqual(got, {
-    round: 3, total: 4, resolved: 1, drifted: 2, driftedThisRound: 1, carried: 3,
+    round: 3, total: 5, resolved: 1, outdated: 1, unchecked: 2, carried: 4,
   });
 });
 
 test('zero pins yields zeros', () => {
   assert.deepEqual(
     composeRoundTooltip({ round: 1, pins: [] }),
-    { round: 1, total: 0, resolved: 0, drifted: 0, driftedThisRound: 0, carried: 0 },
+    { round: 1, total: 0, resolved: 0, outdated: 0, unchecked: 0, carried: 0 },
   );
 });

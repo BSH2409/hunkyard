@@ -12,7 +12,7 @@ import (
 )
 
 // processGroup wraps a Windows Job Object so an entire process tree
-// (parent + every descendant — daemon, git, gh, sl, etc.) can be torn
+// (parent + every descendant — daemon, git, gh, etc.) can be torn
 // down atomically. This is the canonical Windows answer to "kill all
 // children": TerminateProcess only kills the named process, leaving
 // orphans that hold handles on inherited resources (notably, the cwd

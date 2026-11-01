@@ -126,6 +126,9 @@ test.describe('Native rendered tables', () => {
 
     const firstRow = decisionRow(page, 'Auth method');
     await firstRow.locator('.line-comment-gutter').click();
+    // Opening the form can scroll the page under a still pointer; a row's
+    // hover background is not a stripe shift, so measure with the pointer away.
+    await page.mouse.move(0, 0);
     const after = await Promise.all([
       decisionRow(page, 'Key storage').locator('td.line-content').first().evaluate(cell => getComputedStyle(cell).backgroundColor),
       decisionRow(page, 'Header format').locator('td.line-content').first().evaluate(cell => getComputedStyle(cell).backgroundColor),

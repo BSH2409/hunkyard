@@ -944,7 +944,81 @@
     return true;
   }
 
+  // A paused review: the daemon freed its port after idle_pause_minutes and
+  // comes back through the agent (`hunkyard --session <id>`). The tab says so
+  // instead of "Session complete", and reconnects when the review resumes.
+  var paused = false;
+
+  function pausedOverlayHTML(info) {
+    var id = escapeHTML((info && info.review_id) || '');
+    var command = escapeHTML((info && info.command) || ('hunkyard --session ' + ((info && info.review_id) || '')));
+    return '<div class="confirm-dialog paused-dialog">' +
+      '<h3 id="pausedHeading">Review paused</h3>' +
+      '<p>Ask your agent to resume this review.</p>' +
+      '<p class="paused-id">Review <code>' + id + '</code></p>' +
+      '<div class="paused-command"><code>' + command + '</code>' +
+      '<button type="button" class="btn btn-sm paused-copy" data-copy="' + command + '" aria-label="Copy resume command">Copy</button></div>' +
+      '</div>';
+  }
+
+  function showPaused(info) {
+    paused = true;
+    if (typeof document === 'undefined' || !document.body || !document.createElement) return;
+    var overlay = document.getElementById('pausedOverlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.id = 'pausedOverlay';
+      overlay.className = 'confirm-overlay active';
+      overlay.setAttribute('role', 'dialog');
+      overlay.setAttribute('aria-modal', 'true');
+      overlay.setAttribute('aria-labelledby', 'pausedHeading');
+      document.body.appendChild(overlay);
+    }
+    overlay.innerHTML = pausedOverlayHTML(info);
+    watchForResume(info && info.review_id);
+    var copy = overlay.querySelector('.paused-copy');
+    if (copy && navigator.clipboard) {
+      copy.addEventListener('click', function () {
+        navigator.clipboard.writeText(copy.getAttribute('data-copy')).then(function () { copy.textContent = 'Copied'; }).catch(function () {});
+      });
+    }
+  }
+
+  // isOwnReviewServing reports whether this port is serving the paused
+  // review again. Another review can take a freed port (the default 5000),
+  // and the tab must not quietly turn into it. /api/session answers 503
+  // until the resumed daemon is ready.
+  function isOwnReviewServing(reviewId, fetchFn) {
+    return Promise.resolve()
+      .then(function () { return fetchFn('/api/session', { cache: 'no-store' }); })
+      .then(function (res) {
+        if (!res.ok) return false;
+        if (!reviewId) return true;
+        return res.json().then(function (body) { return !!body && body.session_key === reviewId; });
+      })
+      .catch(function () { return false; });
+  }
+
+  // While paused, check every few seconds whether the review came back on
+  // this port (`hunkyard --session <id>` reuses it when free) and reload.
+  var resumeTimer = null;
+  function watchForResume(reviewId) {
+    if (resumeTimer || typeof fetch !== 'function' || typeof setInterval !== 'function') return;
+    resumeTimer = setInterval(function () {
+      isOwnReviewServing(reviewId, fetch).then(function (back) {
+        if (!back || !resumeTimer) return;
+        clearInterval(resumeTimer);
+        resumeTimer = null;
+        if (typeof location !== 'undefined') location.reload();
+      });
+    }, 3000);
+  }
+
+  function isPaused() { return paused; }
+
   function showDisconnected() {
+    // A pause stops the server too; the Paused screen already explains it.
+    if (paused) return;
     serverStopped = true;
     lockFinishBtnIfStopped(document.getElementById('finishBtn'));
     if (document.querySelector('.disconnected-banner')) return;
@@ -1145,6 +1219,10 @@
     computeResizeDelta,
     attachImageUploads,
     showDisconnected,
+    showPaused,
+    pausedOverlayHTML,
+    isPaused,
+    isOwnReviewServing,
     lockFinishBtnIfStopped,
     ensureProjectPromptTrust,
     applyProjectPromptTrustUI,

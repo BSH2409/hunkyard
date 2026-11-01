@@ -305,7 +305,12 @@ func TestHandlePreviewContent_PathTraversal(t *testing.T) {
 	req := httptest.NewRequest("GET", "/preview-content/", nil)
 	// Set Path after construction because httptest.NewRequest normalizes dot
 	// segments as a browser or proxy would before the handler sees them.
-	req.URL.Path = "/preview-content/../../secret.txt"
+	// Point at the real secret: a path to a missing file 404s regardless.
+	rel, err := filepath.Rel(dir, filepath.Join(secretDir, "secret.txt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.URL.Path = "/preview-content/" + filepath.ToSlash(rel)
 	w := httptest.NewRecorder()
 	s.HandlePreviewContentForTest(w, req)
 

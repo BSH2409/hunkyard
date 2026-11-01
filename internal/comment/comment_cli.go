@@ -246,13 +246,25 @@ func addCommentToHunkyardJSONAtPath(filePath string, startLine, endLine int, bod
 	// so paths are stored with forward slashes regardless of host OS.
 	cleaned = filepath.ToSlash(cleaned)
 
-	cj, err := review.LoadHunkyardJSON(hunkyardPath)
-	if err != nil {
-		return err
-	}
+	return updateReviewFile(hunkyardPath, func(cj *session.HunkyardJSON) error {
+		appendCommentScoped(cj, cleaned, startLine, endLine, body, author, scope)
+		return nil
+	})
+}
 
-	appendCommentScoped(&cj, cleaned, startLine, endLine, body, author, scope)
-	return review.SaveHunkyardJSON(hunkyardPath, cj)
+// updateReviewFile loads review.json, applies change and saves it under the
+// review lock, so a running daemon's write cannot interleave with it.
+func updateReviewFile(hunkyardPath string, change func(*session.HunkyardJSON) error) error {
+	return session.WithReviewLock(hunkyardPath, func() error {
+		cj, err := review.LoadHunkyardJSON(hunkyardPath)
+		if err != nil {
+			return err
+		}
+		if err := change(&cj); err != nil {
+			return err
+		}
+		return review.SaveHunkyardJSON(hunkyardPath, cj)
+	})
 }
 
 // addReplyToHunkyardJSON adds a reply to an existing comment in the review file.
@@ -270,30 +282,25 @@ func addReplyToHunkyardJSONAtPath(commentID, body, author string, resolve bool, 
 }
 
 func addReplyToHunkyardJSONAtPathWithRedirect(commentID, body, author string, resolve bool, hunkyardPath string, filterPath string, allowRedirect bool) error {
-	cj, err := review.LoadHunkyardJSON(hunkyardPath)
-	if err != nil {
+	err := updateReviewFile(hunkyardPath, func(cj *session.HunkyardJSON) error {
+		return appendReply(cj, commentID, body, author, resolve, filterPath)
+	})
+	// Only fall back to scanning when the comment genuinely wasn't found.
+	// Don't fall back for ambiguity errors ("found in multiple files").
+	if err == nil || !allowRedirect || !strings.Contains(err.Error(), "not found") {
 		return err
 	}
-
-	if err := appendReply(&cj, commentID, body, author, resolve, filterPath); err != nil {
-		// Only fall back to scanning when the comment genuinely wasn't found.
-		// Don't fall back for ambiguity errors ("found in multiple files").
-		if allowRedirect && strings.Contains(err.Error(), "not found") {
-			if altPath, err2 := review.FindReviewFileByCommentID(commentID, hunkyardPath); err2 == nil {
-				altCJ, loadErr := review.LoadHunkyardJSON(altPath)
-				if loadErr != nil {
-					return err // return original error
-				}
-				if replyErr := appendReply(&altCJ, commentID, body, author, resolve, filterPath); replyErr != nil {
-					return err // return original error
-				}
-				fmt.Fprintf(os.Stderr, "Note: comment %s found in %s (not the resolved review file)\n", commentID, filepath.Base(altPath))
-				return review.SaveHunkyardJSON(altPath, altCJ)
-			}
-		}
+	altPath, findErr := review.FindReviewFileByCommentID(commentID, hunkyardPath)
+	if findErr != nil {
 		return err
 	}
-	return review.SaveHunkyardJSON(hunkyardPath, cj)
+	if altErr := updateReviewFile(altPath, func(cj *session.HunkyardJSON) error {
+		return appendReply(cj, commentID, body, author, resolve, filterPath)
+	}); altErr != nil {
+		return err // return original error
+	}
+	fmt.Fprintf(os.Stderr, "Note: comment %s found in %s (not the resolved review file)\n", commentID, filepath.Base(altPath))
+	return nil
 }
 
 // BulkCommentEntry represents one entry in a bulk comment JSON array.
@@ -539,37 +546,33 @@ func bulkAddCommentsToHunkyardJSONAtPathWithRedirect(entries []BulkCommentEntry,
 	if len(entries) == 0 {
 		return fmt.Errorf("no comment entries provided")
 	}
-	primary, err := review.LoadHunkyardJSON(primaryPath)
-	if err != nil {
-		return err
-	}
-
-	targetPath, targetCJ, redirected, err := resolveBulkTargetWithRedirect(entries, primaryPath, primary, allowRedirect)
-	if err != nil {
-		return err
-	}
-
-	pages := livePageCache{}
-	for i, e := range entries {
-		if err := processBulkEntry(&targetCJ, i, e, globalAuthor, scope, pages); err != nil {
+	var targetPath string
+	var redirected bool
+	err := session.WithReviewLock(primaryPath, func() error {
+		primary, err := review.LoadHunkyardJSON(primaryPath)
+		if err != nil {
 			return err
 		}
-	}
-
-	if err := review.SaveHunkyardJSON(targetPath, targetCJ); err != nil {
+		var targetCJ session.HunkyardJSON
+		targetPath, targetCJ, redirected, err = resolveBulkTargetWithRedirect(entries, primaryPath, primary, allowRedirect)
+		if err != nil {
+			return err
+		}
+		pages := livePageCache{}
+		for i, e := range entries {
+			if err := processBulkEntry(&targetCJ, i, e, globalAuthor, scope, pages); err != nil {
+				return err
+			}
+		}
+		return review.SaveHunkyardJSON(targetPath, targetCJ)
+	})
+	if err != nil {
 		return err
 	}
 	if redirected {
 		fmt.Fprintf(os.Stderr, "Note: replies routed to %s (not the cwd-resolved review file)\n", filepath.Base(targetPath))
 	}
 	return nil
-}
-
-// resolveBulkTarget picks the single review file that this bulk call should
-// write to. Returns the path, the loaded session.HunkyardJSON to mutate, and whether the
-// target differs from the cwd-resolved primary.
-func resolveBulkTarget(entries []BulkCommentEntry, primaryPath string, primary session.HunkyardJSON) (string, session.HunkyardJSON, bool, error) {
-	return resolveBulkTargetWithRedirect(entries, primaryPath, primary, true)
 }
 
 func resolveBulkTargetWithRedirect(entries []BulkCommentEntry, primaryPath string, primary session.HunkyardJSON, allowRedirect bool) (string, session.HunkyardJSON, bool, error) {
@@ -646,13 +649,10 @@ func addReviewCommentToHunkyardJSONScoped(body, author, outputDir string, scope 
 }
 
 func addReviewCommentToHunkyardJSONAtPath(body, author, hunkyardPath string, scope session.InheritedScope) error {
-	cj, err := review.LoadHunkyardJSON(hunkyardPath)
-	if err != nil {
-		return err
-	}
-
-	appendReviewCommentScoped(&cj, body, author, scope)
-	return review.SaveHunkyardJSON(hunkyardPath, cj)
+	return updateReviewFile(hunkyardPath, func(cj *session.HunkyardJSON) error {
+		appendReviewCommentScoped(cj, body, author, scope)
+		return nil
+	})
 }
 
 // addFileCommentToHunkyardJSONScoped adds a file-level comment to the review file
@@ -674,13 +674,10 @@ func addFileCommentToHunkyardJSONAtPath(filePath, body, author, hunkyardPath str
 	// so paths are stored with forward slashes regardless of host OS.
 	cleaned = filepath.ToSlash(cleaned)
 
-	cj, err := review.LoadHunkyardJSON(hunkyardPath)
-	if err != nil {
-		return err
-	}
-
-	appendFileCommentScoped(&cj, cleaned, body, author, scope)
-	return review.SaveHunkyardJSON(hunkyardPath, cj)
+	return updateReviewFile(hunkyardPath, func(cj *session.HunkyardJSON) error {
+		appendFileCommentScoped(cj, cleaned, body, author, scope)
+		return nil
+	})
 }
 
 // appendReviewCommentScoped adds a review-level comment to the session.HunkyardJSON struct

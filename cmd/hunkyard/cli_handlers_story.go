@@ -109,7 +109,7 @@ Diff scope options:
       --base-branch <branch> Override auto-detected base branch
       --output, -o <dir>     Hunkyard data root for reviews (default: ~/.hunkyard)
       --scope <mode>         PR diff scope: layer or full-stack
-      --vcs <name>           VCS backend: git, sl, or jj
+      --vcs <name>           VCS backend: git (the only backend)
 
 Default generation uses global agent_cmd from ~/.hunkyard.config.json. The agent
 must be able to read the generated prep file and print raw story JSON.`)

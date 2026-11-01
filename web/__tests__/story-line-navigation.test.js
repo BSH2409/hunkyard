@@ -329,7 +329,7 @@ test('production Story callers thread side and display mapping into scroll routi
     /anchor\.scope\s*===\s*['"]file['"]/,
     'renderer file anchors must use file-level Story navigation'
   );
-  const reloadStart = appJs.indexOf('async function reloadForScope()');
+  const reloadStart = appJs.indexOf('async function runScopeReload(');
   const reloadEnd = appJs.indexOf('function storyPageById', reloadStart);
   const reloadSource = appJs.slice(reloadStart, reloadEnd);
   assert.match(

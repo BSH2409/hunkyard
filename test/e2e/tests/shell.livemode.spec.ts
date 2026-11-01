@@ -11,8 +11,8 @@ test.beforeEach(async ({ request }) => {
   await clearAllLivePins(request);
 });
 
-// The `deferred error surfaces` block at the end holds chrome features that
-// are not built yet; those tests are `test.fixme`'d (skipped, never run).
+// The block at the end covers the chrome's error surfaces: the iframe load
+// failure banner, the cross-origin redirect notice and the iframe pane sizing.
 
 test.describe('live-mode shell — bootstrap', () => {
   // One load covers the whole /live boot contract: the live script fork,
@@ -195,8 +195,8 @@ test.describe('live-mode shell — theme', () => {
   });
 });
 
-test.describe('live-mode shell — deferred error surfaces', () => {
-  test.fixme('iframe surfaces load failure as a chrome banner with retry', async ({ page }) => {
+test.describe('live-mode shell — error surfaces and sizing', () => {
+  test('iframe surfaces load failure as a chrome banner with retry', async ({ page }) => {
     await page.goto('/live');
     await page.evaluate(() => {
       const f = document.getElementById('hunkyardLiveIframe') as HTMLIFrameElement;
@@ -205,7 +205,7 @@ test.describe('live-mode shell — deferred error surfaces', () => {
     await expect(page.locator('.hunkyard-live-iframe-error')).toBeVisible();
   });
 
-  test.fixme('chrome surfaces a cross-origin-redirect message from iframe', async ({ page }) => {
+  test('chrome surfaces a cross-origin-redirect message from iframe', async ({ page }) => {
     await page.goto('/live');
     await page.evaluate(() => {
       const iframe = document.getElementById('hunkyardLiveIframe') as HTMLIFrameElement;
@@ -217,7 +217,7 @@ test.describe('live-mode shell — deferred error surfaces', () => {
     await expect(page.locator('.hunkyard-live-redirect-notice')).toBeVisible();
   });
 
-  test.fixme('Esc dismisses the cross-origin redirect notice', async ({ page }) => {
+  test('Esc dismisses the cross-origin redirect notice', async ({ page }) => {
     await page.goto('/live');
     await page.evaluate(() => {
       const iframe = document.getElementById('hunkyardLiveIframe') as HTMLIFrameElement;
@@ -231,7 +231,7 @@ test.describe('live-mode shell — deferred error surfaces', () => {
     await expect(page.locator('.hunkyard-live-redirect-notice')).toHaveCount(0);
   });
 
-  test.fixme('iframe pane scrolls horizontally when iframe wider than pane', async ({ page }) => {
+  test('iframe pane scrolls horizontally when iframe wider than pane', async ({ page }) => {
     await page.setViewportSize({ width: 800, height: 700 });
     await page.goto('/live');
     await page.locator('button[data-viewport="desktop"]').click();
@@ -241,7 +241,7 @@ test.describe('live-mode shell — deferred error surfaces', () => {
     expect(scrollW).toBeGreaterThan(clientW);
   });
 
-  test.fixme('resizing window in Fit mode resizes iframe frame to match', async ({ page }) => {
+  test('resizing window in Fit mode resizes iframe frame to match', async ({ page }) => {
     await page.setViewportSize({ width: 1200, height: 800 });
     await page.goto('/live');
     await page.locator('button[data-viewport="fit"]').click();

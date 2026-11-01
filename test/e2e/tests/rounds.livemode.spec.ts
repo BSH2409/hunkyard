@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { clearAllLivePins, getIframe, seedLivePin, waitForAgentReady } from './livemode-helpers';
+import { publishFixtureReview, signalRoundComplete } from './helpers';
 
 // Round-bumping in live mode happens via POST /api/round-complete (Phase E).
 // The server emits a `live-round-start` SSE event; the chrome's
@@ -28,7 +29,7 @@ test.describe('rounds — round-start re-resolution (Scenarios 15–16)', () => 
 
     // Flush the in-memory pin to disk before round-complete; the carry-forward
     // pipeline reloads PreviousComments from disk in handleRoundCompleteFiles.
-    const finish = await request.post('/api/finish');
+    const finish = await publishFixtureReview(request);
     await expect(finish).toBeOK();
 
     const beforeSession = await request.get('/api/session');
@@ -39,7 +40,7 @@ test.describe('rounds — round-start re-resolution (Scenarios 15–16)', () => 
       (window as unknown as { __hunkyardLiveMessages?: unknown[] }).__hunkyardLiveMessages = [];
     });
 
-    const bump = await request.post('/api/round-complete');
+    const bump = await signalRoundComplete(request);
     await expect(bump).toBeOK();
 
     await expect(page.locator('#liveRoundCounter')).toHaveText(

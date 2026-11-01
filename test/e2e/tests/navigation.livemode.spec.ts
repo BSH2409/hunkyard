@@ -37,16 +37,20 @@ test.describe('navigation — link, pushState, redirects (Scenarios 10–13)', (
     await expect(getIframe(page).locator('#dash-title')).toBeVisible();
   });
 
-  test.fixme('chrome breadcrumb reflects post-redirect path', async () => {
-    // FIXME: chrome route announcer doesn't update #liveRouteName when the
-    // iframe navigates via a server-side redirect from a programmatically-set
-    // src. Likely a Phase B announcer wiring gap, not a Phase F infra issue.
+  test('chrome breadcrumb reflects post-redirect path', async ({ page }) => {
+    await waitForAgentReady(page);
+    await exitPinMode(page);
+    await setIframeRoute(page, '/redirect-same');
+    await expect(getIframe(page).locator('#dash-title')).toBeVisible();
+    await expect(page.locator('#liveRouteName')).toHaveText('/dashboard', { timeout: 10_000 });
   });
 
-  test.fixme('cross-origin redirect surfaces an "open in real browser" affordance', async () => {
-    // FIXME: shell.livemode.spec already has fixme'd coverage; the chrome
-    // banner for cross-origin redirects is not yet wired (Phase B/E
-    // incomplete). When [data-hunkyard-live-cross-origin-banner] ships, replace
-    // with assertion against #/redirect-cross.
+  test('cross-origin redirect surfaces an "open in real browser" affordance', async ({ page }) => {
+    await waitForAgentReady(page);
+    await exitPinMode(page);
+    await setIframeRoute(page, '/redirect-cross');
+    const notice = page.locator('.hunkyard-live-redirect-notice');
+    await expect(notice).toBeVisible({ timeout: 10_000 });
+    await expect(notice.locator('.hunkyard-live-redirect-open')).toBeVisible();
   });
 });

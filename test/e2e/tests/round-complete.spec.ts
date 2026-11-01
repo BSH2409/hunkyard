@@ -281,6 +281,20 @@ test.describe('No-Changes Confirmation', () => {
     await expect.poll(async () => (await fileComments(request)).every(c => c.resolved)).toBe(true);
   });
 
+  test('resolve all stops and says so when a resolve fails', async ({ page, request }) => {
+    await carriedForward(request, 'Resolve fails');
+    await loadPage(page);
+    await page.route('**/api/comment/*/resolve*', route => route.fulfill({ status: 500, body: 'boom' }));
+    await page.locator('#finishBtn').click();
+    await expect(page.locator('#noChangesOverlay')).toHaveClass(/active/);
+    await page.locator('#noChangesResolveAll').click();
+    await expect(page.locator('.mini-toast', { hasText: 'Could not resolve' })).toBeVisible();
+    // The failure is reported instead of finishing.
+    await expect(page.getByRole('dialog', { name: 'Submit review', exact: true })).toHaveCount(0);
+    await expect(page.locator('#waitingOverlay')).not.toHaveClass(/active/);
+    expect((await fileComments(request)).every(c => !c.resolved)).toBe(true);
+  });
+
   test('no confirmation when user added a new comment', async ({ page, request }) => {
     await carriedForward(request, 'Original comment');
     // A new comment this round (not carried forward).

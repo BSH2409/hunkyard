@@ -3,8 +3,11 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"net"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/BSH2409/hunkyard/internal/config"
@@ -85,6 +88,9 @@ func resolveReconnectReviewDir(key string, stale daemon.SessionEntry) (string, e
 	if stale.ReviewPath != "" {
 		hunkyardPath := ReviewPathsFor(stale.ReviewPath).Review
 		if _, err := os.Stat(hunkyardPath); err != nil {
+			if _, paused := ReadPausedMarker(stale.ReviewPath); paused && os.IsNotExist(err) {
+				return stale.ReviewPath, nil
+			}
 			if os.IsNotExist(err) {
 				return "", fmt.Errorf("no review found for session %s at %s", key, stale.ReviewPath)
 			}
@@ -198,24 +204,38 @@ func reconnectDir(cj HunkyardJSON, stale daemon.SessionEntry) (string, error) {
 	return dir, nil
 }
 
+// readReconnectReview reads what a restart needs from a review folder. A
+// paused review with no comments has no review.json (an empty review deletes
+// it), so its paused marker supplies the directory and CLI arguments.
+func readReconnectReview(key, revDir string) (HunkyardJSON, error) {
+	var cj HunkyardJSON
+	data, err := os.ReadFile(ReviewPathsFor(revDir).Review)
+	if err != nil {
+		if os.IsNotExist(err) {
+			if marker, paused := ReadPausedMarker(revDir); paused {
+				return HunkyardJSON{CWD: marker.CWD, CliArgs: marker.CliArgs}, nil
+			}
+			return cj, fmt.Errorf("no review found for session %s", key)
+		}
+		return cj, fmt.Errorf("reading review for session %s: %w", key, err)
+	}
+	if err := json.Unmarshal(data, &cj); err != nil {
+		return cj, fmt.Errorf("parsing review for session %s: %w", key, err)
+	}
+	return cj, nil
+}
+
 // reconnectDeadSession restarts a daemon for an existing review folder.
 func reconnectDeadSession(key string, stale daemon.SessionEntry, quiet bool, overrides ...string) (daemon.SessionEntry, error) {
 	revDir, err := resolveReconnectReviewDir(key, stale)
 	if err != nil {
 		return daemon.SessionEntry{}, err
 	}
-	hunkyardPath := ReviewPathsFor(revDir).Review
-	data, err := os.ReadFile(hunkyardPath)
+	cj, err := readReconnectReview(key, revDir)
 	if err != nil {
-		if os.IsNotExist(err) {
-			return daemon.SessionEntry{}, fmt.Errorf("no review found for session %s", key)
-		}
-		return daemon.SessionEntry{}, fmt.Errorf("reading review for session %s: %w", key, err)
+		return daemon.SessionEntry{}, err
 	}
-	var cj HunkyardJSON
-	if err := json.Unmarshal(data, &cj); err != nil {
-		return daemon.SessionEntry{}, fmt.Errorf("parsing review for session %s: %w", key, err)
-	}
+	stale, overrides = pausedResumeArgs(revDir, stale, overrides)
 	daemonArgs := append(daemonArgsForReconnect(key, cj.CliArgs, stale, revDir), overrides...)
 	dir, err := reconnectDir(cj, stale)
 	if err != nil {
@@ -230,4 +250,33 @@ func reconnectDeadSession(key string, stale daemon.SessionEntry, quiet bool, ove
 		HintMissingIntegrations()
 	}
 	return entry, nil
+}
+
+// pausedResumeArgs brings a paused review back where it was: on its recorded
+// host, and on its recorded port when that is still free, so an open tab
+// reconnects by itself. A taken port falls back to a free one (the restart
+// prints the new URL); an explicit --port always wins.
+func pausedResumeArgs(revDir string, stale daemon.SessionEntry, overrides []string) (daemon.SessionEntry, []string) {
+	marker, paused := ReadPausedMarker(revDir)
+	if !paused {
+		return stale, overrides
+	}
+	if stale.Host == "" {
+		stale.Host = marker.Host
+	}
+	if slices.Contains(overrides, "--port") {
+		return stale, overrides
+	}
+	port := "0"
+	host := marker.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	if marker.Port > 0 {
+		if ln, err := net.Listen("tcp", net.JoinHostPort(host, strconv.Itoa(marker.Port))); err == nil {
+			ln.Close()
+			port = strconv.Itoa(marker.Port)
+		}
+	}
+	return stale, append(append([]string(nil), overrides...), "--port", port)
 }

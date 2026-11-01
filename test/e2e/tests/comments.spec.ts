@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test';
 import {
   clearAllComments, loadPage, goSection, jsSection,
   switchToDocumentView, openLineComment, hoverLine, diffLine, setDiffStyle, openDocLineComment,
+  getMdPath,
 } from './helpers';
 
 // How comment bodies render (markdown, code, links, tables) is covered by
@@ -13,6 +14,24 @@ import {
 test.describe('Markdown Comments — Git Mode', () => {
   test.beforeEach(async ({ request }) => {
     await clearAllComments(request);
+  });
+
+  test('a failed delete keeps the comment and says so', async ({ page, request }) => {
+    const mdPath = await getMdPath(request);
+    expect((await request.post(`/api/file/comments?path=${encodeURIComponent(mdPath)}`, {
+      data: { start_line: 1, end_line: 1, body: 'Keep me when the delete fails' },
+    })).ok()).toBeTruthy();
+    await loadPage(page);
+    const section = await switchToDocumentView(page);
+    const card = section.locator('.comment-card', { hasText: 'Keep me when the delete fails' });
+    await expect(card).toBeVisible();
+    await page.route('**/api/comment/*', route => route.request().method() === 'DELETE'
+      ? route.fulfill({ status: 500, body: 'boom' })
+      : route.continue());
+    await card.locator('.comment-actions .delete-btn').click();
+    await expect(page.locator('.mini-toast', { hasText: 'Failed to delete' })).toBeVisible();
+    await expect(card).toBeVisible();
+    await expect(page.locator('#commentCountNumber')).toHaveText('1');
   });
 
   test('gutter form: open focused, Escape, submit, Ctrl+Enter, edit, delete', async ({ page }) => {

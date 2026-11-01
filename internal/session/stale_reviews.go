@@ -20,19 +20,6 @@ type staleReview struct {
 	comments   int
 }
 
-func (s staleReview) metaLabel() string {
-	if s.reviewType == "live" {
-		if s.origin != "" {
-			return "live: " + s.origin + ", "
-		}
-		return "live, "
-	}
-	if s.branch != "" {
-		return s.branch + ", "
-	}
-	return ""
-}
-
 func findStaleReviews(revDir string, days int) []staleReview {
 	entries, err := os.ReadDir(revDir)
 	if err != nil {
@@ -113,7 +100,11 @@ func checkStaleReviewFolder(revDir string, de os.DirEntry, key string, cutoff ti
 		}, true
 	}
 
-	if _, err := os.Stat(filepath.Join(folder, "snapshots.json")); err != nil {
+	// Without review.json, only a folder Hunkyard left behind is a
+	// candidate: orphan snapshots, or a review paused before any comment.
+	_, snapErr := os.Stat(filepath.Join(folder, "snapshots.json"))
+	_, pausedErr := os.Stat(filepath.Join(folder, "paused.json"))
+	if snapErr != nil && pausedErr != nil {
 		return staleReview{}, false
 	}
 	info, err := de.Info()

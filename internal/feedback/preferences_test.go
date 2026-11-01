@@ -25,7 +25,7 @@ func TestReviewCandidateHonorsHostClassificationWithoutPromotion(t *testing.T) {
 	if err != nil || report.Outcomes[0].Status != "captured" {
 		t.Fatalf("host classification was discarded: %#v %v", report, err)
 	}
-	pending := filepath.Join(root, "learn-preferences", "observations", "pending.jsonl")
+	pending := filepath.Join(root, "hunkyard-preferences", "observations", "pending.jsonl")
 	before, err := os.ReadFile(pending)
 	if err != nil {
 		t.Fatal(err)
@@ -38,7 +38,7 @@ func TestReviewCandidateHonorsHostClassificationWithoutPromotion(t *testing.T) {
 	if signals["durable_language"] != false {
 		t.Fatal("candidate supplied durable intent")
 	}
-	if _, err := os.Lstat(filepath.Join(root, "learn-preferences", "current")); !os.IsNotExist(err) {
+	if _, err := os.Lstat(filepath.Join(root, "hunkyard-preferences", "current")); !os.IsNotExist(err) {
 		t.Fatal("candidate created a generation")
 	}
 	if _, err := store.Learn(prefs, batch.ID, decisions, "owner", repo); err != nil {
@@ -117,7 +117,7 @@ func TestReviewPreferenceReplayAndRepositoryScope(t *testing.T) {
 	if err != nil || report.Outcomes[0].Status != "captured" {
 		t.Fatalf("retry: %#v %v", report, err)
 	}
-	before, err := os.ReadFile(filepath.Join(root, "learn-preferences", "current", "rules.yml"))
+	before, err := os.ReadFile(filepath.Join(root, "hunkyard-preferences", "current", "rules.yml"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +127,7 @@ func TestReviewPreferenceReplayAndRepositoryScope(t *testing.T) {
 	if _, err := store.Learn(prefs, batch.ID, decisions, "owner", repo); err != nil {
 		t.Fatal(err)
 	}
-	after, err := os.ReadFile(filepath.Join(root, "learn-preferences", "current", "rules.yml"))
+	after, err := os.ReadFile(filepath.Join(root, "hunkyard-preferences", "current", "rules.yml"))
 	if err != nil || string(before) != string(after) {
 		t.Fatal("replay inflated rule evidence")
 	}
@@ -145,7 +145,7 @@ func TestReviewPreferencePrivacy(t *testing.T) {
 	if err != nil || report.Outcomes[0].Status != "rejected" {
 		t.Fatalf("privacy: %#v %v", report, err)
 	}
-	if _, err := os.Stat(filepath.Join(root, "learn-preferences", "observations", "pending.jsonl")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(root, "hunkyard-preferences", "observations", "pending.jsonl")); !os.IsNotExist(err) {
 		t.Fatal("sensitive comment entered preference evidence")
 	}
 }
@@ -160,7 +160,7 @@ func TestReviewPreferencePartialFailureResumes(t *testing.T) {
 		t.Fatal(err)
 	}
 	decisions := []PreferenceDecision{{CommentID: "human-1", Revision: 2, Kind: "ignore"}, {CommentID: "second", Revision: 1, Kind: "candidate"}}
-	pending := filepath.Join(root, "learn-preferences", "observations", "pending.jsonl")
+	pending := filepath.Join(root, "hunkyard-preferences", "observations", "pending.jsonl")
 	if err := os.MkdirAll(pending, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -208,7 +208,7 @@ func TestLearnPassesCodeContext(t *testing.T) {
 	if _, err := store.Learn(prefs, batch.ID, decisions, "owner", repo); err != nil {
 		t.Fatal(err)
 	}
-	data, err := os.ReadFile(filepath.Join(root, "learn-preferences", "observations", "pending.jsonl"))
+	data, err := os.ReadFile(filepath.Join(root, "hunkyard-preferences", "observations", "pending.jsonl"))
 	if err != nil {
 		t.Fatal(err)
 	}

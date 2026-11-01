@@ -3,6 +3,7 @@ import type { Page, Locator } from '@playwright/test';
 import {
   clearAllComments, getMdPath, loadPage, goSection, mdSection,
   switchToDocumentView, diffLine, setDiffStyle, expectPaintedQuote, selectInLineAndPressC, waitHighlighted,
+  nextFrames,
 } from './helpers';
 
 // Helper: drag-select between two coordinates, then press `c` to comment.
@@ -75,14 +76,16 @@ test.describe('Select-to-comment (git mode)', () => {
 
       // A single click (no drag) opens nothing.
       await page.mouse.click(blockBox.x + 10, blockBox.y + blockBox.height / 2);
-      await expect(section.locator('.comment-form')).not.toBeVisible();
+      await nextFrames(page); // let any click handler render before checking
+      await expect(section.locator('.comment-form')).toHaveCount(0);
 
       // A drag selection alone is for copying: no form, selection preserved.
       await page.mouse.move(blockBox.x + 60, blockBox.y + blockBox.height / 2);
       await page.mouse.down();
       await page.mouse.move(blockBox.x + blockBox.width - 10, blockBox.y + blockBox.height / 2, { steps: 5 });
       await page.mouse.up();
-      await expect(section.locator('.comment-form')).not.toBeVisible();
+      await nextFrames(page);
+      await expect(section.locator('.comment-form')).toHaveCount(0);
       expect(await page.evaluate(() => window.getSelection()?.toString().trim())).toBeTruthy();
 
       // c turns the selection into a form; Escape cancels it.

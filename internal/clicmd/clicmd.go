@@ -22,7 +22,11 @@ func (e ExitError) Error() string {
 
 func (e ExitError) Unwrap() error { return e.Err }
 
-// Exit prints err to stderr and exits. ExitError carries an explicit code.
+// ErrReported marks a failure whose message the command already printed.
+var ErrReported = errors.New("error already reported")
+
+// Exit prints err to stderr and exits. ExitError carries an explicit code;
+// an error the command already reported is not printed again.
 func Exit(err error) {
 	if err == nil {
 		return
@@ -32,17 +36,10 @@ func Exit(err error) {
 	if errors.As(err, &exitErr) && exitErr.Code != 0 {
 		code = exitErr.Code
 	}
-	fmt.Fprintf(os.Stderr, "%v\n", err)
-	os.Exit(code)
-}
-
-// Exitf formats a message and exits with code 1.
-func Exitf(format string, args ...any) {
-	fmt.Fprintf(os.Stderr, format, args...)
-	if len(args) == 0 || format[len(format)-1] != '\n' {
-		fmt.Fprintln(os.Stderr)
+	if !errors.Is(err, ErrReported) {
+		fmt.Fprintf(os.Stderr, "%v\n", err)
 	}
-	os.Exit(1)
+	os.Exit(code)
 }
 
 // Plural returns "" for n==1, otherwise "s".

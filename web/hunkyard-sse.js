@@ -49,7 +49,37 @@
     };
   }
 
-  var api = { createSSE: createSSE };
+  // coalesced wraps an async refresh so events never overlap it: one run at a
+  // time, and events that arrive meanwhile share a single follow-up run.
+  function coalesced(run) {
+    var inFlight = null;
+    var queued = false;
+    function start() {
+      var running;
+      try {
+        running = Promise.resolve(run());
+      } catch (err) {
+        running = Promise.reject(err);
+      }
+      inFlight = running.finally(function () {
+        inFlight = null;
+        if (queued) {
+          queued = false;
+          start();
+        }
+      });
+      return inFlight;
+    }
+    return function () {
+      if (inFlight) {
+        queued = true;
+        return inFlight;
+      }
+      return start();
+    };
+  }
+
+  var api = { createSSE: createSSE, coalesced: coalesced };
 
   if (typeof window !== 'undefined') {
     window.hunkyard = window.hunkyard || {};

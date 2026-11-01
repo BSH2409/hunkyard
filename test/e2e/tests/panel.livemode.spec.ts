@@ -5,11 +5,6 @@ import {
   waitForAgentReady,
 } from './livemode-helpers';
 
-// Phase F infra not online yet. Scenarios are written and parse cleanly so
-// `npx playwright test --list --project=live-mode` enumerates them; the
-// runner is a Phase F deliverable. Use `test.skip(true, 'phase F runner')`
-// rather than `test.fixme` so the per-test reason shows in the trace.
-
 test.describe('live-mode comments panel — M12 toggle (navbar)', () => {
   test('navbar #commentCount toggles the panel open/closed', async ({ page }) => {
     await waitForAgentReady(page);

@@ -166,9 +166,15 @@ func TestHostCheck(t *testing.T) {
 		{"loopback listen, tailscale host allowed with public URL", "127.0.0.1", "mymac.ts.net", 200},
 		{"loopback listen, tailscale host with port", "127.0.0.1", "mymac.ts.net:443", 200},
 
-		// listenHost is non-loopback (user opted into LAN exposure): no check.
-		{"lan listen, evil.com", "0.0.0.0", "evil.com", 200},
+		// listenHost is a wildcard or LAN address: loopback names, IP literals
+		// and the listen host pass; other DNS names are DNS rebinding.
+		{"lan listen, evil.com", "0.0.0.0", "evil.com", 403},
+		{"lan listen, evil.com with port", "0.0.0.0", "evil.example:5000", 403},
 		{"lan listen, localhost", "0.0.0.0", "localhost:3000", 200},
+		{"lan listen, LAN IP", "0.0.0.0", "192.168.1.20:5000", 200},
+		{"lan listen, IPv6 literal", "::", "[fe80::1]:5000", 200},
+		{"named listen, its own name", "devbox.lan", "devbox.lan:5000", 200},
+		{"lan listen, tailscale host allowed with public URL", "0.0.0.0", "mymac.ts.net", 200},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1014,23 +1020,38 @@ func TestReviewCycle_NextCommand(t *testing.T) {
 // ===== Path Traversal Tests =====
 
 func TestHandleFiles_PathTraversal(t *testing.T) {
-	s, _ := newTestServer(t)
+	s, sess := newTestServer(t)
+	secret := filepath.Join(filepath.Dir(sess.RepoRoot), "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP-SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(secret, filepath.Join(sess.RepoRoot, "link-out")); err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
-		name string
-		path string
-		code int
+		name, path string
+		code       int
 	}{
-		{"dotdot", "/files/../../../etc/passwd", 400},
-		{"dotdot encoded", "/files/..%2F..%2Fetc%2Fpasswd", 400},
-		{"empty path", "/files/", 400},
+		{"dotdot", "/files/../secret.txt", http.StatusBadRequest},
+		{"nested dotdot", "/files/sub/../../secret.txt", http.StatusBadRequest},
+		{"bare dotdot", "/files/..", http.StatusForbidden},
+		{"empty path", "/files/", http.StatusBadRequest},
+		{"symlink out of the repo", "/files/link-out", http.StatusForbidden},
+		{"file in the repo (control)", "/files/test.md", http.StatusOK},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			req := httptest.NewRequest("GET", tc.path, nil)
+			// The mux would answer these paths with a 301 before the handler
+			// runs, so call the handler with the raw path.
+			req := httptest.NewRequest(http.MethodGet, "/files/x", nil)
+			req.URL.Path = tc.path
 			w := httptest.NewRecorder()
-			s.ServeHTTP(w, req)
-			if w.Code == 200 {
-				t.Errorf("path %q should be blocked, got 200", tc.path)
+			s.handleFiles(w, req)
+			if w.Code != tc.code {
+				t.Errorf("%s = %d, want %d", tc.path, w.Code, tc.code)
+			}
+			if strings.Contains(w.Body.String(), "TOP-SECRET") {
+				t.Errorf("%s leaked the file outside the repo", tc.path)
 			}
 		})
 	}
@@ -1580,15 +1601,20 @@ func TestGetFile_NotInSession_FallbackToDisk(t *testing.T) {
 // TestGetFile_NotInSession_PathTraversal verifies the disk fallback
 // still blocks path traversal attempts.
 func TestGetFile_NotInSession_PathTraversal(t *testing.T) {
-	s, _ := newTestServer(t)
-
-	for _, path := range []string{"../etc/passwd", "foo/../../etc/passwd"} {
+	s, sess := newTestServer(t)
+	// A real file beside the repo: a missing target would 404 with or
+	// without the guard.
+	secret := filepath.Join(filepath.Dir(sess.RepoRoot), "secret.txt")
+	if err := os.WriteFile(secret, []byte("TOP-SECRET"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, path := range []string{"../secret.txt", "foo/../../secret.txt"} {
 		req := httptest.NewRequest("GET", "/api/file?path="+path, nil)
 		w := httptest.NewRecorder()
 		s.ServeHTTP(w, req)
 
-		if w.Code != 404 {
-			t.Errorf("path %q: status = %d, want 404", path, w.Code)
+		if w.Code != 404 || strings.Contains(w.Body.String(), "TOP-SECRET") {
+			t.Errorf("path %q: status = %d, body %q, want 404 without the file", path, w.Code, w.Body)
 		}
 	}
 }
@@ -4162,17 +4188,6 @@ func TestHandleFiles_EmptyPath(t *testing.T) {
 	}
 }
 
-func TestHandleFiles_PathTraversal_DotDot(t *testing.T) {
-	srv, _ := newTestServer(t)
-	req := httptest.NewRequest("GET", "/files/../../../etc/passwd", nil)
-	w := httptest.NewRecorder()
-	srv.ServeHTTP(w, req)
-	// Should return 400 or 403.
-	if w.Code == 200 {
-		t.Error("path traversal should not return 200")
-	}
-}
-
 // TestEvents_SafariCompat verifies the SSE stream sends an immediate `:\n\n`
 // comment frame (so Safari fires onopen) and continues sending heartbeats so
 // the connection isn't closed by the server's IdleTimeout. Both behaviors are
@@ -4592,41 +4607,39 @@ func readSSEUntil(t *testing.T, ctx context.Context, r io.Reader, eventName stri
 	}
 }
 
-func TestPUTComment_AcceptsDriftedOnRound(t *testing.T) {
-	srv, session := newTestServer(t)
-	session.ReviewType = "live"
-	c, _ := session.AddComment("test.md", 1, 1, "", "live pin", "", "")
-	// Tag as a live pin so the patch path is meaningful.
-	session.Lock()
-	for i := range session.Files[0].Comments {
-		if session.Files[0].Comments[i].ID == c.ID {
-			session.Files[0].Comments[i].DOMAnchor = &DOMAnchor{Pathname: "/", CSSSelector: "h1"}
-		}
+func TestPinStatusPatchAcceptsOnlyKnownValues(t *testing.T) {
+	srv, sess := newTestServer(t)
+	sess.ReviewRound = 4
+	line, _ := sess.AddComment("test.md", 1, 1, "", "line comment", "", "")
+	pin, ok := sess.AddLivePin("/", "pin", "r", &DOMAnchor{Pathname: "/", CSSSelector: "h1", TagChain: []string{"H1"}})
+	if !ok {
+		t.Fatal("pin not added")
 	}
-	session.Unlock()
+	put := func(id, path, body string) int {
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, httptest.NewRequest("PUT", "/api/comment/"+id+"?path="+path, strings.NewReader(body)))
+		return w.Code
+	}
 
-	body := []byte(`{"drifted": true, "drifted_on_round": 4}`)
-	req := httptest.NewRequest("PUT", "/api/comment/"+c.ID+"?path=test.md", bytes.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	w := httptest.NewRecorder()
-	srv.ServeHTTP(w, req)
-	if w.Code != 200 {
-		t.Fatalf("status = %d, want 200; body=%s", w.Code, w.Body.String())
-	}
-	session.RLock()
-	defer session.RUnlock()
-	var got *Comment
-	for i := range session.Files[0].Comments {
-		if session.Files[0].Comments[i].ID == c.ID {
-			got = &session.Files[0].Comments[i]
-			break
+	for _, tc := range []struct {
+		name, id, path, body string
+		want                 int
+	}{
+		{"outdated", pin.ID, "%2F", `{"pin_status":"outdated"}`, 200},
+		{"current", pin.ID, "%2F", `{"pin_status":"current"}`, 200},
+		{"unchecked is derived, not stored", pin.ID, "%2F", `{"pin_status":"unchecked"}`, 400},
+		{"unknown", pin.ID, "%2F", `{"pin_status":"drifted"}`, 400},
+		{"line comment", line.ID, "test.md", `{"pin_status":"outdated"}`, 400},
+		{"missing pin", "nope", "%2F", `{"pin_status":"current"}`, 404},
+		{"legacy drift patch", pin.ID, "%2F", `{"drifted":true}`, 400},
+	} {
+		if got := put(tc.id, tc.path, tc.body); got != tc.want {
+			t.Errorf("%s: PUT = %d, want %d", tc.name, got, tc.want)
 		}
 	}
-	if got == nil {
-		t.Fatalf("comment not found after PUT")
-	}
-	if got.DriftedOnRound != 4 || !got.Drifted {
-		t.Fatalf("got %+v; want DriftedOnRound=4 Drifted=true", got)
+	got, _, _ := sess.FindCommentByID(pin.ID, "/")
+	if got.PinStatus != sesspkg.PinCurrent || got.PinCheckedRound != 4 {
+		t.Errorf("pin = status %q checked round %d, want current checked on round 4", got.PinStatus, got.PinCheckedRound)
 	}
 }
 

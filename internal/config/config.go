@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -50,12 +51,17 @@ type Config struct {
 	// StaleReviewDays is global-only because the background sweep deletes
 	// reviews from every project, not just the current one.
 	StaleReviewDays *int `json:"stale_review_days,omitempty"`
+	// IdlePauseMinutes is how long a review may sit with no activity before
+	// its daemon pauses (frees its port and exits, resumable). Global-only so
+	// a project repo cannot pause every review early; zero or negative
+	// disables pausing.
+	IdlePauseMinutes *int `json:"idle_pause_minutes,omitempty"`
 	// CloseOnApproveAfterMs, when set, auto-closes the review tab this many
 	// milliseconds after an Approve. Global-only (like open_cmd/agent_cmd) so
 	// a project repo cannot force tabs to close. Nil means disabled; the CLI
 	// treats negative values as disabled too (see CloseOnApproveAfterMsEnabled).
 	CloseOnApproveAfterMs *int              `json:"close_on_approve_after_ms,omitempty"`
-	VCS                   string            `json:"vcs,omitempty"` // preferred VCS backend: "git", "sl", "jj"
+	VCS                   string            `json:"vcs,omitempty"` // VCS backend: "git" (the only backend; other values warn at load)
 	LiveCookie            string            `json:"live_cookie,omitempty"`
 	LiveCookieFile        string            `json:"live_cookie_file,omitempty"`
 	LiveCDPURL            string            `json:"live_cdp_url,omitempty"`
@@ -123,6 +129,26 @@ func (c Config) CloseOnApproveAfterMsEnabled() (ms int, enabled bool) {
 		return 0, false
 	}
 	return *c.CloseOnApproveAfterMs, true
+}
+
+// DefaultIdlePauseMinutes is the idle time before a review pauses when
+// idle_pause_minutes is unset.
+const DefaultIdlePauseMinutes = 30
+
+// IdlePauseMinutesOrDefault resolves the idle time before a review pauses:
+// HUNKYARD_IDLE_PAUSE_MINUTES (tests, one-off runs), then the global config,
+// then DefaultIdlePauseMinutes. Zero means pausing is disabled.
+func (c Config) IdlePauseMinutesOrDefault() int {
+	minutes := DefaultIdlePauseMinutes
+	if c.IdlePauseMinutes != nil {
+		minutes = *c.IdlePauseMinutes
+	}
+	if env := os.Getenv("HUNKYARD_IDLE_PAUSE_MINUTES"); env != "" {
+		if n, err := strconv.Atoi(env); err == nil {
+			minutes = n
+		}
+	}
+	return max(minutes, 0)
 }
 
 // DefaultStaleReviewDays is the background sweep age when stale_review_days is unset.
@@ -233,11 +259,6 @@ func (c generatedConfig) String() string {
 // GeneratedConfig is the printable default config template.
 type GeneratedConfig = generatedConfig
 
-// DefaultConfig returns the starter config template for `hunkyard config`.
-func DefaultConfig() GeneratedConfig {
-	return defaultConfig()
-}
-
 // ConfigPresence tracks which fields were explicitly present in a JSON config file.
 // This allows distinguishing "not set" from "explicitly set to empty/zero".
 type ConfigPresence struct {
@@ -286,6 +307,15 @@ func LoadConfigFile(path string) (Config, ConfigPresence, error) {
 	if !validDefaultMarkdownView(cfg.DefaultMarkdownView) {
 		fmt.Fprintf(os.Stderr, "Warning: invalid default_markdown_view %q in %s (want \"diff\" or \"document\"); ignoring\n", cfg.DefaultMarkdownView, path)
 		cfg.DefaultMarkdownView = ""
+	}
+	if cfg.VCS != "" && cfg.VCS != "git" {
+		switch cfg.VCS {
+		case "sl", "sapling", "jj", "jujutsu":
+			fmt.Fprintf(os.Stderr, "Warning: vcs %q is no longer supported (Sapling and Jujutsu support was removed in v1.0.3); using git (%s)\n", cfg.VCS, path)
+		default:
+			fmt.Fprintf(os.Stderr, "Warning: unknown vcs %q in %s (only \"git\" is supported); using git\n", cfg.VCS, path)
+		}
+		cfg.VCS = ""
 	}
 	return cfg, presence, nil
 }
@@ -454,26 +484,9 @@ func LoadConfig(projectDir string) Config { //nolint:gocyclo // Config precedenc
 		merged.Host = "0.0.0.0"
 	}
 
-	// 5. Fall back to VCS user name if no author configured.
-	// Try the configured VCS first, then fall back to the other.
+	// 5. Fall back to the git user name if no author configured.
 	if merged.Author == "" {
-		switch merged.VCS {
-		case "sl", "sapling":
-			merged.Author = slUserName()
-			if merged.Author == "" {
-				merged.Author = gitUserName()
-			}
-		case "jj", "jujutsu":
-			merged.Author = jjUserName()
-			if merged.Author == "" {
-				merged.Author = gitUserName()
-			}
-		default:
-			merged.Author = gitUserName()
-			if merged.Author == "" {
-				merged.Author = slUserName()
-			}
-		}
+		merged.Author = gitUserName()
 	}
 
 	return merged
@@ -615,29 +628,6 @@ func gitUserName() string {
 		return ""
 	}
 	return strings.TrimSpace(string(out))
-}
-
-// jjUserName returns the JJ-configured user name, or empty on error.
-func jjUserName() string {
-	out, err := exec.Command("jj", "config", "get", "user.name").Output()
-	if err != nil {
-		return ""
-	}
-	return strings.TrimSpace(string(out))
-}
-
-// slUserName returns the Sapling-configured user name, or empty string on error.
-// Strips the email suffix ("Name <email>" -> "Name").
-func slUserName() string {
-	out, err := exec.Command("sl", "config", "ui.username").Output()
-	if err != nil {
-		return ""
-	}
-	name := strings.TrimSpace(string(out))
-	if idx := strings.Index(name, " <"); idx >= 0 {
-		name = name[:idx]
-	}
-	return name
 }
 
 // config.MatchPattern checks if a file path matches an ignore pattern.

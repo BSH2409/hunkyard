@@ -190,3 +190,30 @@ test('clear-highlight validates without payload', () => {
   assert.equal(C2A.CLEAR_HIGHLIGHT, 'clear-highlight');
   assert.deepEqual(validateMessage({ type: 'clear-highlight' }), { ok: true });
 });
+
+test('activity from the app iframe is a valid agent message and reaches its handler', () => {
+  assert.equal(A2C.ACTIVITY, 'activity');
+  assert.deepEqual(validateMessage({ type: A2C.ACTIVITY }), { ok: true });
+  const { makeMessageDispatcher } = require('../live-mode.dispatch.js');
+  let seen = 0;
+  makeMessageDispatcher({ onActivity: () => { seen++; } })({ type: 'activity' });
+  assert.equal(seen, 1);
+});
+
+test('pin screenshots carry their selection id and either the image or a reason', () => {
+  assert.equal(A2C.PIN_SCREENSHOT, 'pin-screenshot');
+  const ok = { type: 'pin-screenshot', selection_id: 'sel_1', ok: true, bytes: new ArrayBuffer(8), width: 10, height: 10, scale: 1, band_offset_y: 0, marker_rect: { x: 1, y: 1, width: 2, height: 2 }, viewport: { width: 10, height: 10, scroll_x: 0, scroll_y: 0 } };
+  assert.deepEqual(validateMessage(ok), { ok: true });
+  assert.equal(validateMessage({ ...ok, selection_id: undefined }).ok, false);
+  assert.equal(validateMessage({ ...ok, bytes: 'not bytes' }).ok, false);
+  assert.deepEqual(validateMessage({ type: 'pin-screenshot', selection_id: 'sel_1', ok: false, reason: 'blank' }), { ok: true });
+  assert.equal(validateMessage({ type: 'pin-screenshot', selection_id: 'sel_1', ok: false }).ok, false);
+});
+
+test('pin-resolution-result accepts only known pin statuses', () => {
+  const base = { type: 'pin-resolution-result', pin_id: 'p1', status: 'resolved' };
+  assert.equal(validateMessage({ ...base, pin_status: 'current' }).ok, true);
+  assert.equal(validateMessage({ ...base, pin_status: 'outdated' }).ok, true);
+  assert.equal(validateMessage({ ...base, pin_status: 'unchecked' }).ok, false);
+  assert.equal(validateMessage({ ...base, pin_status: 7 }).ok, false);
+});

@@ -35,10 +35,31 @@ type DiffLine struct {
 // ComputeLineDiff computes a line-level diff between oldContent and newContent
 // using Hirschberg's algorithm (divide-and-conquer LCS in O(n) space).
 // Each line is classified as "unchanged", "added", or "removed".
+// Lines the two versions share at the start and end are emitted as unchanged
+// without entering the O(n·m) search, so a small edit to a long plan costs
+// about the size of the edit.
 func ComputeLineDiff(oldContent, newContent string) []DiffEntry {
 	oldLines := SplitLines(oldContent)
 	newLines := SplitLines(newContent)
-	return hirschbergDiff(oldLines, newLines, 0, 0)
+	prefix := 0
+	for prefix < len(oldLines) && prefix < len(newLines) && oldLines[prefix] == newLines[prefix] {
+		prefix++
+	}
+	suffix := 0
+	for suffix < len(oldLines)-prefix && suffix < len(newLines)-prefix &&
+		oldLines[len(oldLines)-1-suffix] == newLines[len(newLines)-1-suffix] {
+		suffix++
+	}
+	entries := make([]DiffEntry, 0, len(oldLines)+len(newLines)-prefix-suffix)
+	for i := 0; i < prefix; i++ {
+		entries = append(entries, DiffEntry{Type: "unchanged", OldLine: i + 1, NewLine: i + 1, Text: oldLines[i]})
+	}
+	entries = append(entries, hirschbergDiff(oldLines[prefix:len(oldLines)-suffix], newLines[prefix:len(newLines)-suffix], prefix, prefix)...)
+	for i := suffix; i > 0; i-- {
+		oldIdx, newIdx := len(oldLines)-i, len(newLines)-i
+		entries = append(entries, DiffEntry{Type: "unchanged", OldLine: oldIdx + 1, NewLine: newIdx + 1, Text: oldLines[oldIdx]})
+	}
+	return entries
 }
 
 // hirschbergDiff computes the diff between old[0:len(old)] and new[0:len(new)]

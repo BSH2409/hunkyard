@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
@@ -96,7 +97,7 @@ func TestCreateSession_CodeDirectoryKeepsSelectionAcrossRefreshAndScopes(t *test
 	sess.RefreshFileList()
 	sess.RefreshDiffs()
 	for _, scope := range []string{"all", "unstaged"} {
-		info := sess.GetSessionInfoScoped(scope, "")
+		info := sess.GetSessionInfoScoped(context.Background(), scope, "")
 		if len(info.Files) != 4 {
 			t.Fatalf("scope %s: got %d files, want four selected changes", scope, len(info.Files))
 		}
@@ -114,13 +115,13 @@ func TestCreateSession_CodeDirectoryKeepsSelectionAcrossRefreshAndScopes(t *test
 	}
 	base := vcs.GitRun(t, dir, "rev-parse", "HEAD")
 	vcs.GitRun(t, dir, "add", ".")
-	if files := sess.GetSessionInfoScoped("staged", "").Files; len(files) != 4 {
+	if files := sess.GetSessionInfoScoped(context.Background(), "staged", "").Files; len(files) != 4 {
 		t.Fatalf("staged selection: %+v", files)
 	}
 	vcs.GitRun(t, dir, "commit", "-m", "selected and unrelated changes")
 	head := vcs.GitRun(t, dir, "rev-parse", "HEAD")
 	for _, selection := range []struct{ scope, commit string }{{"branch", ""}, {"all", head}} {
-		files := sess.GetSessionInfoScoped(selection.scope, selection.commit).Files
+		files := sess.GetSessionInfoScoped(context.Background(), selection.scope, selection.commit).Files
 		if len(files) != 4 {
 			t.Fatalf("scope %s commit %s: %+v", selection.scope, selection.commit, files)
 		}
@@ -194,7 +195,7 @@ func TestCreateSession_CodePathsValidateOnlySelectedGitFilters(t *testing.T) {
 		t.Fatalf("selected code: mode=%s, files=%d", sess.Mode, len(sess.Files))
 	}
 	sess.RefreshFileList()
-	if files := sess.GetSessionInfoScoped("unstaged", "").Files; len(files) != 1 || files[0].Path != "src/changed.go" {
+	if files := sess.GetSessionInfoScoped(context.Background(), "unstaged", "").Files; len(files) != 1 || files[0].Path != "src/changed.go" {
 		t.Fatalf("selected scope with unrelated filters: %+v", files)
 	}
 	if err := os.WriteFile(filepath.Join(dir, ".gitattributes"), []byte("src/changed.go filter=example\n"), 0o644); err != nil {

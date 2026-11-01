@@ -285,8 +285,18 @@ test.describe('live-mode agent — selection round-trip', () => {
     await expect(page.locator('#commentsPanelBody .hunkyard-live-comment-row')).toHaveCount(1);
   });
 
-  test('save error shows inline error and does not close composer', async () => {
-    test.fixme(true, 'Inline .hunkyard-live-composer-error surface requires forcing a non-ok save response (route mocking against the live-mode dispatch path). Unit test on composer covers the error-display contract.');
+  test('save error shows inline error and does not close composer', async ({ page }) => {
+    await openPinComposer(page);
+    await page.route('**/api/file/comments?path=*', (route) => (
+      route.request().method() === 'POST'
+        ? route.fulfill({ status: 500, contentType: 'text/plain', body: 'disk full' })
+        : route.continue()
+    ));
+    await page.locator('.hunkyard-live-composer-body').fill('Pin that fails to save');
+    await page.locator('.hunkyard-live-composer-save').click();
+    await expect(page.locator('.hunkyard-live-composer-error')).toBeVisible();
+    await expect(page.locator('.hunkyard-live-composer')).toBeVisible();
+    await expect(page.locator('.hunkyard-live-composer-body')).toHaveValue('Pin that fails to save');
   });
 
   test('cancel composer keeps agent in Pin mode for rapid pinning', async ({ page }) => {

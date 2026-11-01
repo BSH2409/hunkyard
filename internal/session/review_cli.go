@@ -66,8 +66,8 @@ func RunReview(args []string) error {
 				go browser.OpenBrowserWithCommand(entry.BaseURL(), sc.OpenCmd)
 			}
 		} else {
-			staleEntry.Host = sc.Host
-			entry, err = reconnectDeadSession(key, staleEntry, sc.Quiet, "--port", strconv.Itoa(sc.Port))
+			listenEntry, listenArgs := deadSessionListener(key, staleEntry, sc)
+			entry, err = reconnectDeadSession(key, listenEntry, sc.Quiet, listenArgs...)
 			if err != nil {
 				return err
 			}
@@ -92,7 +92,7 @@ func RunReview(args []string) error {
 			if len(sc.Files) == 0 && sc.Focus == nil && sc.PlanDir == "" && PreflightCheckFn != nil {
 				if msg := PreflightCheckFn(sc); msg != "" {
 					fmt.Fprint(os.Stderr, msg)
-					return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+					return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 				}
 			}
 			entry, err = startDaemonForReview(key, args)
@@ -149,4 +149,23 @@ func movedRangeHeadNote(focus *Focus, vcsOverride string) string {
 	return fmt.Sprintf("Note: this review is pinned to %s at %.7s, but %s now points to %.7s. "+
 		"Its new commits are not shown. Run `hunkyard --range %s` to review them.\n",
 		focus.RangeSpec, focus.HeadSHA, headRef, current, focus.RangeSpec)
+}
+
+// deadSessionListener picks where a restarted daemon listens. A paused review
+// returns to its recorded host and port (pausedResumeArgs) unless the user
+// asked for a listener with a flag or environment variable; any other stopped
+// review uses the resolved CLI listener, as it always did.
+func deadSessionListener(key string, stale daemon.SessionEntry, sc *CLIReviewConfig) (daemon.SessionEntry, []string) {
+	reviewDir := stale.ReviewPath
+	if reviewDir == "" {
+		reviewDir, _ = daemon.ReviewFilePath(key)
+	}
+	_, paused := ReadPausedMarker(reviewDir)
+	if !paused || sc.HostExplicit {
+		stale.Host = sc.Host
+	}
+	if paused && !sc.PortExplicit {
+		return stale, nil
+	}
+	return stale, []string{"--port", strconv.Itoa(sc.Port)}
 }

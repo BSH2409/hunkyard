@@ -5,7 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"os/exec"
 	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -208,5 +210,26 @@ func TestReorderFlagsFirst_RoundTripFlagParse(t *testing.T) {
 				t.Errorf("Args() = %v, want %v", fs.Args(), tt.wantArgs)
 			}
 		})
+	}
+}
+
+// A command that already printed its error exits 1 without a second line.
+func TestCLIErrorHasNoStrayExitLine(t *testing.T) {
+	if os.Getenv("HUNKYARD_CLICMD_EXIT_TEST") == "1" {
+		fmt.Fprintln(os.Stderr, "Error: invalid --days value")
+		Exit(ExitError{Code: 1, Err: ErrReported})
+		return
+	}
+	cmd := exec.Command(os.Args[0], "-test.run=^TestCLIErrorHasNoStrayExitLine$", "-test.count=1")
+	cmd.Env = append(os.Environ(), "HUNKYARD_CLICMD_EXIT_TEST=1")
+	var stderr strings.Builder
+	cmd.Stderr = &stderr
+	err := cmd.Run()
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 {
+		t.Fatalf("exit = %v, want code 1", err)
+	}
+	if got := stderr.String(); got != "Error: invalid --days value\n" {
+		t.Errorf("stderr = %q, want only the reported error", got)
 	}
 }

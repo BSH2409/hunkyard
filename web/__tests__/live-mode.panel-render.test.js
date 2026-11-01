@@ -415,3 +415,20 @@ test('panel card activation preserves control exclusions and supports Enter and 
     teardownDom(prev);
   }
 });
+
+test('renderCommentsPanel: a pin whose status changed is redrawn', () => {
+  const prev = { document: global.document, window: global.window };
+  const { panelBody } = setupDom();
+  try {
+    const { ctl, state } = makeCtl(panelBody);
+    state.comments = [{ id: '1', body: 'a', path: '/x', pin_status: 'current' }];
+    ctl.renderCommentsPanel();
+    const cards = () => panelBody.firstChild.childNodes.find(n => n.classList.contains('comments-panel-file-cards'));
+    const before = cards().childNodes[0];
+    state.comments[0].pin_status = 'outdated';
+    ctl.renderCommentsPanel();
+    assert.notStrictEqual(cards().childNodes[0], before, 'the card must be rebuilt to show Outdated');
+  } finally {
+    teardownDom(prev);
+  }
+});

@@ -2,7 +2,6 @@ package review
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -21,20 +20,22 @@ func RunCleanup(args []string) error {
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--days":
-			if i+1 < len(args) {
-				i++
-				d, err := strconv.Atoi(args[i])
-				if err != nil || d < 0 {
-					fmt.Fprintf(os.Stderr, "Error: invalid --days value\n")
-					return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
-				}
-				days = d
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "Usage: hunkyard cleanup [--days N] [--force]\n")
+				return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 			}
+			i++
+			d, err := strconv.Atoi(args[i])
+			if err != nil || d < 0 {
+				fmt.Fprintf(os.Stderr, "Error: invalid --days value\n")
+				return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
+			}
+			days = d
 		case "--force":
 			force = true
 		default:
 			fmt.Fprintf(os.Stderr, "Usage: hunkyard cleanup [--days N] [--force]\n")
-			return clicmd.ExitError{Code: 1, Err: errors.New("exit")}
+			return clicmd.ExitError{Code: 1, Err: clicmd.ErrReported}
 		}
 	}
 
@@ -206,7 +207,11 @@ func checkStaleReviewFolder(revDir string, de os.DirEntry, key string, cutoff ti
 	}
 
 	// review.json missing — check for orphan snapshots folder.
-	if _, err := os.Stat(filepath.Join(folder, "snapshots.json")); err != nil {
+	// Without review.json, only a folder Hunkyard left behind is a
+	// candidate: orphan snapshots, or a review paused before any comment.
+	_, snapErr := os.Stat(filepath.Join(folder, "snapshots.json"))
+	_, pausedErr := os.Stat(filepath.Join(folder, "paused.json"))
+	if snapErr != nil && pausedErr != nil {
 		return staleReview{}, false
 	}
 	info, err := de.Info()

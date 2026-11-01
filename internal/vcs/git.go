@@ -190,7 +190,9 @@ func detectDefaultBranch() string {
 // RemoteBranches returns the names of all remote branches (without the "origin/" prefix).
 // The result excludes HEAD. If dir is non-empty, git runs in that directory.
 func RemoteBranches(dir string) ([]string, error) {
-	cmd := exec.Command("git", "for-each-ref", "--format=%(refname:short)", "refs/remotes/origin/")
+	// lstrip, not short: short does an ambiguity check per ref and turns
+	// origin/HEAD into "origin".
+	cmd := exec.Command("git", "for-each-ref", "--format=%(refname:lstrip=3)", "refs/remotes/origin/")
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -200,7 +202,7 @@ func RemoteBranches(dir string) ([]string, error) {
 	}
 	var branches []string
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		name := strings.TrimPrefix(line, "origin/")
+		name := line
 		if name == "" || name == "HEAD" {
 			continue
 		}
@@ -294,29 +296,25 @@ func ChangedFilesScoped(scope, baseRef string) ([]FileChange, error) {
 
 // changedFilesStaged returns only staged (cached) changes.
 func changedFilesStaged() ([]FileChange, error) {
-	out, err := runGit(context.Background(), "", "diff", "--cached", "--name-status")
+	out, err := runGit(context.Background(), "", "diff", "--cached", "--name-status", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("git diff --cached failed: %w", err)
 	}
-	return parseNameStatus(string(out)), nil
+	return parseNameStatusZ(out), nil
 }
 
 // changedFilesUnstaged returns unstaged modifications plus untracked files.
 func changedFilesUnstaged() ([]FileChange, error) {
-	if err := CheckWorkingTreeFilters(""); err != nil {
+	untracked, err := workingTreeListing("", nil)
+	if err != nil {
 		return nil, err
 	}
-	out, err := runGit(context.Background(), "", "diff", "--name-status")
+	out, err := runGit(context.Background(), "", "diff", "--name-status", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("git diff failed: %w", err)
 	}
 
-	changes := parseNameStatus(string(out))
-
-	untracked, err := untrackedFiles()
-	if err != nil {
-		return nil, err
-	}
+	changes := parseNameStatusZ(out)
 	changes = append(changes, untracked...)
 
 	return dedup(changes), nil
@@ -328,11 +326,11 @@ func changedFilesBranch(baseRef string) ([]FileChange, error) {
 	if baseRef == "" {
 		return nil, nil
 	}
-	out, err := runGit(context.Background(), "", "diff", baseRef+"..HEAD", "--name-status")
+	out, err := runGit(context.Background(), "", "diff", baseRef+"..HEAD", "--name-status", "-z")
 	if err != nil {
 		return nil, fmt.Errorf("git diff %s..HEAD failed: %w", baseRef, err)
 	}
-	return parseNameStatus(string(out)), nil
+	return parseNameStatusZ(out), nil
 }
 
 // FileDiffScoped returns parsed diff hunks for a file using a scope-appropriate git diff command.
@@ -437,6 +435,16 @@ func isCommitish(s string) bool {
 	return commitishRe.MatchString(s)
 }
 
+// ValidCommitParam reports whether a commit selection from a request is a hex
+// SHA or a "<sha>..<sha>" range: never a ref name, and never anything git
+// could parse as an option.
+func ValidCommitParam(commit string) bool {
+	if _, _, ok := SplitCommitRange(commit); ok {
+		return true
+	}
+	return isCommitish(commit)
+}
+
 // splitCommitRange parses a commit query param of the form "<baseSHA>..<headSHA>".
 // Returns ok=false for a single-SHA (no "..") param, which keeps single-commit
 // behavior. Both parts must be valid commit-ish tokens; otherwise ok=false.
@@ -455,7 +463,7 @@ func SplitCommitRange(commit string) (base, head string, ok bool) {
 // ChangedFilesForCommit returns the files changed in a single commit.
 // The dir parameter sets the working directory for the git command.
 func ChangedFilesForCommit(sha, dir string) ([]FileChange, error) {
-	cmd := exec.Command("git", "diff-tree", "--no-commit-id", "-r", "--name-status", sha)
+	cmd := exec.Command("git", "diff-tree", "--no-commit-id", "-r", "--name-status", "-z", sha)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -463,7 +471,7 @@ func ChangedFilesForCommit(sha, dir string) ([]FileChange, error) {
 	if err != nil {
 		return nil, fmt.Errorf("git diff-tree failed: %w", err)
 	}
-	return parseNameStatus(string(out)), nil
+	return parseNameStatusZ(out), nil
 }
 
 // FileDiffForCommit returns parsed diff hunks for a file in a single commit.
@@ -511,18 +519,19 @@ func changedFilesOnDefault() ([]FileChange, error) {
 }
 
 func changedFilesOnDefaultInDir(dir string) ([]FileChange, error) {
-	if err := CheckWorkingTreeFilters(dir); err != nil {
+	untracked, err := workingTreeListing(dir, nil)
+	if err != nil {
 		return nil, err
 	}
 	// Staged + unstaged changes vs HEAD
-	cmd := exec.Command("git", "diff", "HEAD", "--name-status")
+	cmd := exec.Command("git", "diff", "HEAD", "--name-status", "-z")
 	if dir != "" {
 		cmd.Dir = dir
 	}
 	out, err := cmd.Output()
 	if err != nil {
 		// If there's no HEAD (empty repo), try diff --cached + working tree
-		cmd = exec.Command("git", "diff", "--name-status")
+		cmd = exec.Command("git", "diff", "--name-status", "-z")
 		if dir != "" {
 			cmd.Dir = dir
 		}
@@ -532,15 +541,7 @@ func changedFilesOnDefaultInDir(dir string) ([]FileChange, error) {
 		}
 	}
 
-	changes := parseNameStatus(string(out))
-
-	// Add untracked files
-	untracked, err := untrackedFilesInDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	changes = append(changes, untracked...)
-
+	changes := append(parseNameStatusZ(out), untracked...)
 	return dedup(changes), nil
 }
 
@@ -561,11 +562,12 @@ func changedFilesFromBase(baseRef string) ([]FileChange, error) {
 
 // changedFilesFromBaseInDir is like changedFilesFromBase but runs git from the specified directory.
 func changedFilesFromBaseInDir(baseRef, dir string) ([]FileChange, error) {
-	if err := CheckWorkingTreeFilters(dir); err != nil {
+	untracked, err := workingTreeListing(dir, nil)
+	if err != nil {
 		return nil, err
 	}
 	// All changes from base ref to working tree
-	cmd := exec.Command("git", "diff", baseRef, "--name-status")
+	cmd := exec.Command("git", "diff", baseRef, "--name-status", "-z")
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -574,15 +576,7 @@ func changedFilesFromBaseInDir(baseRef, dir string) ([]FileChange, error) {
 		return nil, fmt.Errorf("git diff failed: %w", err)
 	}
 
-	changes := parseNameStatus(string(out))
-
-	// Add untracked files
-	untracked, err := untrackedFilesInDir(dir)
-	if err != nil {
-		return nil, err
-	}
-	changes = append(changes, untracked...)
-
+	changes := append(parseNameStatusZ(out), untracked...)
 	return dedup(changes), nil
 }
 
@@ -614,11 +608,11 @@ func initialGitChangesAndScopes(baseRef, dir string) ([]FileChange, []string, bo
 
 	var branch []FileChange
 	if baseRef != "" {
-		out, diffErr := runGit(context.Background(), dir, "diff", baseRef+"..HEAD", "--name-status")
+		out, diffErr := runGit(context.Background(), dir, "diff", baseRef+"..HEAD", "--name-status", "-z")
 		if diffErr != nil {
 			return nil, nil, true, fmt.Errorf("git diff %s..HEAD failed: %w", baseRef, diffErr)
 		}
-		branch = parseNameStatus(string(out))
+		branch = parseNameStatusZ(out)
 	}
 
 	comparisonBase := baseRef
@@ -730,11 +724,11 @@ func mergeGitChangeLayers(baseRef, dir string, layers ...[]FileChange) ([]FileCh
 	for _, layer := range layers {
 		for _, change := range layer {
 			if seenPaths[change.Path] || (change.OldPath != "" && seenPaths[change.OldPath]) {
-				out, err := runGit(context.Background(), dir, "diff", baseRef, "--name-status")
+				out, err := runGit(context.Background(), dir, "diff", baseRef, "--name-status", "-z")
 				if err != nil {
 					return nil, fmt.Errorf("git diff failed: %w", err)
 				}
-				return parseNameStatus(string(out)), nil
+				return parseNameStatusZ(out), nil
 			}
 			seenPaths[change.Path] = true
 			if change.OldPath != "" {
@@ -778,36 +772,13 @@ func ResolveDefaultBranchSHA(vcs VCS, repoRoot, defaultBranch string) (string, e
 	if vcs == nil || defaultBranch == "" {
 		return "", fmt.Errorf("default branch unknown")
 	}
-	switch vcs.Name() {
-	case "git":
-		if out, err := RunGitInDir(repoRoot, "rev-parse", "--verify", "origin/"+defaultBranch); err == nil {
-			return strings.TrimSpace(out), nil
-		}
-		if out, err := RunGitInDir(repoRoot, "rev-parse", "--verify", defaultBranch); err == nil {
-			return strings.TrimSpace(out), nil
-		}
-		return "", fmt.Errorf("could not resolve %s tip", defaultBranch)
-	case "jj":
-		if defaultBranch == jjTrunkRevset {
-			_, sha := resolveJJDefaultBaseInDir(repoRoot)
-			if sha != "" {
-				return sha, nil
-			}
-		}
-		if sha, err := ResolveJJRevisionToCommitID(repoRoot, defaultBranch); err == nil && strings.TrimSpace(sha) != "" {
-			return strings.TrimSpace(sha), nil
-		}
-		return "", fmt.Errorf("could not resolve %s tip", defaultBranch)
-	default:
-		// Sapling: try remote bookmark, then local.
-		if out, err := SLCommandInDir(repoRoot, "log", "-r", "remote/"+defaultBranch, "-T", "{node}"); err == nil && strings.TrimSpace(out) != "" {
-			return strings.TrimSpace(out), nil
-		}
-		if out, err := SLCommandInDir(repoRoot, "log", "-r", defaultBranch, "-T", "{node}"); err == nil && strings.TrimSpace(out) != "" {
-			return strings.TrimSpace(out), nil
-		}
-		return "", fmt.Errorf("could not resolve %s tip", defaultBranch)
+	if out, err := RunGitInDir(repoRoot, "rev-parse", "--verify", "origin/"+defaultBranch); err == nil {
+		return strings.TrimSpace(out), nil
 	}
+	if out, err := RunGitInDir(repoRoot, "rev-parse", "--verify", defaultBranch); err == nil {
+		return strings.TrimSpace(out), nil
+	}
+	return "", fmt.Errorf("could not resolve %s tip", defaultBranch)
 }
 
 // ResolveCommitOID resolves ref (branch name, tag, abbreviated SHA, or full
@@ -822,36 +793,14 @@ func ResolveCommitOID(v VCS, ref, dir string) (string, error) {
 	if ref == "" {
 		return "", fmt.Errorf("empty ref")
 	}
-	switch v.Name() {
-	case "git":
-		out, err := RunGitInDir(dir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
-		if err != nil {
-			return "", fmt.Errorf("resolve %q: %w", ref, err)
-		}
-		return strings.TrimSpace(out), nil
-	case "jj":
-		sha, err := ResolveJJRevisionToCommitID(dir, ref)
-		if err != nil {
-			return "", fmt.Errorf("resolve %q: %w", ref, err)
-		}
-		sha = strings.TrimSpace(sha)
-		if sha == "" {
-			return "", fmt.Errorf("resolve %q: empty commit id", ref)
-		}
-		return sha, nil
-	case "sl":
-		out, err := SLCommandInDir(dir, "log", "-r", ref, "-T", "{node}", "-l", "1")
-		if err != nil {
-			return "", fmt.Errorf("resolve %q: %w", ref, err)
-		}
-		out = strings.TrimSpace(out)
-		if out == "" {
-			return "", fmt.Errorf("resolve %q: empty node", ref)
-		}
-		return out, nil
-	default:
+	if v.Name() != "git" {
 		return "", fmt.Errorf("resolve not supported for vcs=%q", v.Name())
 	}
+	out, err := RunGitInDir(dir, "rev-parse", "--verify", "--end-of-options", ref+"^{commit}")
+	if err != nil {
+		return "", fmt.Errorf("resolve %q: %w", ref, err)
+	}
+	return strings.TrimSpace(out), nil
 }
 
 // walkAncestors enumerates HEAD-first the recent ancestor SHAs that are
@@ -860,87 +809,34 @@ func WalkAncestors(vcs VCS, repoRoot string, maxDepth int) ([]string, error) {
 	if vcs == nil {
 		return nil, nil
 	}
-	switch vcs.Name() {
-	case "git":
-		out, err := RunGitInDir(repoRoot, "rev-list", "--first-parent", "-n", strconv.Itoa(maxDepth), "HEAD")
-		if err != nil {
-			return nil, err
-		}
-		return SplitNonEmpty(out), nil
-	case "jj":
-		out, err := JJCommandInDir(repoRoot, "log", "-r", JJTopicChainRevset(repoRoot, maxDepth), "--no-graph", "-T", "commit_id ++ \"\\n\"")
-		if err != nil {
-			return nil, err
-		}
-		return SplitNonEmpty(out), nil
-	default:
-		// Sapling: ancestors of `.` that are still draft.
-		out, err := SLCommandInDir(repoRoot, "log", "-r",
-			fmt.Sprintf("ancestors(., %d) & draft()", maxDepth),
-			"-T", "{node}\n")
-		if err != nil {
-			return nil, err
-		}
-		return SplitNonEmpty(out), nil
+	out, err := RunGitInDir(repoRoot, "rev-list", "--first-parent", "-n", strconv.Itoa(maxDepth), "HEAD")
+	if err != nil {
+		return nil, err
 	}
+	return splitNonEmpty(out), nil
 }
 
 // localBranchTips returns SHAs that have a useful local label, mapped to that
-// label. For git: refs/heads/ entries. For sapling/JJ: bookmarks when present,
-// plus in-progress commit descriptions for stack labels.
+// label: the refs/heads/ entries.
 func LocalBranchTips(vcs VCS, repoRoot string) (map[string]string, error) {
 	if vcs == nil {
 		return nil, nil
 	}
-	switch vcs.Name() {
-	case "git":
-		return localBranchTipsGit(repoRoot)
-	case "jj":
-		return localBranchTipsJJ(repoRoot), nil
-	default:
-		return localBranchTipsSapling(repoRoot), nil
-	}
-}
-
-func localBranchTipsGit(repoRoot string) (map[string]string, error) {
-	out, err := RunGitInDir(repoRoot, "for-each-ref", "--format=%(objectname) %(refname:short)", "refs/heads/")
+	out, err := RunGitInDir(repoRoot, "for-each-ref", "--format=%(objectname) %(refname:lstrip=2)", "refs/heads/")
 	if err != nil {
 		return nil, err
 	}
 	result := make(map[string]string)
-	addLabelLines(result, out, true)
+	addLabelLines(result, out)
 	return result, nil
 }
 
-func localBranchTipsJJ(repoRoot string) map[string]string {
-	result := make(map[string]string)
-	if bookmarks, err := JJCommandInDir(repoRoot, "bookmark", "list", "-T", "normal_target.commit_id() ++ \" \" ++ name ++ \"\\n\""); err == nil {
-		addLabelLines(result, bookmarks, true)
-	}
-	if drafts, err := JJCommandInDir(repoRoot, "log", "-r", JJTopicChainRevset(repoRoot, 0), "--no-graph", "-T", "commit_id ++ \" \" ++ description.first_line() ++ \"\\n\""); err == nil {
-		addLabelLines(result, drafts, false)
-	}
-	return result
-}
-
-func localBranchTipsSapling(repoRoot string) map[string]string {
-	result := make(map[string]string)
-	if bookmarks, err := SLCommandInDir(repoRoot, "bookmarks", "-T", "{node} {bookmark}\n"); err == nil {
-		addLabelLines(result, bookmarks, true)
-	}
-	if drafts, err := SLCommandInDir(repoRoot, "log", "-r", "draft()", "-T", "{node} {desc|firstline}\n"); err == nil {
-		addLabelLines(result, drafts, false)
-	}
-	return result
-}
-
-func addLabelLines(result map[string]string, output string, overwrite bool) {
-	for _, line := range SplitNonEmpty(output) {
+// addLabelLines records each "<sha> <label>" line of output in result,
+// replacing any earlier label for the same SHA.
+func addLabelLines(result map[string]string, output string) {
+	for _, line := range splitNonEmpty(output) {
 		parts := strings.SplitN(line, " ", 2)
 		if len(parts) != 2 {
-			continue
-		}
-		if _, ok := result[parts[0]]; ok && !overwrite {
 			continue
 		}
 		result[parts[0]] = parts[1]
@@ -960,26 +856,15 @@ func RemoteBranchTips(vcs VCS, repoRoot, defaultBranch string) ([]BranchEntry, e
 	if vcs == nil {
 		return nil, nil
 	}
-	switch vcs.Name() {
-	case "git":
-		return remoteBranchTipsGit(repoRoot, defaultBranch)
-	case "jj":
-		return remoteBranchTipsJJ(repoRoot, defaultBranch)
-	default:
-		return remoteBranchTipsSapling(repoRoot, defaultBranch)
-	}
-}
-
-func remoteBranchTipsGit(repoRoot, defaultBranch string) ([]BranchEntry, error) {
 	out, err := RunGitInDir(repoRoot, "for-each-ref",
 		"--sort=-committerdate", "--count=40",
-		"--format=%(objectname) %(refname:short)",
+		"--format=%(objectname) %(refname:lstrip=2)",
 		"refs/remotes/")
 	if err != nil {
 		return nil, err
 	}
 	var entries []BranchEntry
-	for _, line := range SplitNonEmpty(out) {
+	for _, line := range splitNonEmpty(out) {
 		parts := strings.SplitN(line, " ", 2)
 		if len(parts) != 2 {
 			continue
@@ -999,68 +884,12 @@ func remoteBranchTipsGit(repoRoot, defaultBranch string) ([]BranchEntry, error) 
 	return entries, nil
 }
 
-func remoteBranchTipsJJ(repoRoot, defaultBranch string) ([]BranchEntry, error) {
-	out, err := JJCommandInDir(repoRoot, "bookmark", "list", "--all-remotes", "-T", "normal_target.commit_id() ++ \" \" ++ name ++ \"@\" ++ remote ++ \"\\n\"")
-	if err != nil {
-		return nil, nil //nolint:nilerr // best-effort; remote bookmarks may not be configured
-	}
-	seen := make(map[string]bool)
-	var entries []BranchEntry
-	for _, line := range SplitNonEmpty(out) {
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) != 2 {
-			continue
-		}
-		name := strings.TrimSpace(parts[1])
-		if !strings.Contains(name, "@") || strings.HasSuffix(name, "@") || strings.HasSuffix(name, "@git") || name == "@" {
-			continue
-		}
-		if strings.TrimSuffix(name, "@origin") == defaultBranch || strings.TrimSuffix(name, "@upstream") == defaultBranch {
-			continue
-		}
-		if seen[name] {
-			continue
-		}
-		seen[name] = true
-		entries = append(entries, BranchEntry{Name: name, HeadSHA: parts[0]})
-		if len(entries) >= 20 {
-			break
-		}
-	}
-	return entries, nil
-}
-
-func remoteBranchTipsSapling(repoRoot, defaultBranch string) ([]BranchEntry, error) {
-	out, err := SLCommandInDir(repoRoot, "log", "-r",
-		"sort(remote(), -date)", "--limit", "40",
-		"-T", "{node} {remotebookmarks}\n")
-	if err != nil {
-		return nil, nil //nolint:nilerr // best-effort; missing is fine
-	}
-	var entries []BranchEntry
-	for _, line := range SplitNonEmpty(out) {
-		parts := strings.SplitN(line, " ", 2)
-		if len(parts) != 2 || parts[1] == "" {
-			continue
-		}
-		bookmark := strings.SplitN(parts[1], " ", 2)[0]
-		if bookmark == defaultBranch || strings.HasSuffix(bookmark, "/"+defaultBranch) {
-			continue
-		}
-		entries = append(entries, BranchEntry{Name: bookmark, HeadSHA: parts[0]})
-		if len(entries) >= 20 {
-			break
-		}
-	}
-	return entries, nil
-}
-
 // ChangedFilesBetweenSHAs returns the files changed in the range baseSHA..headSHA.
 // Renames are reported with status "renamed", OldPath set to the previous path,
 // and Path set to the new path.
 // Untracked working-tree files are NOT included — this is a pure git-history range.
 func ChangedFilesBetweenSHAs(baseSHA, headSHA, dir string) ([]FileChange, error) {
-	cmd := exec.Command("git", "diff", "--name-status", "-M", baseSHA+".."+headSHA)
+	cmd := exec.Command("git", "diff", "--name-status", "-z", "-M", baseSHA+".."+headSHA)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -1068,7 +897,7 @@ func ChangedFilesBetweenSHAs(baseSHA, headSHA, dir string) ([]FileChange, error)
 	if err != nil {
 		return nil, fmt.Errorf("git diff %s..%s --name-status: %w", baseSHA, headSHA, err)
 	}
-	return parseNameStatus(string(out)), nil
+	return parseNameStatusZ(out), nil
 }
 
 // FileDiffBetweenSHAs returns parsed diff hunks for path in the range
@@ -1145,10 +974,6 @@ func HasObject(sha, dir string) bool {
 	return cmd.Run() == nil
 }
 
-func untrackedFiles() ([]FileChange, error) {
-	return untrackedFilesInDir("")
-}
-
 // untrackedFilesInDir returns untracked files, running from the specified
 // directory. Start with status's cache-aware normal mode: it reports standalone
 // files exactly and collapses wholly-untracked directories with a trailing slash.
@@ -1203,40 +1028,24 @@ func untrackedFilesFullScanInDir(dir string) ([]FileChange, error) {
 
 // AllTrackedFiles returns all tracked files plus untracked non-ignored files.
 // Paths are relative to the repo root. dir should be the repo root.
-func AllTrackedFiles(dir string) ([]string, error) {
-	// Tracked files
-	out, err := runGit(context.Background(), dir, "ls-files")
+func AllTrackedFiles(dir string, paths ...string) ([]string, error) {
+	args := []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}
+	if len(paths) > 0 {
+		args = append(append([]string{"--literal-pathspecs"}, args...), "--")
+		args = append(args, paths...)
+	}
+	out, err := runGit(context.Background(), dir, args...)
 	if err != nil {
 		return nil, fmt.Errorf("git ls-files failed: %w", err)
 	}
-
 	seen := make(map[string]bool)
 	var files []string
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		if !seen[line] {
-			seen[line] = true
-			files = append(files, line)
+	for _, path := range strings.Split(string(out), "\x00") {
+		if path != "" && !seen[path] {
+			seen[path] = true
+			files = append(files, path)
 		}
 	}
-
-	// Untracked but not gitignored
-	out2, err := runGit(context.Background(), dir, "ls-files", "--others", "--exclude-standard")
-	if err != nil {
-		return files, nil //nolint:nilerr // non-fatal: return tracked files only
-	}
-	for _, line := range strings.Split(strings.TrimSpace(string(out2)), "\n") {
-		if line == "" {
-			continue
-		}
-		if !seen[line] {
-			seen[line] = true
-			files = append(files, line)
-		}
-	}
-
 	return files, nil
 }
 
@@ -1247,8 +1056,6 @@ var SkipDirs = map[string]bool{
 	"vendor":       true,
 	"__pycache__":  true,
 	".git":         true,
-	".jj":          true,
-	".sl":          true,
 	"dist":         true,
 	"build":        true,
 	"_build":       true,
@@ -1461,6 +1268,7 @@ func FileDiffUnifiedNewFile(content string) []DiffHunk {
 type NumstatEntry struct {
 	Additions int
 	Deletions int
+	Binary    bool // numstat reports "-" for both counts
 }
 
 // DiffNumstatDir runs git diff --numstat against the given base ref and returns per-file stats.
@@ -1623,10 +1431,53 @@ func ParseUnifiedDiff(diff string) []DiffHunk {
 // WorkingTreeFingerprint returns a string representing the current working tree state.
 // Compare consecutive calls to detect changes.
 func WorkingTreeFingerprint() string {
-	cmd := exec.Command("git", "--no-optional-locks", "status", "--porcelain")
-	out, err := cmd.Output()
+	root, err := RepoRoot()
 	if err != nil {
 		return ""
 	}
-	return string(out)
+	out, err := runGit(context.Background(), root, "--no-optional-locks", "status", "--porcelain", "-z", "--untracked-files=all")
+	if err != nil {
+		return ""
+	}
+	return fingerprintWithStats(root, out)
+}
+
+// fingerprintWithStats adds each listed file's size and modification time
+// to `git status --porcelain -z` output. Status alone stays "M file" while an
+// already-modified file keeps changing; the stats make those edits visible.
+func fingerprintWithStats(root string, status []byte) string {
+	var b strings.Builder
+	b.Write(status)
+	records := bytes.Split(status, []byte{0})
+	for i := 0; i < len(records); i++ {
+		record := records[i]
+		if len(record) < 4 {
+			continue
+		}
+		path := string(record[3:])
+		if record[0] == 'R' || record[0] == 'C' {
+			i++ // the rename's source path follows
+		}
+		if info, statErr := os.Stat(filepath.Join(root, path)); statErr == nil {
+			fmt.Fprintf(&b, "\x00%s %d %d", path, info.Size(), info.ModTime().UnixNano())
+		}
+	}
+	return b.String()
+}
+
+// splitNonEmpty splits output by newline and returns the non-empty lines,
+// trimming a trailing carriage return from each.
+func splitNonEmpty(output string) []string {
+	trimmed := strings.TrimSpace(output)
+	if trimmed == "" {
+		return nil
+	}
+	var result []string
+	for _, line := range strings.Split(trimmed, "\n") {
+		line = strings.TrimRight(line, "\r")
+		if line != "" {
+			result = append(result, line)
+		}
+	}
+	return result
 }

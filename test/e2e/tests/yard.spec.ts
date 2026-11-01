@@ -9,7 +9,7 @@ test.beforeEach(async ({ request }) => { await clearAllComments(request); });
 test('Yard tab lists a rule, shows health, and retires a rule', async ({ page }) => {
   await loadPage(page);
   const directive = `Write method definitions over multiple lines ${Date.now()}.`;
-  const created = await page.request.post('/api/yard/rules', {
+  const created = await page.request.post('/api/preferences/rules', {
     headers: { 'Sec-Fetch-Site': 'same-origin' },
     data: { directive, scope: 'global', surfaces: ['ruby'], feedback: 'we dont use single line definitions' },
   });
@@ -30,11 +30,14 @@ test('Yard tab lists a rule, shows health, and retires a rule', async ({ page })
   await expect(yard.locator('.yard-row-title', { hasText: 'store' })).toBeVisible();
 
   await yard.locator('[data-yard-view="rules"]').click();
-  await yard.locator('.yard-row', { hasText: directive }).locator('[data-yard-action="retire"]').click();
+  const retiring = yard.locator('.yard-row', { hasText: directive });
+  await retiring.hover();
+  await retiring.getByRole('button', { name: 'Retire' }).click();
+  await retiring.getByRole('button', { name: 'Confirm retire' }).click();
   await expect(yard.locator('.yard-row', { hasText: directive })).toHaveCount(0);
 });
 
 test('Yard rejects changes that do not come from the page', async ({ request }) => {
-  const response = await request.post('/api/yard/maintenance');
+  const response = await request.post('/api/preferences/maintenance');
   expect(response.status()).toBe(403);
 });

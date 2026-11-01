@@ -190,6 +190,21 @@ test('suppressDrift omits the Drifted badge and drifted-context block', () => {
     'wrapper should not get outdated-comment class');
 });
 
+test('an outdated live pin shows an Outdated badge, a current one does not', () => {
+  const outdated = card.buildCommentCard(
+    { id: 'p1', body: 'x', dom_anchor: { pathname: '/' }, pin_status: 'outdated', created_at: '2024-01-01T00:00:00Z' },
+    '/', { deps: baseDeps(), suppressDrift: true }
+  );
+  const badges = findByClass(outdated.card, 'outdated-badge');
+  assert.equal(badges.length, 1);
+  assert.equal(badges[0].textContent, 'Outdated');
+  const current = card.buildCommentCard(
+    { id: 'p2', body: 'x', dom_anchor: { pathname: '/' }, pin_status: 'current', created_at: '2024-01-01T00:00:00Z' },
+    '/', { deps: baseDeps(), suppressDrift: true }
+  );
+  assert.equal(findByClass(current.card, 'outdated-badge').length, 0);
+});
+
 test('GitHub badge renders when comment.github_id is set', () => {
   // Comments synced from a GitHub PR carry a non-zero github_id from the
   // Go side. The shared card paints a small pill so reviewers can tell

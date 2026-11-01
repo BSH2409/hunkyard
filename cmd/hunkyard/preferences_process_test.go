@@ -26,7 +26,7 @@ func TestPreferencesBinaryWithoutRubyOrProviderCLI(t *testing.T) {
 	}
 	home := t.TempDir()
 	root := filepath.Join(home, ".agents")
-	env := []string{"HOME=" + home, "USERPROFILE=" + home, "LEARN_PREFERENCES_HOME=" + root, "CODEX_HOME=" + filepath.Join(home, ".codex"), "CLAUDE_CONFIG_DIR=" + filepath.Join(home, ".claude"), "PATH=" + filepath.Join(home, "empty-path")}
+	env := []string{"HOME=" + home, "USERPROFILE=" + home, "HUNKYARD_PREFERENCES_HOME=" + root, "CODEX_HOME=" + filepath.Join(home, ".codex"), "CLAUDE_CONFIG_DIR=" + filepath.Join(home, ".claude"), "PATH=" + filepath.Join(home, "empty-path")}
 	run := func(input string, args ...string) map[string]any {
 		t.Helper()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -79,7 +79,7 @@ func TestPreferencesBinaryWithoutRubyOrProviderCLI(t *testing.T) {
 			t.Fatalf("%s hook did not continue: %v", event, result)
 		}
 	}
-	source := filepath.Join(root, "learn-preferences", "sources", "code-like-him")
+	source := filepath.Join(root, "hunkyard-preferences", "sources", "code-like-him")
 	if err := os.MkdirAll(source, 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -96,7 +96,7 @@ func TestPreferencesBinaryWithoutRubyOrProviderCLI(t *testing.T) {
 	if output, err := command.CombinedOutput(); err != nil {
 		t.Fatalf("skill install: %v %s", err, output)
 	}
-	for _, path := range []string{filepath.Join(root, "skills", "learn-preferences", "SKILL.md"), filepath.Join(home, ".claude", "skills", "learn-preferences", "SKILL.md")} {
+	for _, path := range []string{filepath.Join(root, "skills", "hunkyard-preferences", "SKILL.md"), filepath.Join(home, ".claude", "skills", "hunkyard-preferences", "SKILL.md")} {
 		data, err := os.ReadFile(path)
 		if err != nil || !strings.Contains(string(data), "hunkyard preferences") {
 			t.Fatal("Go preference skill missing", err)

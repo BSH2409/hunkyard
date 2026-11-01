@@ -444,7 +444,7 @@ func runStatusline(args []string, stdout io.Writer) int {
 	} else if pending > 0 {
 		maintenance = "due"
 	}
-	fmt.Fprintf(stdout, "◆ yard: %d rules · %d pending · maint %s\n", rules, pending, maintenance)
+	fmt.Fprintf(stdout, "◆ Hunkyard: %d rules · %d pending · maint %s\n", rules, pending, maintenance)
 	return 0
 }
 

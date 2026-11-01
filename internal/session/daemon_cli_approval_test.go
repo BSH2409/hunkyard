@@ -32,7 +32,8 @@ func TestStopDaemonOnApproval(t *testing.T) {
 		{name: "not approved", approved: false, cleanup: true, shutdownCode: http.StatusOK, sessionPID: os.Getpid()},
 		{name: "daemon accepts", approved: true, cleanup: true, shutdownCode: http.StatusOK, sessionPID: os.Getpid(), wantRequest: true, wantWaited: true, wantRemoved: true},
 		{name: "daemon survives forced kill", approved: true, cleanup: true, shutdownCode: http.StatusOK, sessionPID: os.Getpid(), exitUnconfirmed: true, wantRequest: true, wantWaited: true},
-		{name: "daemon accepts, cleanup_on_approve off", approved: true, shutdownCode: http.StatusOK, sessionPID: os.Getpid(), wantRequest: true},
+		// Pin screenshots go on approval even with cleanup off, after the daemon's last write; the review stays.
+		{name: "daemon accepts, cleanup_on_approve off", approved: true, shutdownCode: http.StatusOK, sessionPID: os.Getpid(), wantRequest: true, wantWaited: true},
 		{name: "successor registers while the daemon exits", approved: true, cleanup: true, shutdownCode: http.StatusOK, sessionPID: os.Getpid(), successorDuringWait: true, wantRequest: true, wantWaited: true},
 		{name: "another daemon on the port", approved: true, cleanup: true, shutdownCode: http.StatusConflict, sessionPID: os.Getpid(), wantRequest: true},
 		{name: "daemon already shutting down for another client", approved: true, cleanup: true, shutdownCode: http.StatusNotFound, sessionPID: noSessionFile, wantRequest: true, wantWaited: true, wantRemoved: true},

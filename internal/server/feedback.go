@@ -103,6 +103,11 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	appendComment := func(path string, c session.Comment) {
 		file, exists := files[path]
 		parent := feedback.Comment{ID: c.ID, Body: c.Body, Path: path, OldPath: file.OldPath, Scope: c.Scope, Side: c.Side, StartLine: c.StartLine, EndLine: c.EndLine, Quote: c.Quote, Anchor: c.Anchor, HeadSHA: c.HeadSHA, FocusKey: c.FocusKey, ContentID: c.ContentID, ViewID: c.ViewID, Outdated: path != "" && (!exists || (c.ContentID != "" && c.ContentID != file.ContentID)), Label: c.Label, Blocking: c.Blocking, ClaimUnchanged: c.ClaimUnchangedRound > 0 && !c.Resolved}
+		if c.DOMAnchor != nil {
+			parent.Path, parent.OldPath, parent.Outdated = "", "", false
+			parent.Pin = s.pinContext(c, sess.ReviewRound)
+			parent.Outdated = parent.Pin.Status == session.PinOutdated
+		}
 		if c.AuthorKind != "agent" {
 			batch.Comments = append(batch.Comments, parent)
 		}

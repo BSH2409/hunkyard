@@ -350,11 +350,4 @@ func TestResolveCommitOID_ErrorPaths(t *testing.T) {
 	if _, err := ResolveCommitOID(unknown, "tip", dir); err == nil || !strings.Contains(err.Error(), "not supported") {
 		t.Fatalf("got %v, want not supported", err)
 	}
-	// jj/sl error branches (no real bookmark / rev in empty-ish dir).
-	if _, err := ResolveCommitOID(&fakeFetchVCS{name: "jj"}, "no-such-bookmark", dir); err == nil {
-		t.Fatal("expected jj resolve error")
-	}
-	if _, err := ResolveCommitOID(&fakeFetchVCS{name: "sl"}, "no-such-rev", dir); err == nil {
-		t.Fatal("expected sl resolve error")
-	}
 }

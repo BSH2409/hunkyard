@@ -10,8 +10,8 @@ import (
 	"github.com/BSH2409/hunkyard/internal/preferences"
 )
 
-// handleYard serves the Preference Yard API. It needs no review session, so
-// it works inside a review and under `hunkyard yard`. Changes require
+// handleYard serves the Preference Yard API behind the Settings Preferences
+// tab. It needs no review session. Changes require
 // Sec-Fetch-Site: same-origin, which stops a page on another site from
 // changing rules through the reviewer's browser. It does not authenticate:
 // any local client can send that header.
@@ -27,9 +27,9 @@ func (s *Server) handleYard(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot open preference store", http.StatusInternalServerError)
 		return
 	}
-	path := strings.TrimPrefix(r.URL.Path, "/api/yard/")
+	path := strings.TrimPrefix(r.URL.Path, "/api/preferences/")
 	if r.Method != http.MethodGet && r.Header.Get("Sec-Fetch-Site") != "same-origin" {
-		http.Error(w, "changes are only accepted from the Yard page", http.StatusForbidden)
+		http.Error(w, "changes are only accepted from the review page's Preferences tab", http.StatusForbidden)
 		return
 	}
 	var result any
@@ -59,7 +59,11 @@ func (s *Server) handleYard(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid rule", http.StatusBadRequest)
 			return
 		}
-		result, err = store.YardCreateRule(body.Directive, body.Scope, body.RepoKey, body.Surfaces, body.Feedback)
+		cwd := ""
+		if sess := s.session.Load(); sess != nil {
+			cwd = sess.RepoRoot
+		}
+		result, err = store.YardCreateRule(body.Directive, body.Scope, body.RepoKey, cwd, body.Surfaces, body.Feedback)
 	case r.Method == http.MethodPost && path == "maintenance":
 		result, err = store.YardRunMaintenance()
 	case r.Method == http.MethodPost && strings.HasPrefix(path, "rules/"):

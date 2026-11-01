@@ -98,6 +98,8 @@ func init() {
 		return &session.CLIReviewConfig{
 			Port:               sc.Port,
 			Host:               sc.Host,
+			PortExplicit:       sc.PortExplicit,
+			HostExplicit:       sc.HostExplicit,
 			Files:              sc.Files,
 			Focus:              sc.Focus,
 			OutputDir:          sc.OutputDir,

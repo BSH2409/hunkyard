@@ -3,9 +3,11 @@ package live
 import (
 	"bytes"
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,6 +29,7 @@ type smokeKind int
 const (
 	smokeOK          smokeKind = iota
 	smokeConnRefused           // connection refused / DNS failure
+	smokeSlow                  // no answer in time: running but busy (warn, continue)
 	smokeNon2xx                // non-2xx HTTP status (warn, continue)
 	smokeNonHTML               // non-text/html content type (fatal)
 	smokeMissingBody           // HTML without </body> (warn, continue)
@@ -86,6 +89,13 @@ func runSmokeTest(origin, cookies string) smokeResult {
 		req.Header.Set("Cookie", cookies)
 	}
 	resp, err := smokeClient.Do(req)
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return smokeResult{
+			kind:    smokeSlow,
+			message: fmt.Sprintf("%s did not answer within %s (still starting or compiling assets?); starting anyway", origin, smokeClient.Timeout),
+		}
+	}
 	if err != nil {
 		return smokeResult{
 			kind:    smokeConnRefused,
@@ -303,7 +313,7 @@ func checkLiveSmoke(origin, cookies string) {
 	case smokeConnRefused, smokeNonHTML:
 		fmt.Fprintf(os.Stderr, "Error: %s\n", result.message)
 		os.Exit(1)
-	case smokeNon2xx, smokeMissingBody:
+	case smokeNon2xx, smokeMissingBody, smokeSlow:
 		fmt.Fprintf(os.Stderr, "[hunkyard] warning: %s\n", result.message)
 	}
 	if result.hasCSPFrameAncestors {

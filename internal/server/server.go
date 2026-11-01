@@ -51,6 +51,9 @@ var AgentScriptFiles = []string{
 	"agent-mutation-batcher.js",
 	"agent-resolution.js",
 	"agent-reanchor-state.js",
+	"snapdom.min.js",
+	"agent-pin-marker.js",
+	"agent-capture.js",
 	"hunkyard-agent.js",
 }
 
@@ -80,8 +83,16 @@ type Server struct {
 	cfg                 Config
 	configConfigured    bool
 	reviewPath          string
-	cliArgs             []string     // positional file args; flags (--pr, --range, etc.) are not preserved
-	prList              *PRListCache // 60s cache for picker "Other PRs"
+	// inFlight counts requests being served, excluding the event stream and
+	// the feedback waits (longLivedRequest); a review never pauses with one
+	// in flight. The plan hook's /api/review-cycle long-poll is counted on
+	// purpose: an agent blocked on it is mid-review.
+	inFlight atomic.Int32
+	// pausing is set once the idle monitor commits to a pause; requests
+	// arriving after that are refused.
+	pausing atomic.Bool
+	cliArgs []string     // positional file args; flags (--pr, --range, etc.) are not preserved
+	prList  *PRListCache // 60s cache for picker "Other PRs"
 
 	// listenHost is the host the server is bound to (e.g. "127.0.0.1" or
 	// "0.0.0.0"). Set via SetListenHost after construction. When set to a
@@ -141,8 +152,7 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 
 	// Theme preview page — static samples, no session needed.
 	mux.HandleFunc("/themes", s.serveHTML("themes.html"))
-	mux.HandleFunc("/yard", s.serveHTML("yard.html"))
-	mux.HandleFunc("/api/yard/", s.handleYard)
+	mux.HandleFunc("/api/preferences/", s.handleYard)
 
 	// Live-mode routes — NOT wrapped in withReady.
 	mux.HandleFunc("/live", s.serveIndexHTML())
@@ -190,6 +200,8 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 	mux.HandleFunc("/api/agent/request", s.withReady(s.handleAgentRequest))
 	mux.HandleFunc("/api/branches", s.withReady(s.handleBranches))
 	mux.HandleFunc("/api/base-branch", s.withReady(s.handleBaseBranch))
+	mux.HandleFunc("/api/refresh", s.withReady(s.handleRefresh))
+	mux.HandleFunc("/api/activity", s.withReady(s.handleActivity))
 	mux.HandleFunc("/api/commits", s.withReady(s.handleCommits))
 	mux.HandleFunc("/api/comments", s.withReady(s.handleReviewComments))
 	mux.HandleFunc("/api/review-comment/", s.withReady(s.handleReviewCommentByID))
@@ -247,18 +259,23 @@ func isLoopbackHost(host string) bool {
 	return config.IsLoopbackHost(host)
 }
 
-// checkHost returns true if the request is allowed to proceed. When the server
-// is bound to a loopback address, the request's Host header must also resolve
-// to a loopback hostname — this is the canonical DNS-rebinding defense.
+// checkHost returns true if the request is allowed to proceed: the DNS-
+// rebinding defense. A loopback bind accepts only loopback Host headers. Any
+// other bind (the default 0.0.0.0, for Docker) also accepts IP literals and
+// its own listen host, since a rebinding page always arrives under a DNS name
+// of its own; other names need --public-url.
 func (s *Server) checkHost(r *http.Request) bool {
 	host := requestHost(r.Host)
 	if s.publicURLHost != "" && strings.EqualFold(host, s.publicURLHost) {
 		return true
 	}
-	if s.listenHost == "" || !isLoopbackHost(s.listenHost) {
+	if s.listenHost == "" || isLoopbackHost(host) {
 		return true
 	}
-	return isLoopbackHost(host)
+	if isLoopbackHost(s.listenHost) {
+		return false
+	}
+	return net.ParseIP(host) != nil || strings.EqualFold(host, s.listenHost)
 }
 
 func requestHost(hostport string) string {
@@ -274,7 +291,13 @@ func requestHost(hostport string) string {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Content-Security-Policy", localonly.ContentSecurityPolicy)
+	if strings.HasPrefix(r.URL.Path, "/preview-content") {
+		if policy := localonly.PagePolicy(); policy != "" {
+			w.Header().Set("Content-Security-Policy", policy)
+		}
+	} else {
+		w.Header().Set("Content-Security-Policy", localonly.ReviewPolicy(requestHost(r.Host)))
+	}
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if s.localOnly && r.URL.Path == "/api/agent/request" {
 		http.Error(w, "local-only build: remote integration is unavailable", http.StatusForbidden)
@@ -298,7 +321,38 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "review owner verification failed", http.StatusForbidden)
 		return
 	}
+	s.markRequestActivity(r)
+	if !longLivedRequest(r.URL.Path) {
+		s.inFlight.Add(1)
+		defer s.inFlight.Add(-1)
+		if s.pausing.Load() {
+			http.Error(w, "review is pausing", http.StatusServiceUnavailable)
+			return
+		}
+	}
 	s.mux.ServeHTTP(w, r)
+}
+
+// longLivedRequest names requests that stay open by design (the event
+// stream and the waits for feedback); they do not hold off a pause.
+func longLivedRequest(path string) bool {
+	switch path {
+	case "/api/events", "/api/wait-for-event", "/api/feedback/await":
+		return true
+	}
+	return false
+}
+
+// markRequestActivity keeps the review awake for anything that changes it:
+// comments, replies, learn/ack, round-complete, publishing. Reads (including
+// the agent's await polling) and shutdown do not count.
+func (s *Server) markRequestActivity(r *http.Request) {
+	if r.Method == http.MethodGet || r.Method == http.MethodHead || !strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/api/shutdown" {
+		return
+	}
+	if sess := s.session.Load(); sess != nil {
+		sess.MarkActivity(r.URL.Path)
+	}
 }
 
 // hostForbiddenMessage explains a checkHost rejection so a reverse-proxy /
@@ -632,8 +686,12 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) {
 	}
 	scope := r.URL.Query().Get("scope")
 	commit := r.URL.Query().Get("commit")
+	if !session.ValidCommitSelection(commit) {
+		http.Error(w, "Bad request: commit must be a SHA or a SHA range", http.StatusBadRequest)
+		return
+	}
 	session := s.session.Load()
-	info := session.GetSessionInfoScoped(scope, commit)
+	info := session.GetSessionInfoScoped(r.Context(), scope, commit)
 
 	if hasRound && session != nil && session.Mode == "files" {
 		info.Files = filterFilesAtRound(session, info.Files, round)
@@ -1001,6 +1059,10 @@ func (s *Server) handleFileDiff(w http.ResponseWriter, r *http.Request) {
 
 	scope := r.URL.Query().Get("scope")
 	commit := r.URL.Query().Get("commit")
+	if !session.ValidCommitSelection(commit) {
+		http.Error(w, "Bad request: commit must be a SHA or a SHA range", http.StatusBadRequest)
+		return
+	}
 	ignoreWS := r.URL.Query().Get("w") == "1"
 	snapshot, ok := s.session.Load().GetFileDiffSnapshotScoped(path, scope, commit, ignoreWS)
 	if !ok {
@@ -1121,6 +1183,10 @@ func (s *Server) handleFileComments(w http.ResponseWriter, r *http.Request) {
 			ViewID    string     `json:"view_id"`
 			Label     string     `json:"label"`
 			Blocking  bool       `json:"blocking"`
+
+			PinScreenshot    *session.PinScreenshot `json:"pin_screenshot"`
+			ScreenshotStatus string                 `json:"screenshot_status"`
+			ScreenshotReason string                 `json:"screenshot_reason"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			http.Error(w, "Invalid request body", http.StatusBadRequest)
@@ -1150,10 +1216,22 @@ func (s *Server) handleFileComments(w http.ResponseWriter, r *http.Request) {
 			if author == "" {
 				author = s.author
 			}
+			if err := s.validatePinScreenshot(req.PinScreenshot, req.ScreenshotStatus, req.ScreenshotReason); err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
 			sess := s.session.Load()
-			c, ok := sess.AddLivePin(path, req.Body, author, req.DOMAnchor)
+			c, merged, ok := sess.PlaceLivePin(path, req.Body, author, req.DOMAnchor, session.PinShot{Screenshot: req.PinScreenshot, Status: req.ScreenshotStatus, Reason: req.ScreenshotReason})
 			if !ok {
 				http.Error(w, "Live pin rejected", http.StatusBadRequest)
+				return
+			}
+			if merged {
+				if req.PinScreenshot != nil {
+					s.removeAttachment(req.PinScreenshot.File)
+				}
+				sess.Notify(SSEEvent{Type: "comments-changed"})
+				writeJSON(w, c)
 				return
 			}
 			// Fan out to SSE so other tabs (and the originating tab's review
@@ -1307,35 +1385,43 @@ func (s *Server) handleFileCommentResolve(w http.ResponseWriter, r *http.Request
 	writeJSON(w, c)
 }
 
-// handleFileCommentPut decodes the PUT patch and applies body/anchor +
-// live-mode drift patches in one shot. Extracted from handleFileCommentUpdate
-// to keep that switch's cyclomatic complexity within budget.
+// handleFileCommentPut decodes the PUT patch and applies a body/anchor edit,
+// or a live pin's status report. Extracted from handleFileCommentUpdate to
+// keep that switch's cyclomatic complexity within budget.
 func (s *Server) handleFileCommentPut(w http.ResponseWriter, r *http.Request, path, id string) {
 	r.Body = http.MaxBytesReader(w, r.Body, 10<<20)
 	var req struct {
-		Body           string     `json:"body"`
-		DOMAnchor      *DOMAnchor `json:"dom_anchor"`
-		Drifted        *bool      `json:"drifted,omitempty"`
-		DriftedOnRound *int       `json:"drifted_on_round,omitempty"`
+		Body      string     `json:"body"`
+		DOMAnchor *DOMAnchor `json:"dom_anchor"`
+		PinStatus *string    `json:"pin_status"`
+
+		// A re-anchored pin brings the screenshot taken of its new element.
+		PinScreenshot    *session.PinScreenshot `json:"pin_screenshot"`
+		ScreenshotStatus string                 `json:"screenshot_status"`
+		ScreenshotReason string                 `json:"screenshot_reason"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "Invalid request body", http.StatusBadRequest)
 		return
 	}
-	isDriftPatch := req.Drifted != nil || req.DriftedOnRound != nil
-	if !isDriftPatch && req.Body == "" && req.DOMAnchor == nil {
+	sess := s.session.Load()
+	if req.PinStatus != nil {
+		s.putPinStatus(w, sess, path, id, *req.PinStatus)
+		return
+	}
+	if req.Body == "" && req.DOMAnchor == nil {
 		http.Error(w, "Comment body is required", http.StatusBadRequest)
 		return
 	}
-	sess := s.session.Load()
-	if isDriftPatch {
-		c, ok := sess.PatchCommentDrift(path, id, req.Drifted, req.DriftedOnRound)
-		if !ok {
-			http.Error(w, "Comment not found", http.StatusNotFound)
+	shot := session.PinShot{Screenshot: req.PinScreenshot, Status: req.ScreenshotStatus, Reason: req.ScreenshotReason}
+	newShot := shot.Screenshot != nil || shot.Status != ""
+	if newShot {
+		if req.DOMAnchor == nil {
+			http.Error(w, "A pin screenshot comes only with a new dom_anchor", http.StatusBadRequest)
 			return
 		}
-		if req.Body == "" && req.DOMAnchor == nil {
-			writeJSON(w, c)
+		if err := s.validatePinScreenshot(shot.Screenshot, shot.Status, shot.Reason); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 	}
@@ -1351,6 +1437,26 @@ func (s *Server) handleFileCommentPut(w http.ResponseWriter, r *http.Request, pa
 		}
 		return
 	}
+	if newShot {
+		if old := sess.ReplacePinShot(path, id, shot); old != nil && old.File != "" {
+			s.removeAttachment(old.File)
+		}
+		c, _, _ = sess.FindCommentByID(id, path)
+	}
+	writeJSON(w, c)
+}
+
+// putPinStatus records the status the page found for a live pin.
+func (s *Server) putPinStatus(w http.ResponseWriter, sess *Session, path, id, status string) {
+	if _, _, found := sess.FindCommentByID(id, path); !found {
+		http.Error(w, "Comment not found", http.StatusNotFound)
+		return
+	}
+	c, ok := sess.SetPinStatus(path, id, status)
+	if !ok {
+		http.Error(w, `pin_status must be "current" or "outdated" on a live pin`, http.StatusBadRequest)
+		return
+	}
 	writeJSON(w, c)
 }
 
@@ -1362,11 +1468,15 @@ func (s *Server) handleFileCommentUpdate(w http.ResponseWriter, r *http.Request,
 
 	case http.MethodDelete:
 		sess := s.session.Load()
+		deleted, _, _ := sess.FindCommentByID(id, path)
 		// Replies cascade automatically because they're nested inside the
 		// parent Comment struct.
 		if !sess.DeleteComment(path, id) {
 			http.Error(w, "Comment not found", http.StatusNotFound)
 			return
+		}
+		if deleted.PinScreenshot != nil {
+			s.removeAttachment(deleted.PinScreenshot.File)
 		}
 		// Fan out to SSE so other tabs (and the originating tab's review
 		// panel) drop the deleted comment without waiting for the watcher's
@@ -1423,11 +1533,17 @@ func (s *Server) handleBaseBranch(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
+	r.Body = http.MaxBytesReader(w, r.Body, 8<<10)
 	var body struct {
 		Branch string `json:"branch"`
 		Ref    string `json:"ref"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			http.Error(w, "Request body too large", http.StatusRequestEntityTooLarge)
+			return
+		}
 		http.Error(w, "Bad request: invalid JSON", http.StatusBadRequest)
 		return
 	}
@@ -2217,6 +2333,12 @@ func (s *Server) handleAttachmentUpload(w http.ResponseWriter, r *http.Request) 
 // filename. The filename regex makes path traversal impossible without the
 // caller having to look at r.URL.Path themselves.
 func (s *Server) handleAttachmentGet(w http.ResponseWriter, r *http.Request, filename string) {
+	// Pin screenshots show the reviewed app; no other site, not even a
+	// sibling port on localhost, may read them.
+	if site := r.Header.Get("Sec-Fetch-Site"); site == "cross-site" || site == "same-site" {
+		http.Error(w, "Attachments are not served to other sites", http.StatusForbidden)
+		return
+	}
 	path, mime, err := attachmentPathFor(s.reviewPath, filename)
 	if err != nil {
 		http.Error(w, "Invalid attachment filename", http.StatusBadRequest)
@@ -2234,8 +2356,7 @@ func (s *Server) handleAttachmentGet(w http.ResponseWriter, r *http.Request, fil
 		return
 	}
 	w.Header().Set("Content-Type", mime)
-	// UUIDs are never reused; the bytes behind a URL never change.
-	w.Header().Set("Cache-Control", "public, max-age=31536000, immutable")
+	w.Header().Set("Cache-Control", "private, no-store")
 	http.ServeContent(w, r, filename, info.ModTime(), f)
 }
 
@@ -2607,4 +2728,29 @@ func writeJSONStatus(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
 	writeJSON(w, v)
+}
+
+// handleRefresh brings working-tree changes made outside an agent round into
+// the review (the page's Refresh banner) without starting a new round.
+func (s *Server) handleRefresh(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	if err := s.session.Load().RefreshWorkingTree(); err != nil {
+		http.Error(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "refreshed"})
+}
+
+// handleActivity records an interaction in a review tab (throttled by the
+// page) so the review does not pause while someone is using it. The
+// recording itself happens in markRequestActivity.
+func (s *Server) handleActivity(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

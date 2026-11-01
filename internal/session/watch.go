@@ -322,13 +322,37 @@ func (s *Session) watchPollInterval() time.Duration {
 	return time.Second
 }
 
-// watchGit polls `git status --porcelain` for working tree changes.
-// Used in git mode (no-args invocation).
-//
-// Git status polling only runs during the "waiting for agent" phase (between
-// POST /api/finish and POST /api/round-complete). mergeExternalHunkyardJSON runs
-// on every tick since it only uses os.Stat.
-func (s *Session) watchGit(stop <-chan struct{}) {
+// slowFingerprintInterval is how often the git watcher runs the full
+// working-tree fingerprint (a tree walk) when HEAD and the index are still.
+// Edits to unstaged or untracked files move neither, so this fallback is
+// what notices them.
+const slowFingerprintInterval = 30 * time.Second
+
+// waitingFingerprintInterval is the fallback while the agent works: edits
+// are counted for the waiting screen, so the walk runs more often.
+const waitingFingerprintInterval = time.Second
+
+// fingerprintIntervals returns the tree-walk intervals for reviewing and
+// waiting; tests shorten them per session.
+func (s *Session) fingerprintIntervals() (reviewing, waiting time.Duration) {
+	reviewing, waiting = slowFingerprintInterval, waitingFingerprintInterval
+	if s.slowWalkInterval > 0 {
+		reviewing = s.slowWalkInterval
+	}
+	if s.waitingWalkInterval > 0 {
+		waiting = s.waitingWalkInterval
+	}
+	return reviewing, waiting
+}
+
+// watchGit notices working-tree changes in git mode. Each tick it probes
+// HEAD and the index (one cheap git call); the full fingerprint runs only when
+// they move or the fallback interval passes. While the agent works, changes
+// count as edits for the waiting screen. Otherwise they mark the review's
+// snapshot stale and send "review-stale", so the page can offer Refresh
+// instead of redrawing. mergeExternalHunkyardJSON runs on every tick since
+// it only uses os.Stat.
+func (s *Session) watchGit(stop <-chan struct{}) { //nolint:gocyclo // one loop owns the waiting and reviewing phases
 	ticker := time.NewTicker(s.watchPollInterval())
 	defer ticker.Stop()
 
@@ -337,40 +361,72 @@ func (s *Session) watchGit(stop <-chan struct{}) {
 	vc := s.VCS
 	s.mu.RUnlock()
 
-	var lastFP string
-	wasWaiting := false
+	fingerprint := func() string {
+		if vc != nil {
+			return vc.WorkingTreeFingerprint()
+		}
+		return vcs.WorkingTreeFingerprint()
+	}
+
+	var lastFP, lastKey, lastHead string
+	var lastWalk time.Time
+	wasWaiting, haveBaseline := false, false
+	reviewingInterval, waitingInterval := s.fingerprintIntervals()
 
 	for {
 		select {
 		case <-stop:
 			return
 		case <-ticker.C:
+			s.gitWatchTicks.Add(1)
 			// Check for external review file changes (e.g. hunkyard comment).
 			s.mergeExternalHunkyardJSON()
 
-			// Only poll vcs.VCS status while waiting for the agent to make edits.
-			if !s.isWaitingForAgent() {
-				wasWaiting = false
+			s.mu.RLock()
+			root := s.RepoRoot
+			s.mu.RUnlock()
+			// HEAD and the index only: a base change is not a working-tree change.
+			probe := snapshotKey(vc, root, "")
+			key := probe.String()
+			keyMoved := lastKey != "" && key != lastKey
+			// A new commit or checkout is a change by itself. The index alone
+			// is not: tools rewrite it to refresh stat data (a prompt's `git
+			// status`), so it only prompts a walk, and staging shows up in
+			// the fingerprint.
+			headMoved := lastHead != "" && probe.head != lastHead
+			lastKey, lastHead = key, probe.head
+			waiting := s.isWaitingForAgent()
+			interval := reviewingInterval
+			if waiting {
+				interval = waitingInterval
+			}
+			if waiting != wasWaiting || !haveBaseline {
+				// First tick, or entering/leaving the waiting phase: the walk
+				// is a baseline, not a change.
+				lastFP, lastWalk = fingerprint(), time.Now()
+				wasWaiting, haveBaseline = waiting, true
 				continue
 			}
-
-			var fp string
-			if vc != nil {
-				fp = vc.WorkingTreeFingerprint()
-			} else {
-				fp = vcs.WorkingTreeFingerprint()
-			}
-			if !wasWaiting {
-				// Just entered waiting state — establish baseline.
-				lastFP = fp
-				wasWaiting = true
+			if !keyMoved && time.Since(lastWalk) < interval {
 				continue
 			}
-			if fp == lastFP {
+			fp := fingerprint()
+			lastWalk = time.Now()
+			if fp == lastFP && !headMoved {
 				continue
 			}
 			lastFP = fp
 
+			s.invalidateWorkingTreeSnapshot()
+			if !waiting {
+				s.mu.RLock()
+				workingTree := s.Focus.Kind == FocusWorkingTree
+				s.mu.RUnlock()
+				if workingTree {
+					s.markStale()
+				}
+				continue
+			}
 			s.IncrementEdits()
 			s.notify(SSEEvent{
 				Type:    "edit-detected",
@@ -378,6 +434,8 @@ func (s *Session) watchGit(stop <-chan struct{}) {
 			})
 		case <-s.roundComplete:
 			s.handleRoundCompleteGit()
+			s.invalidateWorkingTreeSnapshot()
+			lastKey, wasWaiting, haveBaseline = "", false, false
 		}
 	}
 }
@@ -448,6 +506,9 @@ func (s *Session) watchFileMtimes(stop <-chan struct{}) {
 					Type:    "edit-detected",
 					Content: strconv.Itoa(s.GetPendingEdits()),
 				})
+				if !s.isWaitingForAgent() {
+					s.markStale()
+				}
 			}
 		case <-s.roundComplete:
 			s.handleRoundCompleteFiles()
@@ -521,6 +582,12 @@ func carryForwardComment(old Comment, now string) Comment {
 		// on round bump.
 		DOMAnchor: old.DOMAnchor,
 		PinNumber: old.PinNumber,
+
+		PinScreenshot:    old.PinScreenshot,
+		ScreenshotStatus: old.ScreenshotStatus,
+		ScreenshotReason: old.ScreenshotReason,
+		PinStatus:        old.PinStatus,
+		PinCheckedRound:  old.PinCheckedRound,
 	}
 	// Drift fields are carried forward only for code-review comments. Live
 	// pins (DOMAnchor != nil) are never drifted: the live DOM can change
@@ -614,6 +681,11 @@ func (s *Session) finishRoundComplete(edits int) {
 // and round advance still run.
 // Must only be called from the single watcher goroutine (watchGit).
 func (s *Session) handleRoundCompleteGit() {
+	s.roundBusy.Store(true)
+	defer s.roundBusy.Store(false)
+	s.mu.Lock()
+	s.stale = false
+	s.mu.Unlock()
 	s.mu.RLock()
 	edits := s.lastRoundEdits
 	s.mu.RUnlock()
@@ -787,6 +859,11 @@ func (s *Session) refreshFilesFromCLIDirs() {
 // Re-reads files, carries forward unresolved comments.
 // Must only be called from the single watcher goroutine (watchFileMtimes).
 func (s *Session) handleRoundCompleteFiles() {
+	s.roundBusy.Store(true)
+	defer s.roundBusy.Store(false)
+	s.mu.Lock()
+	s.stale = false
+	s.mu.Unlock()
 	s.mu.RLock()
 	edits := s.lastRoundEdits
 	s.mu.RUnlock()

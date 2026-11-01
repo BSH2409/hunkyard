@@ -100,8 +100,10 @@ test('live-mode.js forces Browse when commenting is unavailable', () => {
 });
 
 test('live-mode.js clears the agent-ready latch on iframe navigations', () => {
-  includes('function loadIframe(url)');
-  includes('Consume the latch so the next navigation cannot inherit Ready');
+  const start = liveModeSrc.indexOf('function loadIframe(url)');
+  assert.ok(start >= 0, 'loadIframe must exist');
+  const body = liveModeSrc.slice(start, liveModeSrc.indexOf('\n  }\n', start));
+  assert.match(body, /agentReadyForCurrentLoad = false;\s*state\.agentReady = false;[\s\S]*\.src = url/);
 });
 
 test('hunkyard-agent.js emits structured bootstrap errors', () => {

@@ -91,7 +91,7 @@ func TestStatuslineOutput(t *testing.T) {
 		t.Fatalf("exit %d", exit)
 	}
 	line := strings.TrimSpace(out.String())
-	if !strings.HasPrefix(line, "◆ yard:") || !strings.Contains(line, "1 pending") || len([]rune(line)) > 80 {
+	if !strings.HasPrefix(line, "◆ Hunkyard: ") || !strings.Contains(line, "1 pending") || len([]rune(line)) > 80 {
 		t.Fatalf("status line %q", line)
 	}
 }
@@ -105,7 +105,7 @@ func TestPromptHookAddsAfterHookNote(t *testing.T) {
 	var response map[string]any
 	_ = json.Unmarshal(out.Bytes(), &response)
 	note := textField(response["systemMessage"])
-	if note == "" || strings.Contains(note, "{n}") {
+	if !strings.HasPrefix(note, "Hunkyard ") || strings.Contains(note, "{n}") {
 		t.Fatalf("after-hook note missing or unfilled: %q", note)
 	}
 }
@@ -120,7 +120,7 @@ func TestPromptHookAnnouncesCapture(t *testing.T) {
 	note := textField(response["systemMessage"])
 	found := false
 	for _, message := range capturingMessages {
-		found = found || note == message
+		found = found || note == message && strings.HasPrefix(message, "Hunkyard ")
 	}
 	if !found {
 		t.Fatalf("capture not announced: %q", note)

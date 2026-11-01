@@ -199,7 +199,7 @@ func TestHookPathFollowsHostConfiguration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	t.Setenv("LEARN_PREFERENCES_HOME", "")
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", "")
 	tests := []struct {
 		host, codexHome, claudeDir, want string
 	}{

@@ -53,6 +53,7 @@
     if (state[k] === undefined) state[k] = stateDefaults[k];
   });
   var shared = window.hunkyard.shared;
+  var activityTracker = null; // set in boot(); the iframe agent reports through it
   var utils = window.hunkyard.liveUtils;
   var inflightAPI = (window.hunkyard && window.hunkyard.live && window.hunkyard.live.inflight) || null;
 
@@ -345,6 +346,8 @@
   }
 
   async function boot() {
+    // Interaction keeps the review from pausing (idle_pause_minutes).
+    if (window.hunkyard.activity) activityTracker = window.hunkyard.activity.start();
     if (shared && shared.applyThemeFromCookie) shared.applyThemeFromCookie();
     state.session = await waitForSession();
     if (state.session.review_type !== 'live' && state.session.review_type !== 'preview') {
@@ -1678,7 +1681,7 @@
       }
       var yard = window.hunkyard && window.hunkyard.yard;
       if (yard) {
-        yard.render(overlay.querySelector('#yardPane'), { mode: 'tab', since: yardSince });
+        yard.render(overlay.querySelector('#yardPane'), { since: yardSince });
       }
     }
 
@@ -1826,6 +1829,8 @@
   }
 
   function closeComposer() {
+    pinShots.close(composerSelectionId);
+    composerSelectionId = null;
     if (activeComposerKey) { draftMod.clearDraft(activeComposerKey); activeComposerKey = null; }
     var h = document.querySelector('.hunkyard-live-composer-host');
     if (h) { h.innerHTML = ''; delete h.dataset.active; }
@@ -1837,6 +1842,8 @@
   async function saveComposer(domAnchor) {
     var host = document.querySelector('.hunkyard-live-composer-host');
     if (!host) return;
+    var selectionId = composerSelectionId;
+    savingSelectionId = selectionId;
     var bodyEl = host.querySelector('.hunkyard-live-composer-body');
     var body = bodyEl ? bodyEl.value.trim() : '';
     var errEl = host.querySelector('.hunkyard-live-composer-error');
@@ -1853,13 +1860,16 @@
     if (saveBtn) saveBtn.disabled = true;
     try {
       var url = '/api/file/comments?path=' + encodeURIComponent(domAnchor.pathname);
+      var pin = Object.assign({ start_line: 0, end_line: 0, body: body, dom_anchor: domAnchor, author: (state.config && state.config.author) || '' }, await pinScreenshotFields(selectionId));
       var res = await shared.fetchJSON(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ start_line: 0, end_line: 0, body: body, dom_anchor: domAnchor, author: (state.config && state.config.author) || '' }),
+        body: JSON.stringify(pin),
       });
       optimisticInsertComment(domAnchor.pathname, res);
-      closeComposer();
+      // Another element may have been picked while this saved; leave its composer.
+      if (composerSelectionId === selectionId) closeComposer();
+      else pinShots.close(selectionId);
       refreshCommentsForRoute(domAnchor.pathname);
     } catch (err) {
       if (errEl) {
@@ -1869,6 +1879,7 @@
     } finally {
       if (saveBtn) saveBtn.disabled = false;
       if (composerInFlight) composerInFlight.clear();
+      if (savingSelectionId === selectionId) savingSelectionId = null;
     }
   }
 
@@ -1907,10 +1918,12 @@
     } catch (_) { /* swallow */ }
   }
 
-  async function handleReanchorSelection(pinId, domAnchor) {
+  async function handleReanchorSelection(pinId, domAnchor, selectionId) {
     if (!reanchorPutAPI) return;
     try {
-      var req = reanchorPutAPI.buildReanchorRequest(pinId, domAnchor);
+      var shotFields = await pinScreenshotFields(selectionId);
+      pinShots.close(selectionId);
+      var req = reanchorPutAPI.buildReanchorRequest(pinId, domAnchor, shotFields);
       var res = await fetch(req.url, { method: req.method, headers: req.headers, body: req.body });
       if (!res.ok) {
         showToast('Re-anchor failed: ' + res.status);
@@ -1927,9 +1940,36 @@
     }
   }
 
-  function handleSelection(domAnchor, pointer, reanchorFor) {
+  // The screenshot the frame captured for the pin being composed.
+  var pinShots = window.hunkyard.live.pinShot.createShotStore();
+  // The selection whose composer is open, and the one being saved.
+  var composerSelectionId = null;
+  var savingSelectionId = null;
+  var PIN_SHOT_WAIT_MS = 3000;
+
+  function handlePinScreenshot(msg) {
+    pinShots.receive(msg);
+    if (msg.ok) return;
+    var note = document.querySelector('.hunkyard-live-composer-host .hunkyard-live-composer-shot');
+    if (note) note.hidden = false;
+  }
+
+  async function pinScreenshotFields(selectionId) {
+    var pinShot = window.hunkyard.live.pinShot;
+    var shot = await pinShots.waitFor(selectionId, PIN_SHOT_WAIT_MS);
+    if (!shot || !shot.ok) return pinShot.pinShotPayload(shot, null);
+    try {
+      return pinShot.pinShotPayload(shot, await pinShot.uploadShot(shot, fetch));
+    } catch (err) {
+      try { console.warn('[live-mode] screenshot upload failed:', err && err.message); } catch (_) {}
+      return { screenshot_status: 'failed', screenshot_reason: 'upload' };
+    }
+  }
+
+  function handleSelection(domAnchor, pointer, reanchorFor, selectionId) {
     if (reanchorFor) {
-      handleReanchorSelection(reanchorFor, domAnchor);
+      pinShots.open(selectionId);
+      handleReanchorSelection(reanchorFor, domAnchor, selectionId);
       return;
     }
     var sizeMod = window.hunkyard.live.size;
@@ -1946,6 +1986,9 @@
     var host = ensureComposerHost();
     host.innerHTML = window.hunkyard.live.composer.renderComposerHTML(domAnchor);
     host.dataset.active = '1';
+    if (composerSelectionId && composerSelectionId !== savingSelectionId) pinShots.close(composerSelectionId);
+    composerSelectionId = selectionId || null;
+    pinShots.open(selectionId);
     // Ask the agent to keep the captured element outlined while the
     // composer is open. Cleared by closeComposer (Save / Cancel / Esc).
     if (domAnchor && domAnchor.css_selector) {
@@ -2215,15 +2258,13 @@
   function handlePinResolutionResult(msg) {
     var prev = lookupPin && lookupPin(msg && msg.pin_id);
     if (state.pinState) state.pinState.applyResolution(msg);
+    // Every resolution reports; reportPinStatus skips what the server has.
+    if (prev) reportPinStatus(prev, msg);
     if (prev) {
       var path2 = (prev.dom_anchor && prev.dom_anchor.pathname) || state.currentRoute || '/';
       var inActiveScan = typeof state.pendingByPath[path2] === 'number' &&
                          state.pendingByPath[path2] > 0;
       if (inActiveScan && !prev._roundResolved) {
-        // Drift detection PUT was removed — daemon no longer emits the
-        // drift bit on live pins. We still bookkeep
-        // pendingByPath so the resolution-gate / re-anchor flow stays
-        // accurate for route changes.
         prev._roundResolved = true;
         state.pendingByPath[path2] = Math.max(0, state.pendingByPath[path2] - 1);
         if (state.pendingByPath[path2] === 0) {
@@ -2231,6 +2272,36 @@
           delete state.pendingByPath[path2];
         }
       }
+    }
+  }
+
+  // Records on the server what the page found for this pin on this round.
+  async function reportPinStatus(pin, msg) {
+    var roundResolve = window.hunkyard.live.roundResolve;
+    var status = roundResolve.pinStatusToReport(pin, msg, state.currentRound);
+    // One report per pin at a time; a page that re-resolves on every DOM
+    // change reports again once the server has answered.
+    if (!status || pin._statusInFlight) return;
+    pin._statusInFlight = true;
+    var path = (pin.dom_anchor && pin.dom_anchor.pathname) || '/';
+    try {
+      var res = await fetch('/api/comment/' + encodeURIComponent(pin.id) + '?path=' + encodeURIComponent(path), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin_status: status }),
+      });
+      if (!res.ok) throw new Error(res.status + ' ' + (await res.text()));
+      var saved = await res.json();
+      // The panel may have reloaded its comments meanwhile; update every copy.
+      [pin].concat((state.comments || []).filter(function (c) { return c && c.id === pin.id; })).forEach(function (c) {
+        c.pin_status = saved.pin_status;
+        c.pin_checked_round = saved.pin_checked_round;
+      });
+      refreshPanel();
+    } catch (err) {
+      try { console.warn('[live-mode] pin status not saved:', err && err.message); } catch (_) {}
+    } finally {
+      pin._statusInFlight = false;
     }
   }
 
@@ -2332,9 +2403,13 @@
     });
 
     var dispatch = dispatchMod.makeMessageDispatcher({
+      // The reviewer mostly works inside the app iframe, whose events never
+      // reach this page; the agent forwards them.
+      onActivity: function () { if (activityTracker) activityTracker.mark(); },
       onAgentReady: handleAgentReady,
       onAgentError: handleAgentError,
       onSelection: handleSelection,
+      onPinScreenshot: handlePinScreenshot,
       onRequestAncestorMenu: handleAncestorMenu,
       onFocusState: handleFocusState,
       onShortcutKey: handleIframeShortcutKey,
@@ -2666,7 +2741,9 @@
     function show() {
       var allPins = (state.comments || []).filter(function (c) { return c && c.dom_anchor; });
       var t = tooltipMod.composeRoundTooltip({ round: state.currentRound, pins: allPins });
-      tip.textContent = 'Round ' + t.round + '. ' + t.carried + ' carried, ' + t.resolved + ' resolved.';
+      tip.textContent = 'Round ' + t.round + '. ' + t.carried + ' carried, ' + t.resolved + ' resolved' +
+        (t.outdated ? ', ' + t.outdated + ' outdated' : '') +
+        (t.unchecked ? ', ' + t.unchecked + ' not checked yet' : '') + '.';
       var r = btn.getBoundingClientRect();
       tip.style.left = r.left + 'px';
       tip.style.top  = (r.bottom + 6) + 'px';

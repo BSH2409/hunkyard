@@ -63,7 +63,7 @@ func setHome(t *testing.T, dir string) {
 	t.Helper()
 	t.Setenv("HOME", dir)
 	t.Setenv("CODEX_HOME", "")
-	t.Setenv("LEARN_PREFERENCES_HOME", "")
+	t.Setenv("HUNKYARD_PREFERENCES_HOME", "")
 	if runtime.GOOS == "windows" {
 		t.Setenv("USERPROFILE", dir)
 		// HOMEDRIVE/HOMEPATH together form a fallback used by os.UserHomeDir.
@@ -160,15 +160,6 @@ func advanceRoundForTest(s *Session) {
 	next := s.ReviewRound
 	s.mu.Unlock()
 	if (rt == "live" || rt == "preview") && s.liveRoundStart != nil {
-		s.liveRoundStart(prev, next)
-	}
-}
-
-// fireOnLiveRoundStart invokes the installed liveRoundStart hook
-// directly. Used by SSE tests to trigger an event without driving the
-// watcher loop.
-func fireOnLiveRoundStart(s *Session, prev, next int) {
-	if s.liveRoundStart != nil {
 		s.liveRoundStart(prev, next)
 	}
 }

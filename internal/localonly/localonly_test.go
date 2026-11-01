@@ -70,10 +70,23 @@ func TestDockerListenerArguments(t *testing.T) {
 	}
 }
 
-func TestSourceReviewDoesNotExecuteHTMLOrLivePages(t *testing.T) {
-	for _, args := range [][]string{{"live", "http://127.0.0.1:3000"}, {"preview", "index.html"}, {"_serve", "--live-origin", "http://127.0.0.1:3000"}, {"_serve", "--preview-file", "index.html"}} {
-		if err := ValidateArgs(args); err == nil {
-			t.Errorf("accepted executable page review: %v", args)
+func TestLocalLiveAndPreviewAllowed(t *testing.T) {
+	for _, tc := range []struct {
+		args []string
+		ok   bool
+	}{
+		{[]string{"live", "http://localhost:3000"}, true},
+		{[]string{"live", "http://127.0.0.1:3000/app"}, true},
+		{[]string{"live", "https://example.com"}, false},
+		{[]string{"preview", "page.html"}, true},
+		{[]string{"_serve", "--live-origin", "http://127.0.0.1:3000"}, true},
+		{[]string{"_serve", "--preview-file", "index.html"}, true},
+		{[]string{"pr", "42"}, false},
+		{[]string{"review", "--pr", "42"}, false},
+		{[]string{"review", "--vcs", "jj"}, false},
+	} {
+		if err := ValidateArgs(tc.args); (err == nil) != tc.ok {
+			t.Errorf("%v: err = %v, want allowed=%v", tc.args, err, tc.ok)
 		}
 	}
 }

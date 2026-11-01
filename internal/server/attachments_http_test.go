@@ -101,8 +101,8 @@ func TestHandleAttachments_UploadAndGet(t *testing.T) {
 	if ct := getRec.Header().Get("Content-Type"); ct != "image/png" {
 		t.Errorf("Content-Type = %q, want image/png", ct)
 	}
-	if cc := getRec.Header().Get("Cache-Control"); !strings.Contains(cc, "immutable") {
-		t.Errorf("Cache-Control = %q, want immutable directive", cc)
+	if cc := getRec.Header().Get("Cache-Control"); cc != "private, no-store" {
+		t.Errorf("Cache-Control = %q, want private, no-store", cc)
 	}
 }
 

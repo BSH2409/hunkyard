@@ -18,19 +18,12 @@
     }
     return out;
   }
-  function classifyPinForRound(prev, resolution, round) {
-    const wasDrifted = !!(prev && prev.drifted);
-    if (!resolution) return { driftedOnRound: null, drifted: wasDrifted };
-    switch (resolution.status) {
-      case 'resolved':
-        return { driftedOnRound: null, drifted: false };
-      case 'drifted':
-        if (wasDrifted) return { driftedOnRound: null, drifted: true };
-        return { driftedOnRound: round, drifted: true };
-      case 'drifted-recoverable':
-      default:
-        return { driftedOnRound: null, drifted: wasDrifted };
-    }
+  // The status the page found for a pin, when the server has not recorded
+  // it for this round yet; null when there is nothing to report.
+  function pinStatusToReport(pin, msg, round) {
+    if (!pin || !msg || !msg.pin_status) return null;
+    if (pin.pin_status === msg.pin_status && pin.pin_checked_round === round) return null;
+    return msg.pin_status;
   }
-  return { pinsToResolveAtRoundStart, classifyPinForRound };
+  return { pinsToResolveAtRoundStart, pinStatusToReport };
 });

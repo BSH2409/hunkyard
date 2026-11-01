@@ -1,12 +1,12 @@
 # Local preference maintenance
 
-All commands use `hunkyard preferences`. Add `--root PATH` only when the user deliberately chooses another canonical preference root. Normal Codex and Claude use the same `${LEARN_PREFERENCES_HOME:-$HOME/.agents}` store, with data under its `learn-preferences/` folder and the optional `code-like-him` baseline under `learn-preferences/sources/`.
+All commands use `hunkyard preferences`. Add `--root PATH` only when the user deliberately chooses another canonical preference root. Normal Codex and Claude use the same `${HUNKYARD_PREFERENCES_HOME:-$HOME/.agents}` store, with data under its `hunkyard-preferences/` folder and the optional `code-like-him` baseline under `hunkyard-preferences/sources/`.
 
 The `code-like-him` source baseline is optional. Personal preferences work without it. Once a baseline is imported, missing or changed source files are reported rather than silently discarding their provenance.
 
 ## Hooks and installation
 
-Install the workflow with `hunkyard install --global preferences`. It writes the skill to `~/.agents/skills/learn-preferences` for Codex and to the Claude skills folder (`$CLAUDE_CONFIG_DIR` when set). Existing skill files and symlinked skill folders are preserved unless `--force` is supplied; with `--force`, a symlinked folder is replaced by a copy rather than written through. Back up a customized skill before replacing it. This does not install a hook or cron job.
+Install the workflow with `hunkyard install --global preferences`. It writes the skill to `~/.agents/skills/hunkyard-preferences` for Codex and to the Claude skills folder (`$CLAUDE_CONFIG_DIR` when set). Existing skill files and symlinked skill folders are preserved unless `--force` is supplied; with `--force`, a symlinked folder is replaced by a copy rather than written through. Back up a customized skill before replacing it. This does not install a hook or cron job.
 
 Explicit hook installation uses `hunkyard preferences install-hook --host codex --json` or `--host claude`, which write `${CODEX_HOME:-$HOME/.codex}/hooks.json` and `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/settings.json`. It registers `SessionStart`, `UserPromptSubmit`, `PreToolUse` (shell commands and file edits) and `Stop` on both hosts, `Interrupt` on Codex, and a background `asyncRewake` review-wake handler under Claude's `Stop`, one stable command each, and replaces earlier Hunkyard hooks. `hunkyard preferences doctor --json` reports missing or stale events. It preserves unrelated settings, backs up changed settings, verifies the result, and rolls back a failed write. Inspect the returned absolute command in the host's `/hooks` UI and trust it there. Never synthesize trust. Hooks are advisory: malformed input, unavailable storage, and lock contention must not block the user's session. Transcript context is bounded, restricted to owned files for the same session, sanitized, and never used as durable intent.
 

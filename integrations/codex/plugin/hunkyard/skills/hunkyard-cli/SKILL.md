@@ -5,7 +5,7 @@ description: Use when reading local Hunkyard feedback, posting replies, or integ
 
 # Local Hunkyard CLI
 
-Read [the shared review protocol](../hunkyard/references/review-workflow.md) for publication, selected skills, learn-preferences classification, acknowledgment, and next rounds. Use the same stable owner environment as the launch; target the explicit `--session ID`.
+Read [the shared review protocol](../hunkyard/references/review-workflow.md) for publication, selected skills, hunkyard-preferences classification, acknowledgment, and next rounds. Use the same stable owner environment as the launch; target the explicit `--session ID`.
 
 - `hunkyard feedback await --session ID --follow --json`
 - `hunkyard feedback learn --session ID --batch BATCH --decisions FILE --json`
