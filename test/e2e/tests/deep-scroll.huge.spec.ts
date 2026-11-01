@@ -28,31 +28,44 @@ async function reviewOrder(page: Page): Promise<string[]> {
     els.map(el => (el as HTMLElement).dataset.treePath as string));
 }
 
-// Screenshot a region and count pixels that differ from its first pixel.
-// Decoded in the page with a canvas, so no image dependency.
-async function paintedFraction(page: Page, clip: { x: number; y: number; width: number; height: number }) {
+// Screenshot a region and count pixels that differ from the background:
+// the given color, or the region's first pixel. Decoded in the page with a
+// canvas, so no image dependency.
+async function paintedFraction(page: Page, clip: { x: number; y: number; width: number; height: number }, background?: number[]) {
   const png = await page.screenshot({ clip });
-  return page.evaluate(async (b64) => {
+  return page.evaluate(async ({ b64, background }) => {
     const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
     const img = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
     const canvas = new OffscreenCanvas(img.width, img.height);
     const ctx = canvas.getContext('2d')!;
     ctx.drawImage(img, 0, 0);
     const { data } = ctx.getImageData(0, 0, img.width, img.height);
-    const bg = [data[0], data[1], data[2]];
+    const bg = background || [data[0], data[1], data[2]];
     let differs = 0;
     for (let i = 0; i < data.length; i += 4) {
       if (Math.abs(data[i] - bg[0]) + Math.abs(data[i + 1] - bg[1]) + Math.abs(data[i + 2] - bg[2]) > 24) differs++;
     }
     return differs / (data.length / 4);
-  }, png.toString('base64'));
+  }, { b64: png.toString('base64'), background });
+}
+
+// The review pane's own background. Its first pixel can fall inside a
+// colored diff block, which would count the block as unpainted.
+async function paneBackground(page: Page): Promise<number[]> {
+  return reviewScroller(page).evaluate(el => {
+    for (let node: Element | null = el; node; node = node.parentElement) {
+      const m = getComputedStyle(node).backgroundColor.match(/[\d.]+/g);
+      if (m && (m.length < 4 || Number(m[3]) > 0)) return m.slice(0, 3).map(Number);
+    }
+    return [255, 255, 255];
+  });
 }
 
 async function expectPainted(page: Page) {
   const content = await reviewScroller(page).boundingBox();
   const side = await page.locator('.file-tree-panel').boundingBox();
   expect(content && side).toBeTruthy();
-  const contentPaint = await paintedFraction(page, { x: content!.x + 10, y: content!.y + 10, width: content!.width - 20, height: content!.height - 20 });
+  const contentPaint = await paintedFraction(page, { x: content!.x + 10, y: content!.y + 10, width: content!.width - 20, height: content!.height - 20 }, await paneBackground(page));
   const sidebarPaint = await paintedFraction(page, { x: side!.x, y: side!.y + 60, width: side!.width, height: Math.min(300, side!.height - 80) });
   expect(contentPaint, 'diff content is painted').toBeGreaterThan(0.02);
   expect(sidebarPaint, 'sidebar is painted').toBeGreaterThan(0.01);
