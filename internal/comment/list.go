@@ -18,25 +18,6 @@ type ListedComment struct {
 	Comment
 }
 
-// UnmarshalJSON decodes the list fields itself: Comment's own UnmarshalJSON
-// would otherwise be promoted and drop them.
-func (l *ListedComment) UnmarshalJSON(data []byte) error {
-	var list struct {
-		Scope string  `json:"scope"`
-		Path  *string `json:"path"`
-	}
-	if err := json.Unmarshal(data, &list); err != nil {
-		return err
-	}
-	if err := json.Unmarshal(data, &l.Comment); err != nil {
-		return err
-	}
-	// "scope" on the wire is the list scope; Comment.Scope is shadowed.
-	l.Comment.Scope = ""
-	l.Scope, l.Path = list.Scope, list.Path
-	return nil
-}
-
 func isUnresolved(c Comment) bool {
 	return !c.Resolved
 }

@@ -50,8 +50,11 @@ func batchFixture(t *testing.T) string {
 	if err := os.Remove(filepath.Join(dir, "gone.txt")); err != nil {
 		t.Fatal(err)
 	}
-	writeFile(t, filepath.Join(dir, `quo"te.txt`), "quoted\n")
-	gitT(t, dir, "add", `quo"te.txt`)
+	// Windows file names cannot contain a double quote.
+	if runtime.GOOS != "windows" {
+		writeFile(t, filepath.Join(dir, `quo"te.txt`), "quoted\n")
+		gitT(t, dir, "add", `quo"te.txt`)
+	}
 	writeFile(t, filepath.Join(dir, "new.txt"), "brand\nnew\n")
 	return dir
 }

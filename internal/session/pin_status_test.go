@@ -6,20 +6,17 @@ import (
 )
 
 func TestLegacyDriftedPinLoadsAsOutdated(t *testing.T) {
-	var pin Comment
-	if err := json.Unmarshal([]byte(`{"id":"p1","dom_anchor":{"pathname":"/","css_selector":"h1"},"drifted":true,"drifted_on_round":2}`), &pin); err != nil {
+	var comments []Comment
+	if err := json.Unmarshal([]byte(`[{"id":"p1","dom_anchor":{"pathname":"/","css_selector":"h1"},"drifted":true,"drifted_on_round":2},{"id":"c1","drifted":true,"drifted_on_round":2}]`), &comments); err != nil {
 		t.Fatal(err)
 	}
+	normalizeLoadedComments(comments)
+	pin, line := comments[0], comments[1]
 	if pin.PinStatus != PinOutdated || pin.Drifted || pin.DriftedOnRound != 0 {
 		t.Errorf("legacy drifted pin = status %q drifted %v round %d, want outdated and no drift", pin.PinStatus, pin.Drifted, pin.DriftedOnRound)
 	}
-
-	var line Comment
-	if err := json.Unmarshal([]byte(`{"id":"c1","drifted":true,"drifted_on_round":2}`), &line); err != nil {
-		t.Fatal(err)
-	}
-	if !line.Drifted || line.DriftedOnRound != 2 || line.PinStatus != "" {
-		t.Errorf("line comment drift changed: %+v", line)
+	if !line.Drifted || line.DriftedOnRound != 2 || line.PinStatus != "" || line.Scope != "line" {
+		t.Errorf("line comment changed: %+v", line)
 	}
 }
 
@@ -41,7 +38,7 @@ func TestReanchorResetsPinStatus(t *testing.T) {
 // Legacy line comments get scope "line" on load; live pins have no line.
 func TestLoadingLeavesLivePinsWithoutLineScope(t *testing.T) {
 	comments := []Comment{{ID: "c1"}, {ID: "p1", DOMAnchor: &DOMAnchor{Pathname: "/", CSSSelector: "#pay"}}}
-	defaultEmptyCommentScopes(comments)
+	normalizeLoadedComments(comments)
 	if comments[0].Scope != "line" || comments[1].Scope != "" {
 		t.Errorf("scopes after load = %q, %q; want line for the legacy comment and none for the pin", comments[0].Scope, comments[1].Scope)
 	}

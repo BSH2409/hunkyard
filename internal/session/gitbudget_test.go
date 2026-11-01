@@ -55,7 +55,7 @@ func newBudgetRepo(t *testing.T, files, untracked int) string {
 			t.Fatal(err)
 		}
 		script := `BEGIN { for (i = 0; i < n; i++) { f = d "/" p i ".go"; printf "package p\n\nfunc F%d() int { return %d }\n", i, i > f; close(f) } }`
-		cmd := exec.Command("awk", "-v", "n="+itoa(count), "-v", "d="+filepath.Join(dir, dirName), "-v", "p="+prefix, script)
+		cmd := exec.Command("awk", "-v", "n="+itoa(count), "-v", "d="+filepath.ToSlash(filepath.Join(dir, dirName)), "-v", "p="+prefix, script)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("awk: %v %s", err, out)
 		}

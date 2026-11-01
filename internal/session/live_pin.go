@@ -139,23 +139,6 @@ type PinFingerprint struct {
 	HTMLHash      string `json:"html_hash"`
 }
 
-// UnmarshalJSON reads a comment and moves a live pin's legacy drift flag to
-// its pin status. Line comments keep their drift fields.
-func (c *Comment) UnmarshalJSON(data []byte) error {
-	type plain Comment
-	if err := json.Unmarshal(data, (*plain)(c)); err != nil {
-		return err
-	}
-	if c.DOMAnchor != nil && c.Drifted {
-		c.Drifted = false
-		c.DriftedOnRound = 0
-		if c.PinStatus == "" {
-			c.PinStatus = PinOutdated
-		}
-	}
-	return nil
-}
-
 // ReplacePinShot sets a re-anchored pin's screenshot fields and returns the
 // screenshot it replaced, so the caller can delete its file.
 func (s *Session) ReplacePinShot(filePath, id string, shot PinShot) *PinScreenshot {

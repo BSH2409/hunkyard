@@ -2570,7 +2570,7 @@ func (s *Session) restoreFileCommentsLocked(cj *HunkyardJSON) {
 			continue
 		}
 		f.Comments = cf.Comments
-		defaultEmptyCommentScopes(f.Comments)
+		normalizeLoadedComments(f.Comments)
 	}
 }
 
@@ -2752,7 +2752,7 @@ func (s *Session) applyOrphanedHunkyardFile(path string, cf HunkyardJSONFile, by
 	}
 	if f != nil {
 		f.Comments = mergeCommentSlices(f.Comments, comments)
-		defaultEmptyCommentScopes(f.Comments)
+		normalizeLoadedComments(f.Comments)
 		return
 	}
 	fe := &FileEntry{
@@ -2762,7 +2762,7 @@ func (s *Session) applyOrphanedHunkyardFile(path string, cf HunkyardJSONFile, by
 		Comments: comments,
 		Orphaned: true,
 	}
-	defaultEmptyCommentScopes(fe.Comments)
+	normalizeLoadedComments(fe.Comments)
 	s.Files = append(s.Files, fe)
 }
 
@@ -2780,10 +2780,24 @@ func omitTombstonedComments(comments []Comment, deleted map[string]struct{}) []C
 	return out
 }
 
-func defaultEmptyCommentScopes(comments []Comment) {
+// normalizeLoadedComments brings comments read from a review file up to the
+// current shape: legacy line comments get scope "line", and a live pin's
+// legacy drift flag becomes its pin status. Pins have no scope.
+func normalizeLoadedComments(comments []Comment) {
 	for i := range comments {
-		if comments[i].Scope == "" && comments[i].DOMAnchor == nil {
-			comments[i].Scope = "line"
+		c := &comments[i]
+		if c.DOMAnchor == nil {
+			if c.Scope == "" {
+				c.Scope = "line"
+			}
+			continue
+		}
+		if c.Drifted {
+			c.Drifted = false
+			c.DriftedOnRound = 0
+			if c.PinStatus == "" {
+				c.PinStatus = PinOutdated
+			}
 		}
 	}
 }

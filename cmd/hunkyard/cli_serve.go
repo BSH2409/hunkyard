@@ -13,7 +13,6 @@ import (
 	"path/filepath"
 	"strconv"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/BSH2409/hunkyard/internal/feedback"
@@ -73,7 +72,7 @@ func checkStaleIntegrations(sc *server.DaemonCLIConfig, srv *Server, cwd string)
 // a second review should start, not fail. A port someone chose is kept.
 func bindReviewListener(host string, port int, defaulted bool) (net.Listener, error) {
 	listener, err := bindListener(host, port)
-	if err != nil && defaulted && port != 0 && errors.Is(err, syscall.EADDRINUSE) {
+	if err != nil && defaulted && port != 0 && addressInUse(err) {
 		return bindListener(host, 0)
 	}
 	return listener, err

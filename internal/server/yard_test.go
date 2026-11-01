@@ -114,6 +114,9 @@ func TestOldYardAPIPathIsGone(t *testing.T) {
 
 // "This repository" in the Preferences tab means the repository under review.
 func TestYardRepositoryRuleUsesTheReviewedRepository(t *testing.T) {
+	if !preferences.SupportedPlatform {
+		t.Skip(preferences.ErrUnsupportedPlatform.Error())
+	}
 	t.Setenv("HUNKYARD_PREFERENCES_HOME", t.TempDir())
 	s, sess := newTestServer(t)
 	if out, err := exec.Command("git", "-C", sess.RepoRoot, "init", "-q").CombinedOutput(); err != nil {
