@@ -43,3 +43,21 @@ func TestBaseRefCannotPassGitOptions(t *testing.T) {
 		t.Fatalf("a base ref reached git as an option: victim now %q", data)
 	}
 }
+
+// The repository root may arrive un-normalised (git reports C:/... with
+// forward slashes on Windows; a trailing separator elsewhere); files inside
+// it are still inside it.
+func TestResolveInRepoAcceptsAnUnnormalisedRoot(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, "notes.md"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	for _, r := range []string{root + string(filepath.Separator), filepath.ToSlash(root), filepath.Join(root, "sub", "..")} {
+		if _, ok := resolveInRepo(r, "notes.md"); !ok {
+			t.Errorf("resolveInRepo(%q, notes.md) refused a file inside the repository", r)
+		}
+		if _, ok := resolveInRepo(r, "../outside.md"); ok {
+			t.Errorf("resolveInRepo(%q, ../outside.md) accepted a path outside the repository", r)
+		}
+	}
+}

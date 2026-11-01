@@ -2086,6 +2086,9 @@ func resolveInRepo(repoRoot, path string) (string, bool) {
 	if repoRoot == "" {
 		return "", false
 	}
+	// Compare like with like: the root may carry forward slashes (git on
+	// Windows), a trailing separator or "..", and Join cleans the path.
+	repoRoot = filepath.Clean(filepath.FromSlash(repoRoot))
 	clean := filepath.Clean(filepath.FromSlash(path))
 	if filepath.IsAbs(clean) || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
 		return "", false
