@@ -82,7 +82,11 @@ func TestSplitBatchedPatchEdgeCases(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(changes) < 9 {
+	want := 9
+	if runtime.GOOS == "windows" {
+		want = 8 // no file with a double quote in its name
+	}
+	if len(changes) < want {
 		t.Fatalf("fixture produced only %d changes: %+v", len(changes), changes)
 	}
 	batch, err := (&GitVCS{}).DiffAll(context.Background(), dir, DiffSpec{Base: "HEAD", WholeAdded: true}, changes)

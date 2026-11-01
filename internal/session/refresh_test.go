@@ -16,6 +16,10 @@ func TestRefreshWorkingTreePicksUpEditsAndKeepsComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The comment schedules a debounced write into the repository; stop it
+	// before the temp directory is removed (Windows cannot remove a
+	// directory that is being written).
+	t.Cleanup(sess.QuiesceForTest)
 	if _, ok := sess.AddComment("src/file3.go", 3, 3, "", "keep me", "", ""); !ok {
 		t.Fatal("comment rejected")
 	}

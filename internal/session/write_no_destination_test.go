@@ -35,10 +35,18 @@ func TestScheduleWriteWithoutDestinationDoesNotTouchCWD(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 
-	time.Sleep(500 * time.Millisecond)
-
-	if _, err := os.Stat(ReviewPathsFor(withDest.hunkyardJSONPath()).Review); err != nil {
-		t.Fatalf("control: the debounced write did not land within the window: %v", err)
+	// Wait for the control write rather than a fixed time: slow runners take
+	// longer than the debounce, and both writes were scheduled together.
+	deadline := time.Now().Add(10 * time.Second)
+	var statErr error
+	for {
+		if _, statErr = os.Stat(ReviewPathsFor(withDest.hunkyardJSONPath()).Review); statErr == nil || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if statErr != nil {
+		t.Fatalf("control: the debounced write did not land within 10s: %v", statErr)
 	}
 	if _, err := os.Stat(filepath.Join(dir, ".hunkyard")); !os.IsNotExist(err) {
 		t.Fatalf("debounced write leaked .hunkyard into the working directory (stat err: %v)", err)
