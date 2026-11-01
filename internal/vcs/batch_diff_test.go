@@ -84,7 +84,7 @@ func TestSplitBatchedPatchEdgeCases(t *testing.T) {
 	}
 	want := 9
 	if runtime.GOOS == "windows" {
-		want = 8 // no file with a double quote in its name
+		want = 7 // no double quote in file names, and no executable bit to change
 	}
 	if len(changes) < want {
 		t.Fatalf("fixture produced only %d changes: %+v", len(changes), changes)
