@@ -27,6 +27,23 @@ func EnsureReviewFolder(identity string) error {
 //     sidecar into <identity>/snapshots.json.
 //
 // No-op when there's nothing to migrate.
+// recoverInterruptedMigration finishes a folder migration that stopped after
+// moving review.json into its temp folder, which left the review only there.
+// It runs where an existing review is opened and found missing, not on the
+// save path of every new review. It reports whether it restored the folder.
+func recoverInterruptedMigration(identity string) bool {
+	tmp := identity + migrateTmpSuffix
+	if _, err := os.Stat(filepath.Join(tmp, "review.json")); err != nil {
+		return false
+	}
+	if err := os.Rename(tmp, identity); err != nil {
+		fmt.Fprintf(os.Stderr, "hunkyard: could not recover interrupted review migration at %s: %v\n", tmp, err)
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "hunkyard: recovered interrupted review migration: %s\n", identity)
+	return true
+}
+
 func ensureReviewFolder(identity string) error {
 	if info, err := os.Stat(identity); err == nil {
 		if info.IsDir() {
@@ -38,17 +55,6 @@ func ensureReviewFolder(identity string) error {
 		return migrateFlatToFolder(identity, identity)
 	} else if !os.IsNotExist(err) {
 		return fmt.Errorf("stat review identity: %w", err)
-	}
-
-	// A migration interrupted after moving review.json into its temp folder
-	// left the review only there: finish the rename.
-	tmp := identity + migrateTmpSuffix
-	if _, err := os.Stat(filepath.Join(tmp, "review.json")); err == nil {
-		if err := os.Rename(tmp, identity); err != nil {
-			return fmt.Errorf("recovering interrupted review migration: %w", err)
-		}
-		fmt.Fprintf(os.Stderr, "hunkyard: recovered interrupted review migration: %s\n", identity)
-		return nil
 	}
 
 	// Legacy <identity>.json path (folder or flat). The v4 identity does not

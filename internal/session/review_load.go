@@ -11,6 +11,9 @@ import (
 func readHunkyardJSONFromDisk(hunkyardPath string) (HunkyardJSON, error) {
 	var cj HunkyardJSON
 	data, err := ReadFileShared(ReviewPathsFor(hunkyardPath).Review)
+	if err != nil && os.IsNotExist(err) && recoverInterruptedMigration(hunkyardPath) {
+		data, err = ReadFileShared(ReviewPathsFor(hunkyardPath).Review)
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cj, nil

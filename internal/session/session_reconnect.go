@@ -213,6 +213,9 @@ func reconnectDir(cj HunkyardJSON, stale daemon.SessionEntry) (string, error) {
 func readReconnectReview(key, revDir string) (HunkyardJSON, error) {
 	var cj HunkyardJSON
 	data, err := os.ReadFile(ReviewPathsFor(revDir).Review)
+	if err != nil && os.IsNotExist(err) && recoverInterruptedMigration(revDir) {
+		data, err = os.ReadFile(ReviewPathsFor(revDir).Review)
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			if marker, paused := ReadPausedMarker(revDir); paused {

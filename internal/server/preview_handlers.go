@@ -6,6 +6,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"path"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -67,7 +68,11 @@ func newPreviewContentHandler(listenHost, previewFile string, apiPort int) http.
 			http.NotFound(w, r)
 			return
 		}
-		resolved, err := filepath.EvalSymlinks(filepath.Join(filepath.Dir(previewFile), filepath.Clean("/"+reqPath)))
+		// reqPath is a URL path: clean it as one (rooted, so ".." cannot climb
+		// out) and only then make it a file path, which also keeps a doubled
+		// slash from being read as a Windows UNC prefix.
+		cleaned := path.Clean("/" + strings.TrimPrefix(reqPath, "/"))
+		resolved, err := filepath.EvalSymlinks(filepath.Join(filepath.Dir(previewFile), filepath.FromSlash(cleaned)))
 		if err != nil {
 			http.NotFound(w, r)
 			return

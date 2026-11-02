@@ -8,7 +8,7 @@ import (
 
 // A crash between moving review.json into the temp folder and renaming that
 // folder into place leaves the review only in the temp folder.
-func TestEnsureReviewFolderRecoversAnInterruptedMigration(t *testing.T) {
+func TestOpeningAReviewRecoversAnInterruptedMigration(t *testing.T) {
 	identity := filepath.Join(t.TempDir(), "abcdefabcdef")
 	tmp := identity + ".hunkyard-migrate.tmp"
 	if err := os.MkdirAll(tmp, 0o755); err != nil {
@@ -17,7 +17,7 @@ func TestEnsureReviewFolderRecoversAnInterruptedMigration(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(tmp, "review.json"), []byte(`{"branch":"main","files":{}}`), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := ensureReviewFolder(identity); err != nil {
+	if _, err := readHunkyardJSONFromDisk(identity); err != nil {
 		t.Fatal(err)
 	}
 	data, err := os.ReadFile(filepath.Join(identity, "review.json"))
@@ -46,4 +46,19 @@ func TestMigrationNeverWipesATempFolderHoldingTheReview(t *testing.T) {
 		}
 	}
 	t.Fatal("the only copy of the interrupted review was deleted")
+}
+
+func TestResumingAReviewRecoversAnInterruptedMigration(t *testing.T) {
+	revDir := filepath.Join(t.TempDir(), "abcdefabcdef")
+	tmp := revDir + migrateTmpSuffix
+	if err := os.MkdirAll(tmp, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(tmp, "review.json"), []byte(`{"branch":"feature","files":{}}`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cj, err := readReconnectReview("abcdefabcdef", revDir)
+	if err != nil || cj.Branch != "feature" {
+		t.Fatalf("resume did not recover the review: %+v %v", cj, err)
+	}
 }
