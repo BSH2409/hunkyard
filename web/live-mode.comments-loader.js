@@ -87,10 +87,21 @@
             return [];
           });
       }));
+      // Open reply and edit composers live on the comment objects; carry
+      // them over so an agent reply or SSE refresh never closes one.
+      var previous = {};
+      (state.comments || []).forEach(function (c) { if (c && c.id) previous[c.id] = c; });
       state.comments = results.reduce(
         function (acc, arr) { return acc.concat(arr); },
         []
       );
+      state.comments.forEach(function (c) {
+        var old = previous[c.id];
+        if (!old) return;
+        ['_replyOpen', '_replyDraft', '_editOpen', '_editDraft'].forEach(function (key) {
+          if (old[key] !== undefined) c[key] = old[key];
+        });
+      });
     }
 
     return { loadAllComments: loadAllComments };

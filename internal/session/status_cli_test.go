@@ -134,7 +134,7 @@ func TestResolveStatusReviewPathCentralizedFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := daemon.SessionKey(resolvedCWD, "feature", nil)
-	want, err := daemon.ReviewFilePath(key)
+	want, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}

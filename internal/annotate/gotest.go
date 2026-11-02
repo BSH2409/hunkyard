@@ -39,13 +39,19 @@ func parseGoTest(r io.Reader, opts Options) (Annotations, error) {
 		if e.Test == "" {
 			continue
 		}
+		// Tests are identified by package and name: two packages can both
+		// have a TestParse, and their output must not mix.
+		key := e.Package + "\x00" + e.Test
 		switch e.Action {
 		case "output":
 			if text := strings.TrimSpace(e.Output); text != "" && !strings.HasPrefix(text, "=== ") && !strings.HasPrefix(text, "--- ") {
-				output[e.Test] = append(output[e.Test], text)
+				output[key] = append(output[key], text)
 			}
+		case "pass", "skip":
+			delete(output, key)
 		case "fail":
-			f, ok := failureFinding(e.Test, packageDir(e.Package, opts), output[e.Test], opts)
+			f, ok := failureFinding(e.Test, packageDir(e.Package, opts), output[key], opts)
+			delete(output, key)
 			if !ok {
 				out.IgnoredFiles++
 				continue

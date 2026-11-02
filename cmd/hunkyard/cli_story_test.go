@@ -436,15 +436,16 @@ func TestStoryNoSpendWithoutStory(t *testing.T) {
 	}
 }
 
-// fixturePath resolves a repo test fixture, anchored at this test file's own
-// directory (via runtime.Caller) so it stays correct after t.Chdir().
+// fixturePath resolves a story fixture under testdata/story, anchored at this
+// test file's own directory (via runtime.Caller) so it stays correct after
+// t.Chdir().
 func fixturePath(t *testing.T, name string) string {
 	t.Helper()
 	_, thisFile, _, ok := runtime.Caller(0)
 	if !ok {
 		t.Fatal("runtime.Caller failed")
 	}
-	return filepath.Join(filepath.Dir(thisFile), "..", "..", "test", "fixtures", "story", name)
+	return filepath.Join(filepath.Dir(thisFile), "testdata", "story", name)
 }
 
 func TestStoryFixtureValidIngests(t *testing.T) {

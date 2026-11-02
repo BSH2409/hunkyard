@@ -2,9 +2,13 @@ package session
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"github.com/BSH2409/hunkyard/internal/daemon"
 )
 
 // pausedMarkerName is the file a paused review leaves in its review folder:
@@ -58,3 +62,83 @@ func (s *Session) RoundBusy() bool { return s.roundBusy.Load() }
 
 // SetRoundBusyForTest marks a round transition in progress.
 func (s *Session) SetRoundBusyForTest(busy bool) { s.roundBusy.Store(busy) }
+
+// A paused review's marker lives in its own folder, which for plan and
+// --output reviews is not ~/.hunkyard/reviews/<key>, and the session file
+// that named that folder is gone once the daemon exits. A pointer in the
+// sessions folder records it until the review resumes or is stopped.
+func pausedPointerPath(key string) (string, error) {
+	dir, err := daemon.SessionsDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, key+".paused"), nil
+}
+
+// RecordPausedReview remembers where key's paused review lives.
+func RecordPausedReview(key, reviewDir string) error {
+	path, err := pausedPointerPath(key)
+	if err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	return AtomicWriteFile(path, []byte(reviewDir), 0o600)
+}
+
+// PausedReviewDir returns the folder of key's paused review, if it is paused.
+func PausedReviewDir(key string) (string, bool) {
+	if path, err := pausedPointerPath(key); err == nil {
+		if data, err := os.ReadFile(path); err == nil {
+			if _, paused := ReadPausedMarker(string(data)); paused {
+				return string(data), true
+			}
+		}
+	}
+	dir, err := daemon.ReviewDir(key)
+	if err != nil {
+		return "", false
+	}
+	_, paused := ReadPausedMarker(dir)
+	return dir, paused
+}
+
+// ForgetPausedReview clears key's pause: the marker in reviewDir and the
+// pointer to it.
+func ForgetPausedReview(key, reviewDir string) error {
+	if path, err := pausedPointerPath(key); err == nil {
+		_ = os.Remove(path)
+	}
+	return RemovePausedMarker(reviewDir)
+}
+
+// ForgetAllPausedReviews clears every paused review: those recorded in the
+// sessions folder and any marker left in the reviews folder.
+func ForgetAllPausedReviews() error {
+	var errs []error
+	if dir, err := daemon.SessionsDir(); err == nil {
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			key, ok := strings.CutSuffix(e.Name(), ".paused")
+			if !ok {
+				continue
+			}
+			reviewDir, _ := PausedReviewDir(key)
+			if err := ForgetPausedReview(key, reviewDir); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	if dir, err := daemon.ReviewsDir(); err == nil {
+		entries, _ := os.ReadDir(dir)
+		for _, e := range entries {
+			if e.IsDir() {
+				if err := RemovePausedMarker(filepath.Join(dir, e.Name())); err != nil {
+					errs = append(errs, err)
+				}
+			}
+		}
+	}
+	return errors.Join(errs...)
+}

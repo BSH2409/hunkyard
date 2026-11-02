@@ -16,7 +16,7 @@
         .replace(/"/g, '&quot;').replace(/'/g, '&#39;'); };
   function renderAncestorMenuHTML(options) {
     var items = options.map(function (o) {
-      return '<button type="button" class="hunkyard-live-ancestor-menu-item" data-level="' + o.level + '">' + escapeHTML(o.label) + '</button>';
+      return '<button type="button" class="hunkyard-live-ancestor-menu-item" data-level="' + escapeHTML(o.level) + '">' + escapeHTML(o.label) + '</button>';
     }).join('');
     return '<div class="hunkyard-live-ancestor-menu" role="menu">' + items + '</div>';
   }

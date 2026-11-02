@@ -32,11 +32,11 @@ func TestConsumeOverrideSingleUseAfterFailedWrite(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
 
-	if s.consumeOverride("r1") {
+	if s.consumeOverrides([]string{"r1"}) {
 		t.Error("override reported as used although it is still on disk")
 	}
 	_ = os.Chmod(dir, 0o755)
-	if !s.consumeOverride("r1") {
+	if !s.consumeOverrides([]string{"r1"}) {
 		t.Error("the override was lost: the positive control could not use it")
 	}
 }

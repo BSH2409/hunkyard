@@ -1336,13 +1336,13 @@ func TestSessionLogPath(t *testing.T) {
 	}
 }
 
-func TestReviewFilePath(t *testing.T) {
+func TestReviewDir(t *testing.T) {
 	home := t.TempDir()
 	testutil.SetHome(t, home)
 
-	path, err := ReviewFilePath("mykey123456")
+	path, err := ReviewDir("mykey123456")
 	if err != nil {
-		t.Fatalf("ReviewFilePath: %v", err)
+		t.Fatalf("ReviewDir: %v", err)
 	}
 	want := filepath.Join(home, ".hunkyard", "reviews", "mykey123456")
 	if path != want {
@@ -1601,7 +1601,7 @@ func shortenStopWait(t *testing.T) {
 	t.Cleanup(func() { stopWait = orig })
 }
 
-// fakeDaemonProc records what StopDaemon and WaitForExit did to the daemon
+// fakeDaemonProc records what StopDaemon and WaitOrKill did to the daemon
 // process. A hanging one ignores termination and is gone only once killed.
 type fakeDaemonProc struct {
 	hangs           bool
@@ -1611,7 +1611,7 @@ type fakeDaemonProc struct {
 	polledAfterKill bool
 }
 
-// stubStopSignals replaces the process hooks StopDaemon and WaitForExit use
+// stubStopSignals replaces the process hooks StopDaemon and WaitOrKill use
 // with a fakeDaemonProc.
 func stubStopSignals(t *testing.T, hangs bool) *fakeDaemonProc {
 	t.Helper()
@@ -1701,14 +1701,14 @@ func TestWaitForExit(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			proc := stubStopSignals(t, tt.hangs)
-			if !WaitForExit(os.Getpid()) {
-				t.Error("WaitForExit did not confirm daemon exit")
+			if !WaitOrKill(os.Getpid()) {
+				t.Error("WaitOrKill did not confirm daemon exit")
 			}
 			if proc.killed != tt.wantKill {
 				t.Errorf("killed = %v, want %v", proc.killed, tt.wantKill)
 			}
 			if proc.killed && !proc.polledAfterKill {
-				t.Error("WaitForExit returned before the killed daemon was gone")
+				t.Error("WaitOrKill returned before the killed daemon was gone")
 			}
 		})
 	}
@@ -1727,8 +1727,8 @@ func TestWaitForExit_DoesNotConfirmSurvivingProcess(t *testing.T) {
 			stubStopSignals(t, true)
 			killProc = func(*os.Process) error { return tt.killErr }
 			procExists = func(*os.Process) bool { return true }
-			if WaitForExit(os.Getpid()) {
-				t.Error("WaitForExit confirmed exit while process was still alive")
+			if WaitOrKill(os.Getpid()) {
+				t.Error("WaitOrKill confirmed exit while process was still alive")
 			}
 		})
 	}

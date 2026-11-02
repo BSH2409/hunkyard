@@ -17,7 +17,12 @@ failure modes, and framework-specific setup for local apps.
 
 1. Hunkyard starts an API server (review chrome) and a **proxy** port.
 2. The chrome iframe loads `http://<host>:<proxy>/…`, which reverse-proxies
-   your upstream origin.
+   your upstream origin. The proxy listens on the review port plus one, on the
+   same host as the review, so a review in Docker needs both ports published.
+   It answers only the review's own host names (loopback, or IP addresses and
+   the listen host on a network bind). A request another site sends through it
+   reaches your app as the browser sent it, without the configured session
+   cookies, so the app's own CSRF checks decide.
 3. For `text/html` responses, the proxy:
    - strips `Content-Security-Policy` and `X-Frame-Options` **response headers**
    - rewrites `Set-Cookie` so cookies work on the proxy host
@@ -191,7 +196,10 @@ hunkyard comment --selector '#save' --route /settings 'Save stays disabled'
 
 `--route` is the page path. It defaults to `/` for a live review, or to the
 path of the URL you passed to `hunkyard live` when that URL has one. HTML preview
-defaults to `/preview-content`. On a multi-page preview, pass the page under
+defaults to `/preview-content`. A preview is served the same way as a live app,
+from its own port (the review port plus one), so the previewed page cannot act
+as the review page; the file's folder is served beside it, and a symlink that
+leads outside that folder is refused. On a multi-page preview, pass the page under
 that prefix (`--route /preview-content/chapter.html` or `--route /chapter.html`).
 
 Preview resolves the selector against the HTML file and refuses a selector

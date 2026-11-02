@@ -39,30 +39,30 @@ test('countUnresolved tolerates null entries inside arrays', () => {
   assert.equal(panel.countUnresolved({ '/x': [null, { resolved: false }, undefined] }), 1);
 });
 
-test('computeResizeWidth: dragging left grows the panel', () => {
+test('resizedWidth: dragging left grows the panel', () => {
   // startW=400, startX=1000, currentX=900 -> dx=-100 -> w = 400 - (-100) = 500
-  assert.equal(panel.computeResizeWidth(400, 1000, 900, 200), 500);
+  assert.equal(panel.resizedWidth(400, 1000, 900, 200), 500);
 });
 
-test('computeResizeWidth: dragging right shrinks the panel', () => {
+test('resizedWidth: dragging right shrinks the panel', () => {
   // startW=400, dx=+100 -> w = 300
-  assert.equal(panel.computeResizeWidth(400, 1000, 1100, 200), 300);
+  assert.equal(panel.resizedWidth(400, 1000, 1100, 200), 300);
 });
 
-test('computeResizeWidth: clamps to min', () => {
+test('resizedWidth: clamps to min', () => {
   // dx=+1000 -> w would be -600, clamp to 200
-  assert.equal(panel.computeResizeWidth(400, 1000, 2000, 200), 200);
+  assert.equal(panel.resizedWidth(400, 1000, 2000, 200), 200);
 });
 
-test('computeResizeWidth: default min is 200', () => {
-  assert.equal(panel.computeResizeWidth(100, 0, 1000), 200);
+test('resizedWidth: default min is 200', () => {
+  assert.equal(panel.resizedWidth(100, 0, 1000), 200);
 });
 
-test('computeResizeWidth: NO upper clamp (user gets what they ask for)', () => {
+test('resizedWidth: NO upper clamp (user gets what they ask for)', () => {
   // dx=-2000 -> w=2400, no clamp
-  assert.equal(panel.computeResizeWidth(400, 1000, -1000, 200), 2400);
+  assert.equal(panel.resizedWidth(400, 1000, -1000, 200), 2400);
 });
 
-test('computeResizeWidth: rounds fractional values', () => {
-  assert.equal(panel.computeResizeWidth(400.5, 1000, 999.7, 200), 401);
+test('resizedWidth: rounds fractional values', () => {
+  assert.equal(panel.resizedWidth(400.5, 1000, 999.7, 200), 401);
 });

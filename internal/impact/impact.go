@@ -15,21 +15,21 @@ import (
 )
 
 const (
-	maxSymbols = 20
-	maxCallers = 50
-	maxTests   = 20
+	maxSymbols  = 20
+	maxMentions = 50
+	maxTests    = 20
 )
 
-// Reference is a line in another file that mentions a changed symbol.
-type Reference struct {
+// Mention is a line in another file that mentions a changed symbol.
+type Mention struct {
 	Path   string `json:"path"`
 	Line   int    `json:"line"`
 	Symbol string `json:"symbol"`
 	Text   string `json:"text"`
 }
 
-// TestRef is a test file that mentions changed symbols.
-type TestRef struct {
+// TestFile is a test file that mentions changed symbols.
+type TestFile struct {
 	Path    string `json:"path"`
 	Hits    int    `json:"hits"`
 	Changed bool   `json:"changed"`
@@ -37,16 +37,16 @@ type TestRef struct {
 
 // Truncation says which lists were cut at their cap.
 type Truncation struct {
-	Callers bool `json:"callers"`
-	Tests   bool `json:"tests"`
+	Mentions bool `json:"callers"`
+	Tests    bool `json:"tests"`
 }
 
 // Result is the impact of one changed file.
 type Result struct {
-	Symbols   []string    `json:"symbols"`
-	Callers   []Reference `json:"callers"`
-	Tests     []TestRef   `json:"tests"`
-	Truncated Truncation  `json:"truncated"`
+	Symbols   []string   `json:"symbols"`
+	Mentions  []Mention  `json:"callers"`
+	Tests     []TestFile `json:"tests"`
+	Truncated Truncation `json:"truncated"`
 }
 
 // GrepFunc searches tracked files for whole-word mentions of words, leaving
@@ -143,7 +143,7 @@ func IsTestPath(p string) bool {
 // callers and tests. changed marks files that are part of the review;
 // ignored drops paths the review ignores.
 func Search(ctx context.Context, grep GrepFunc, filePath string, symbols []string, changed map[string]bool, ignored func(string) bool) (Result, error) {
-	result := Result{Symbols: append([]string{}, symbols...), Callers: []Reference{}, Tests: []TestRef{}}
+	result := Result{Symbols: append([]string{}, symbols...), Mentions: []Mention{}, Tests: []TestFile{}}
 	if len(symbols) == 0 {
 		return result, nil
 	}
@@ -151,7 +151,7 @@ func Search(ctx context.Context, grep GrepFunc, filePath string, symbols []strin
 	if err != nil {
 		return result, err
 	}
-	tests := map[string]*TestRef{}
+	tests := map[string]*TestFile{}
 	var testOrder []string
 	for _, h := range hits {
 		if h.Path == filePath || (ignored != nil && ignored(h.Path)) {
@@ -159,17 +159,17 @@ func Search(ctx context.Context, grep GrepFunc, filePath string, symbols []strin
 		}
 		if IsTestPath(h.Path) {
 			if tests[h.Path] == nil {
-				tests[h.Path] = &TestRef{Path: h.Path, Changed: changed[h.Path]}
+				tests[h.Path] = &TestFile{Path: h.Path, Changed: changed[h.Path]}
 				testOrder = append(testOrder, h.Path)
 			}
 			tests[h.Path].Hits++
 			continue
 		}
-		if len(result.Callers) >= maxCallers {
-			result.Truncated.Callers = true
+		if len(result.Mentions) >= maxMentions {
+			result.Truncated.Mentions = true
 			continue
 		}
-		result.Callers = append(result.Callers, Reference{Path: h.Path, Line: h.Line, Symbol: matchedSymbol(h.Text, symbols), Text: truncate(h.Text, 200)})
+		result.Mentions = append(result.Mentions, Mention{Path: h.Path, Line: h.Line, Symbol: matchedSymbol(h.Text, symbols), Text: truncate(h.Text, 200)})
 	}
 	sort.Strings(testOrder)
 	for _, p := range testOrder {

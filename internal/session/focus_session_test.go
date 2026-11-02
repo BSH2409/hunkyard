@@ -1046,3 +1046,87 @@ type canonicalizeFailVCS struct{ vcs.GitVCS }
 
 func (c *canonicalizeFailVCS) Name() string               { return "hg" }
 func (c *canonicalizeFailVCS) HasObject(_, _ string) bool { return true }
+
+// commentDuringBuild adds a reviewer comment the first time the focus
+// rebuild asks git for the changed files, as a browser tab would while the
+// rebuild runs.
+type commentDuringBuild struct {
+	*vcs.GitVCS
+	once func()
+}
+
+func (c *commentDuringBuild) ChangedFilesBetweenSHAs(base, head, repoRoot string) ([]vcs.FileChange, error) {
+	if c.once != nil {
+		c.once()
+		c.once = nil
+	}
+	return c.GitVCS.ChangedFilesBetweenSHAs(base, head, repoRoot)
+}
+
+func TestSetFocus_KeepsACommentAddedDuringTheRebuild(t *testing.T) {
+	dir := initTestRepo(t)
+	base := gitT(t, dir, "rev-parse", "HEAD")
+	commitAt(t, dir, "added.txt", "first\nsecond\n", "add file")
+	head := gitT(t, dir, "rev-parse", "HEAD")
+	fake := &commentDuringBuild{GitVCS: &vcs.GitVCS{}}
+	s := &Session{RepoRoot: dir, OutputDir: dir, VCS: fake, Branch: "main"}
+	if err := s.SetFocus(Focus{Kind: FocusRange, BaseSHA: base, HeadSHA: head, DiffScope: DiffScopeLayer}); err != nil {
+		t.Fatal(err)
+	}
+	s.sessionStarted.Store(1)
+	fake.once = func() {
+		if _, ok := s.AddComment("added.txt", 1, 1, "", "added mid-rebuild", "", "reviewer"); !ok {
+			t.Error("comment not accepted")
+		}
+	}
+	if err := s.SetFocus(Focus{Kind: FocusRange, BaseSHA: base, HeadSHA: head, DiffScope: DiffScopeFullStack, DefaultSHA: base}); err != nil {
+		t.Fatal(err)
+	}
+	flushWrites(s)
+	for _, f := range s.Files {
+		if f.Path == "added.txt" {
+			for _, c := range f.Comments {
+				if c.Body == "added mid-rebuild" {
+					return
+				}
+			}
+			t.Fatalf("comment added during the rebuild was lost: %+v", f.Comments)
+		}
+	}
+	t.Fatal("added.txt missing after focus change")
+}
+
+// A comment accepted after the last flush and before the file list is swapped
+// lives only on the old entries; it must survive the swap.
+func TestSetFocus_KeepsACommentAddedJustBeforeTheSwap(t *testing.T) {
+	dir := initTestRepo(t)
+	base := gitT(t, dir, "rev-parse", "HEAD")
+	commitAt(t, dir, "added.txt", "first\nsecond\n", "add file")
+	head := gitT(t, dir, "rev-parse", "HEAD")
+	s := &Session{RepoRoot: dir, OutputDir: dir, VCS: &vcs.GitVCS{}, Branch: "main"}
+	if err := s.SetFocus(Focus{Kind: FocusRange, BaseSHA: base, HeadSHA: head, DiffScope: DiffScopeLayer}); err != nil {
+		t.Fatal(err)
+	}
+	s.sessionStarted.Store(1)
+	beforeFocusSwapForTest = func() {
+		if _, ok := s.AddComment("added.txt", 1, 1, "", "added at the swap", "", "reviewer"); !ok {
+			t.Error("comment not accepted")
+		}
+	}
+	defer func() { beforeFocusSwapForTest = nil }()
+	if err := s.SetFocus(Focus{Kind: FocusRange, BaseSHA: base, HeadSHA: head, DiffScope: DiffScopeFullStack, DefaultSHA: base}); err != nil {
+		t.Fatal(err)
+	}
+	flushWrites(s)
+	for _, f := range s.Files {
+		if f.Path == "added.txt" {
+			for _, c := range f.Comments {
+				if c.Body == "added at the swap" {
+					return
+				}
+			}
+			t.Fatalf("comment added at the swap was lost: %+v", f.Comments)
+		}
+	}
+	t.Fatal("added.txt missing after focus change")
+}

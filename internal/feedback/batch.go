@@ -153,7 +153,9 @@ func validateBatch(batch Batch) error {
 			return fmt.Errorf("invalid comment label")
 		}
 		for _, name := range []string{c.Path, c.OldPath} {
-			if name != "" && (path.IsAbs(name) || path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || strings.ContainsAny(name, "\\\x00")) {
+			// A file outside the repository is keyed by its clean absolute
+			// path; anything else must stay inside the review's root.
+			if name != "" && (path.Clean(name) != name || name == ".." || strings.HasPrefix(name, "../") || strings.ContainsAny(name, "\\\x00")) {
 				return fmt.Errorf("invalid comment path")
 			}
 		}
@@ -163,6 +165,31 @@ func validateBatch(batch Batch) error {
 
 // Only a human edit creates new learning evidence; automatic reanchoring does not.
 func revisionHash(comment Comment) string { return digest(comment.Body) }
+
+// SummaryCommentID is the review-level comment carrying the reviewer's
+// summary; every publication delivers it, since each summary is new.
+const SummaryCommentID = "review-summary"
+
+// deliveryHash covers what the agent must act on: a change to any of it is
+// delivered again, while only a body change is a new learning revision.
+func deliveryHash(c Comment) string {
+	return digest(struct {
+		Body                               string
+		Label, Verdict                     string
+		Blocking, ClaimUnchanged, Outdated bool
+	}{c.Body, c.Label, c.Verdict, c.Blocking, c.ClaimUnchanged, c.Outdated})
+}
+
+// stateChanged reports whether c differs from what the agent last received:
+// changed review state, or reopened after the previous publication left it out.
+// Journals written before Seen existed compare with the last delivered copy.
+func stateChanged(previous, c Comment, lastSeen map[string]string) bool {
+	if lastSeen == nil {
+		return revisionHash(previous) != revisionHash(c)
+	}
+	hash, open := lastSeen[c.ID]
+	return !open || hash != deliveryHash(c)
+}
 
 // ValidLabel reports whether label is a review comment label: none, or one
 // of the conventional-comment kinds Hunkyard offers.

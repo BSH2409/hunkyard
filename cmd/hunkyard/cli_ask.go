@@ -92,7 +92,7 @@ func askCommand(ctx context.Context, args []string, out io.Writer) error {
 // sendDecisionRequest posts the request to the review's daemon as its owner.
 func sendDecisionRequest(ctx context.Context, key string, request feedback.DecisionRequest) (feedback.DecisionRequest, error) {
 	var asked feedback.DecisionRequest
-	entry, err := resumedSession(ctx, key, false)
+	entry, err := liveDaemonOrWaitForResume(ctx, key, false)
 	if errors.Is(err, errReviewPaused) {
 		return asked, fmt.Errorf("review %s is paused; resume it with: hunkyard --session %s", key, key)
 	}

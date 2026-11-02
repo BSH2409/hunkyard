@@ -80,12 +80,10 @@ func hashConfigMap(h hash.Hash, section string, m map[string]string, projectDir 
 		h.Write([]byte(v))
 		h.Write([]byte{0})
 		if strings.HasPrefix(v, prefixFile) {
-			path := strings.TrimPrefix(v, prefixFile)
-			if !filepath.IsAbs(path) {
-				path = filepath.Join(projectDir, path)
-			}
-			if data, err := os.ReadFile(path); err == nil {
-				h.Write(data)
+			if path, err := projectFilePath(strings.TrimPrefix(v, prefixFile), projectDir); err == nil {
+				if data, err := os.ReadFile(path); err == nil {
+					h.Write(data)
+				}
 			}
 		}
 	}

@@ -37,7 +37,7 @@ hunkyard/
 7. **Comments reference source line numbers** — stored in `~/.hunkyard/reviews/<key>.json` with per-file sections
 8. **Real-time output** — review file written on every comment change (200ms debounce)
 9. **File watching** — git mode polls `git status --porcelain`; files mode polls mtimes; reloads via SSE
-10. **Docker-ready listener** — server binds to `0.0.0.0:5000` by default; browser URLs use localhost and CLI requests use loopback. Use `--host 127.0.0.1`, `HUNKYARD_HOST`, or global `host` for local-only listening. Network binding is enabled by default and can be disabled with `HUNKYARD_ALLOW_UNAUTHENTICATED_NETWORK=0`. The browser API has no network auth; publish Docker ports on host loopback.
+10. **Docker-ready listener** — server binds to `0.0.0.0:5000` by default; browser URLs use localhost and CLI requests use loopback. Use `--host 127.0.0.1`, `HUNKYARD_HOST`, or global `host` for local-only listening. Network binding is enabled by default and can be disabled with `HUNKYARD_ALLOW_UNAUTHENTICATED_NETWORK=0`. The browser API has no network auth; publish Docker ports on host loopback. Live and preview reviews also listen on the review port plus one (the proxy or preview server, each on its own origin), so publish that port too. Live and preview reviews also listen on the review port plus one (the proxy or preview server, each on its own origin), so publish that port too.
 11. **Two-level config** — `~/.hunkyard.config.json` (global) merged with `.hunkyard.config.json` (project), CLI flags override both. `agent_cmd` and `plan_approve_mode` are global-only (prevents malicious repos from hijacking agent commands or weakening Claude Code permissions)
 12. **Headless CLI comment** — `hunkyard comment` writes directly to the review file without starting the server; SSE notifies any running server
 13. **Comment threading** — comments support nested replies and a `resolved` boolean. Review file schema nests replies inside each comment's `replies` array.
@@ -256,7 +256,7 @@ Static: `GET /files/<path>` — serve files from repo root (path traversal prote
 <important if="you are modifying server security, request handling, or path-validation logic">
 
 - Server binds to `0.0.0.0:5000` by default for Docker port forwarding. Use `--host 127.0.0.1` or `HUNKYARD_HOST=127.0.0.1` to restrict listening, including when resuming a stopped review. `HUNKYARD_ALLOW_UNAUTHENTICATED_NETWORK=0` refuses non-loopback binding unless the CLI allow flag overrides it. Project config cannot change the listen host or network permission. Publish Docker ports with `-p 127.0.0.1:port:port` because the browser API is unauthenticated.
-- State-changing requests (POST/PUT/PATCH/DELETE) with a `Sec-Fetch-Site` header must be `same-origin`. Missing header is allowed (CLI/curl/agent). `cross-site` is rejected — CSRF defense against malicious pages posting to loopback. Complements `checkHost` (DNS-rebinding); does not authenticate network clients.
+- State-changing requests (POST/PUT/PATCH/DELETE) with a `Sec-Fetch-Site` header must be `same-origin`. Missing header is allowed (CLI/curl/agent). `cross-site` is rejected — CSRF defense against malicious pages posting to loopback. Complements `hostAllowed` (DNS-rebinding); does not authenticate network clients.
 - `/files/` validates paths, blocks `..` traversal, verifies resolved path stays within repo root
 - Body size: 10MB for comments via `http.MaxBytesReader`
 - HTTP server: `ReadTimeout: 15s`, `IdleTimeout: 60s` (no `WriteTimeout` — SSE needs open connections)

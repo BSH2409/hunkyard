@@ -206,7 +206,7 @@ func TestWriteFiles_EmptyPreservesAttachments(t *testing.T) {
 		t.Fatalf("NewSessionFromFiles: %v", err)
 	}
 	identity := filepath.Join(dir, ".hunkyard")
-	s.ReviewFilePath = identity
+	s.ReviewDir = identity
 	paths := ReviewPathsFor(identity)
 
 	if err := os.MkdirAll(paths.Folder, 0o755); err != nil {
@@ -456,7 +456,7 @@ func TestSession_LoadHunkyardJSON_PostSetSessionIsNoOp(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := filepath.Join(dir, ".hunkyard")
-	s.ReviewFilePath = identity
+	s.ReviewDir = identity
 
 	// Pre-flag: snapshot some state, then set the flag (simulating
 	// Server.SetSession), and seed disk with DIFFERENT state.

@@ -546,6 +546,15 @@ func bulkAddCommentsToHunkyardJSONAtPathWithRedirect(entries []BulkCommentEntry,
 	if len(entries) == 0 {
 		return fmt.Errorf("no comment entries provided")
 	}
+	apply := func(cj *session.HunkyardJSON) error {
+		pages := livePageCache{}
+		for i, e := range entries {
+			if err := processBulkEntry(cj, i, e, globalAuthor, scope, pages); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
 	var targetPath string
 	var redirected bool
 	err := session.WithReviewLock(primaryPath, func() error {
@@ -553,21 +562,24 @@ func bulkAddCommentsToHunkyardJSONAtPathWithRedirect(entries []BulkCommentEntry,
 		if err != nil {
 			return err
 		}
-		var targetCJ session.HunkyardJSON
-		targetPath, targetCJ, redirected, err = resolveBulkTargetWithRedirect(entries, primaryPath, primary, allowRedirect)
-		if err != nil {
+		targetPath, _, redirected, err = resolveBulkTargetWithRedirect(entries, primaryPath, primary, allowRedirect)
+		if err != nil || redirected {
 			return err
 		}
-		pages := livePageCache{}
-		for i, e := range entries {
-			if err := processBulkEntry(&targetCJ, i, e, globalAuthor, scope, pages); err != nil {
-				return err
-			}
+		if err := apply(&primary); err != nil {
+			return err
 		}
-		return review.SaveHunkyardJSON(targetPath, targetCJ)
+		return review.SaveHunkyardJSON(primaryPath, primary)
 	})
 	if err != nil {
 		return err
+	}
+	// Replies routed to another review are written under that review's lock,
+	// from a copy read while holding it.
+	if redirected {
+		if err := updateReviewFile(targetPath, apply); err != nil {
+			return err
+		}
 	}
 	if redirected {
 		fmt.Fprintf(os.Stderr, "Note: replies routed to %s (not the cwd-resolved review file)\n", filepath.Base(targetPath))

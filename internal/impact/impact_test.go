@@ -81,10 +81,10 @@ func TestSearchSplitsCallersAndTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Callers) != 1 || got.Callers[0] != (Reference{Path: "routes.go", Line: 4, Symbol: "ServeLogin", Text: "r.Get(\"/login\", ServeLogin)"}) {
-		t.Fatalf("callers = %+v", got.Callers)
+	if len(got.Mentions) != 1 || got.Mentions[0] != (Mention{Path: "routes.go", Line: 4, Symbol: "ServeLogin", Text: "r.Get(\"/login\", ServeLogin)"}) {
+		t.Fatalf("callers = %+v", got.Mentions)
 	}
-	want := []TestRef{{Path: "api_test.go", Hits: 2}, {Path: "web/login.spec.ts", Hits: 1, Changed: true}}
+	want := []TestFile{{Path: "api_test.go", Hits: 2}, {Path: "web/login.spec.ts", Hits: 1, Changed: true}}
 	if !reflect.DeepEqual(got.Tests, want) {
 		t.Fatalf("tests = %+v", got.Tests)
 	}
@@ -92,15 +92,15 @@ func TestSearchSplitsCallersAndTests(t *testing.T) {
 
 func TestSearchTruncates(t *testing.T) {
 	var hits []vcs.GrepHit
-	for i := 0; i < maxCallers+5; i++ {
+	for i := 0; i < maxMentions+5; i++ {
 		hits = append(hits, vcs.GrepHit{Path: "c" + strconv.Itoa(i) + ".go", Line: 1, Text: "ServeLogin"})
 	}
 	for i := 0; i < maxTests+3; i++ {
 		hits = append(hits, vcs.GrepHit{Path: "t" + strconv.Itoa(i) + "_test.go", Line: 1, Text: "ServeLogin"})
 	}
 	got, _ := Search(context.Background(), fakeGrep(hits), "api.go", []string{"ServeLogin"}, nil, nil)
-	if len(got.Callers) != maxCallers || !got.Truncated.Callers || len(got.Tests) != maxTests || !got.Truncated.Tests {
-		t.Fatalf("callers %d %v, tests %d %v", len(got.Callers), got.Truncated.Callers, len(got.Tests), got.Truncated.Tests)
+	if len(got.Mentions) != maxMentions || !got.Truncated.Mentions || len(got.Tests) != maxTests || !got.Truncated.Tests {
+		t.Fatalf("callers %d %v, tests %d %v", len(got.Mentions), got.Truncated.Mentions, len(got.Tests), got.Truncated.Tests)
 	}
 }
 
@@ -109,7 +109,7 @@ func TestSearchWithoutSymbols(t *testing.T) {
 		t.Fatal("grep ran without symbols")
 		return nil, nil
 	}, "a.go", nil, nil, nil)
-	if err != nil || got.Callers == nil || got.Tests == nil || got.Symbols == nil {
+	if err != nil || got.Mentions == nil || got.Tests == nil || got.Symbols == nil {
 		t.Fatalf("got %+v %v", got, err)
 	}
 }

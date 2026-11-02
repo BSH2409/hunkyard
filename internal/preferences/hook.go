@@ -453,15 +453,32 @@ func (s *Store) unprocessedCount(current *generation) int {
 	return count
 }
 
-var commitIntent = regexp.MustCompile(`(?i)\b(?:commit|push)\b`)
-var negatedCommit = regexp.MustCompile(`(?i)\b(?:don'?t|do\s+not|never|no|not|without|stop|avoid)\b(?:\W+\w+){0,2}?\W+(?:commit|push)\w*`)
+// A pull request or a merge needs a commit and a push, so asking for one
+// asks for them too.
+var commitIntent = regexp.MustCompile(`(?i)\b(?:commit|push)\b|\b(?:open|create|raise|make|submit|send)\s+(?:a\s+|the\s+|an\s+)?(?:pr|pull\s+request|merge\s+request)\b|\bmerge\s+(?:it|this|that|them|the\s+(?:pr|branch|pull\s+request)|into|back)\b|\band\s+merge\b`)
+
+// Negation reaches the action word only across whitespace-separated words,
+// so "No, just commit it" is a request while "don't commit yet" is not.
+var negatedCommit = regexp.MustCompile(`(?i)\b(?:don'?t|do\s+not|never|no|not|without|stop|avoid)\b(?:\s+\w+){0,2}?\s+(?:commit|push|merge|open|create|raise|make|submit|send|pr|pull)\w*`)
 var commitNoun = regexp.MustCompile(`(?i)\b(?:the|a|an|this|that|last|previous|latest|each|every|my|your|its|initial|first)\s+(?:commit|push)(?:es|s)?\b`)
+
+// commitVerbPhrase is "make a commit"-style wording: the noun form of a
+// request, which commitNoun would otherwise remove as a mere mention.
+var commitVerbPhrase = regexp.MustCompile(`(?i)\b(?:make|create|do|add)\s+(?:a|an|the|new)\s+commit\b`)
+
+// forgetToCommit is the reminder form ("don't forget to commit"), a request
+// despite its negation.
+var forgetToCommit = regexp.MustCompile(`(?i)\b(?:don'?t|do\s+not)\s+forget\s+to\b`)
 
 // requestsCommit reports whether the user asked for a commit or push, as
 // opposed to forbidding one ("don't commit yet") or mentioning one ("the
 // last commit broke tests").
 func requestsCommit(authored string) bool {
-	text := negatedCommit.ReplaceAllString(authored, " ")
+	text := forgetToCommit.ReplaceAllString(authored, " ")
+	text = negatedCommit.ReplaceAllString(text, " ")
+	if commitVerbPhrase.MatchString(text) {
+		return true
+	}
 	text = commitNoun.ReplaceAllString(text, " ")
 	return commitIntent.MatchString(text)
 }

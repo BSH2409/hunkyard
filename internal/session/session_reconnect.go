@@ -65,19 +65,19 @@ func daemonArgsFromCliArgs(sessionKey string, cliArgs []string) []string {
 	if len(cliArgs) == 0 {
 		return args
 	}
+	// _serve takes the live origin and preview file as flags; a positional
+	// argument would start a files review of a path named after them.
 	if len(cliArgs) >= 2 && cliArgs[0] == "live" {
-		return append(args, "live", cliArgs[1])
+		return append(args, "--live-origin", cliArgs[1])
 	}
 	if len(cliArgs) >= 2 && cliArgs[0] == "preview" {
-		return append(args, "preview", cliArgs[1])
+		return append(args, "--preview-file", cliArgs[1])
 	}
-	if len(cliArgs) == 1 {
-		switch {
-		case strings.HasPrefix(cliArgs[0], "pr:"):
-			return append(args, "--pr", strings.TrimPrefix(cliArgs[0], "pr:"))
-		case strings.HasPrefix(cliArgs[0], "range:"):
-			return append(args, "--range", strings.TrimPrefix(cliArgs[0], "range:"))
-		}
+	switch {
+	case strings.HasPrefix(cliArgs[0], "pr:"):
+		return append(append(args, "--pr", strings.TrimPrefix(cliArgs[0], "pr:")), cliArgs[1:]...)
+	case strings.HasPrefix(cliArgs[0], "range:"):
+		return append(append(args, "--range", strings.TrimPrefix(cliArgs[0], "range:")), cliArgs[1:]...)
 	}
 	return append(args, cliArgs...)
 }
@@ -98,7 +98,10 @@ func resolveReconnectReviewDir(key string, stale daemon.SessionEntry) (string, e
 		}
 		return stale.ReviewPath, nil
 	}
-	return daemon.ReviewFilePath(key)
+	if dir, paused := PausedReviewDir(key); paused {
+		return dir, nil
+	}
+	return daemon.ReviewDir(key)
 }
 
 // daemonArgsForReconnect rebuilds _serve argv including flags not stored in cli_args.
@@ -116,7 +119,7 @@ func daemonArgsForReconnect(sessionKey string, cliArgs []string, stale daemon.Se
 // appendReconnectPathFlags adds --output or --plan-dir/--name when the review
 // folder is outside the default ~/.hunkyard/reviews/<key> layout.
 func appendReconnectPathFlags(sessionKey string, args []string, reviewDir string) []string {
-	defaultDir, err := daemon.ReviewFilePath(sessionKey)
+	defaultDir, err := daemon.ReviewDir(sessionKey)
 	if err == nil && filepath.Clean(reviewDir) == filepath.Clean(defaultDir) {
 		return args
 	}
@@ -210,6 +213,9 @@ func reconnectDir(cj HunkyardJSON, stale daemon.SessionEntry) (string, error) {
 func readReconnectReview(key, revDir string) (HunkyardJSON, error) {
 	var cj HunkyardJSON
 	data, err := os.ReadFile(ReviewPathsFor(revDir).Review)
+	if err != nil && os.IsNotExist(err) && recoverInterruptedMigration(revDir) {
+		data, err = os.ReadFile(ReviewPathsFor(revDir).Review)
+	}
 	if err != nil {
 		if os.IsNotExist(err) {
 			if marker, paused := ReadPausedMarker(revDir); paused {

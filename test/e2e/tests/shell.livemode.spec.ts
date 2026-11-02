@@ -198,6 +198,8 @@ test.describe('live-mode shell — theme', () => {
 test.describe('live-mode shell — error surfaces and sizing', () => {
   test('iframe surfaces load failure as a chrome banner with retry', async ({ page }) => {
     await page.goto('/live');
+    // The shell builds the iframe after its async boot; wait for it.
+    await expect(page.locator('#hunkyardLiveIframe')).toBeAttached();
     await page.evaluate(() => {
       const f = document.getElementById('hunkyardLiveIframe') as HTMLIFrameElement;
       f.dispatchEvent(new Event('error'));
@@ -207,6 +209,7 @@ test.describe('live-mode shell — error surfaces and sizing', () => {
 
   test('chrome surfaces a cross-origin-redirect message from iframe', async ({ page }) => {
     await page.goto('/live');
+    await expect(page.locator('#hunkyardLiveIframe')).toBeAttached();
     await page.evaluate(() => {
       const iframe = document.getElementById('hunkyardLiveIframe') as HTMLIFrameElement;
       window.dispatchEvent(new MessageEvent('message', {
@@ -219,6 +222,7 @@ test.describe('live-mode shell — error surfaces and sizing', () => {
 
   test('Esc dismisses the cross-origin redirect notice', async ({ page }) => {
     await page.goto('/live');
+    await expect(page.locator('#hunkyardLiveIframe')).toBeAttached();
     await page.evaluate(() => {
       const iframe = document.getElementById('hunkyardLiveIframe') as HTMLIFrameElement;
       window.dispatchEvent(new MessageEvent('message', {

@@ -97,7 +97,7 @@ func bindListener(host string, port int) (net.Listener, error) {
 }
 
 // resolveServeReviewPath computes the daemon's review folder so that
-// srv.reviewPath, the session-registry entry, session.ReviewFilePath, and
+// srv.reviewPath, the session-registry entry, session.ReviewDir, and
 // session.hunkyardJSONPath() all agree on one folder.
 var serveAbsPath = filepath.Abs
 
@@ -168,15 +168,7 @@ func runServe(args []string) {
 	if err != nil {
 		daemonFatal(pipe, "Error: resolve review path: %v", err)
 	}
-	var cliArgs []string
-	switch {
-	case sc.LiveOrigin != "":
-		cliArgs = []string{"live", sc.LiveOrigin}
-	case sc.PreviewFile != "":
-		cliArgs = []string{"preview", sc.PreviewFile}
-	default:
-		cliArgs = sc.Files
-	}
+	cliArgs := reviewCLIArgs(sc)
 	sessionArgs := sc.Files
 	if sc.LiveOrigin != "" {
 		sessionArgs = []string{liveSessionArgsTag, sc.LiveOrigin}
@@ -224,8 +216,15 @@ func runServe(args []string) {
 
 	var proxyLn net.Listener
 	var proxySrv *http.Server
-	if sc.LiveOrigin != "" {
-		pl, ps, err := bindProxyServer(sc.Host, sc.LiveOrigin, addr.Port, sc.LiveCookie)
+	if sc.LiveOrigin != "" || sc.PreviewFile != "" {
+		var pl net.Listener
+		var ps *http.Server
+		var err error
+		if sc.LiveOrigin != "" {
+			pl, ps, err = bindProxyServer(sc.Host, sc.LiveOrigin, addr.Port, sc.LiveCookie)
+		} else {
+			pl, ps, err = bindPreviewServer(sc.Host, sc.PreviewFile, addr.Port)
+		}
 		if err != nil {
 			daemonFatal(pipe, "Error starting proxy server: %v", err)
 		}
@@ -310,21 +309,16 @@ func runServe(args []string) {
 		return
 	}
 	server.ApplySessionOverrides(sess, sc)
-	switch {
-	case sc.LiveOrigin != "":
-		sess.CLIArgs = []string{"live", sc.LiveOrigin}
-	case sc.PreviewFile != "":
-		sess.CLIArgs = []string{"preview", sc.PreviewFile}
-	default:
-		sess.CLIArgs = sc.Files
-	}
+	sess.CLIArgs = cliArgs
 	sess.SessionKey = key
 	sess.CWD = cwd
 
 	checkStaleIntegrations(sc, srv, cwd)
 
-	if sc.LiveOrigin != "" && proxyLn != nil {
+	if proxyLn != nil {
 		sess.ProxyPort = proxyLn.Addr().(*net.TCPAddr).Port
+	}
+	if sc.LiveOrigin != "" && proxyLn != nil {
 		sess.ReviewType = "live"
 		sess.Origin = sc.LiveOrigin
 	}
@@ -360,7 +354,7 @@ func runServe(args []string) {
 	// an earlier pause no longer applies.
 	sess.SetActivityFile(filepath.Join(sc.ReviewPath, "activity"))
 	sess.MarkActivity("start")
-	if err := session.RemovePausedMarker(sc.ReviewPath); err != nil {
+	if err := session.ForgetPausedReview(key, sc.ReviewPath); err != nil {
 		log.Printf("Warning: could not clear the paused marker: %v", err)
 	}
 	idle, every := idlePauseTiming(sc.Cfg.IdlePauseMinutesOrDefault())
@@ -410,8 +404,8 @@ func runServe(args []string) {
 		recordSessionStats(sess, srv.Author(), sessionStartedAt, false)
 	}
 
-	if sess.ReviewFilePath != "" {
-		fmt.Fprintf(os.Stderr, "Review file: %s\n", reviewPathsFor(sess.ReviewFilePath).Review)
+	if sess.ReviewDir != "" {
+		fmt.Fprintf(os.Stderr, "Review file: %s\n", reviewPathsFor(sess.ReviewDir).Review)
 	}
 }
 
@@ -448,4 +442,19 @@ func installRuleChecks(sess *session.Session) bool {
 		return store.RecordRuleVerdict(ruleID, repoKey, verdict)
 	})
 	return true
+}
+
+// reviewCLIArgs is what the review records to restart itself: the live
+// origin, the preview file, or the selected paths, led by the pinned range
+// for a range review so a resume shows the same commits.
+func reviewCLIArgs(sc *server.DaemonCLIConfig) []string {
+	switch {
+	case sc.LiveOrigin != "":
+		return []string{"live", sc.LiveOrigin}
+	case sc.PreviewFile != "":
+		return []string{"preview", sc.PreviewFile}
+	case sc.Focus != nil && sc.Focus.Kind == session.FocusRange && sc.Focus.ChangeNumber == 0:
+		return append([]string{"range:" + sc.Focus.BaseSHA + ".." + sc.Focus.HeadSHA}, sc.Files...)
+	}
+	return sc.Files
 }

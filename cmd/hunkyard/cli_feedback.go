@@ -36,22 +36,22 @@ var (
 		return entry, err == nil
 	}
 	pausedPollInterval = 5 * time.Second
+	readyPollInterval  = 500 * time.Millisecond
+	// resumeInitWaits bounds how long a follow waiter lets a resumed daemon
+	// answer 503 while it initializes (about 30s at readyPollInterval).
+	resumeInitWaits = 60
 )
 
-// resumedSession finds the review's live daemon. A paused review (its marker
+// liveDaemonOrWaitForResume finds the review's live daemon. A paused review (its marker
 // is in the review folder) is not an error: a follow waiter keeps polling
 // until the review resumes; a one-shot caller gets errReviewPaused. A review
 // that is neither live nor paused stopped for good.
-func resumedSession(ctx context.Context, key string, follow bool) (daemon.SessionEntry, error) {
+func liveDaemonOrWaitForResume(ctx context.Context, key string, follow bool) (daemon.SessionEntry, error) {
 	for {
 		if entry, alive := lookupSession(key); alive {
 			return entry, nil
 		}
-		dir, err := daemon.ReviewFilePath(key)
-		if err != nil {
-			return daemon.SessionEntry{}, err
-		}
-		if _, paused := session.ReadPausedMarker(dir); !paused {
+		if _, paused := session.PausedReviewDir(key); !paused {
 			return daemon.SessionEntry{}, fmt.Errorf("review session %s is not running", key)
 		}
 		if !follow {
@@ -114,7 +114,11 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 	if *follow && action != "await" {
 		return fmt.Errorf("--follow is only supported for await")
 	}
-	entry, err := resumedSession(ctx, *key, *follow)
+	// A waiter that starts while the review is paused is handed the resumed
+	// daemon, which may still be initializing: it gets the same bounded wait
+	// as one that reconnects after a pause.
+	_, startedPaused := session.PausedReviewDir(*key)
+	entry, err := liveDaemonOrWaitForResume(ctx, *key, *follow)
 	if errors.Is(err, errReviewPaused) {
 		if action == "await" {
 			return reportPaused(out, *key, *jsonOutput)
@@ -142,7 +146,7 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		var decisions []feedback.PreferenceDecision
+		var decisions []feedback.PreferenceClassification
 		if strictjson.Decode(data, &decisions) != nil {
 			return fmt.Errorf("invalid preference decision JSON")
 		}
@@ -161,6 +165,10 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 	default:
 		return fmt.Errorf("unknown feedback action %q", action)
 	}
+	initWaitsLeft := 0
+	if startedPaused {
+		initWaitsLeft = resumeInitWaits
+	}
 	for {
 		requestCtx, cancel := context.WithTimeout(ctx, *timeout+5*time.Second)
 		resp, err := daemon.OwnerRequest(requestCtx, entry, *key, method, path, strings.NewReader(body))
@@ -170,8 +178,9 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 			// reconnect to the new daemon. The same daemon failing again is a
 			// real error, not a pause.
 			if *follow && ctx.Err() == nil {
-				if next, resumeErr := resumedSession(ctx, *key, true); resumeErr == nil && !sameDaemon(next, entry) {
+				if next, resumeErr := liveDaemonOrWaitForResume(ctx, *key, true); resumeErr == nil && !sameDaemon(next, entry) {
 					entry = next
+					initWaitsLeft = resumeInitWaits
 					continue
 				}
 			}
@@ -182,6 +191,18 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 		cancel()
 		if err != nil {
 			return err
+		}
+		// A daemon that just resumed answers 503 until its session is ready;
+		// a follow waiter gives it a bounded while rather than giving up. A
+		// 503 from the daemon it was already talking to is a real error.
+		if resp.StatusCode == http.StatusServiceUnavailable && *follow && initWaitsLeft > 0 {
+			initWaitsLeft--
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(readyPollInterval):
+			}
+			continue
 		}
 		if resp.StatusCode != 200 && *jsonOutput {
 			fmt.Fprintln(out, string(content))

@@ -27,6 +27,23 @@ func EnsureReviewFolder(identity string) error {
 //     sidecar into <identity>/snapshots.json.
 //
 // No-op when there's nothing to migrate.
+// recoverInterruptedMigration finishes a folder migration that stopped after
+// moving review.json into its temp folder, which left the review only there.
+// It runs where an existing review is opened and found missing, not on the
+// save path of every new review. It reports whether it restored the folder.
+func recoverInterruptedMigration(identity string) bool {
+	tmp := identity + migrateTmpSuffix
+	if _, err := os.Stat(filepath.Join(tmp, "review.json")); err != nil {
+		return false
+	}
+	if err := os.Rename(tmp, identity); err != nil {
+		fmt.Fprintf(os.Stderr, "hunkyard: could not recover interrupted review migration at %s: %v\n", tmp, err)
+		return false
+	}
+	fmt.Fprintf(os.Stderr, "hunkyard: recovered interrupted review migration: %s\n", identity)
+	return true
+}
+
 func ensureReviewFolder(identity string) error {
 	if info, err := os.Stat(identity); err == nil {
 		if info.IsDir() {
@@ -86,9 +103,17 @@ func renameLegacyJSONFolder(legacyFolder, identity string) error {
 // flat file or the folder exists", not "the file is fully written or not at
 // all". Reusing AtomicWriteFile would require re-reading and re-writing the
 // review JSON for no benefit. (review W6)
+// migrateTmpSuffix names the folder a migration builds before renaming it
+// into place.
+const migrateTmpSuffix = ".hunkyard-migrate.tmp"
+
 func migrateFlatToFolder(flatPath, identity string) error {
-	tmp := identity + ".hunkyard-migrate.tmp"
-	// A previous crash may have left tmp/ behind. Wipe.
+	tmp := identity + migrateTmpSuffix
+	// A previous crash may have left tmp/ behind. Wipe it only when it does
+	// not hold a review: that one may be the only copy left.
+	if _, err := os.Stat(filepath.Join(tmp, "review.json")); err == nil {
+		return fmt.Errorf("migration temp folder %s holds a review; move it into place by hand", tmp)
+	}
 	_ = os.RemoveAll(tmp)
 
 	if err := os.MkdirAll(tmp, 0o755); err != nil {

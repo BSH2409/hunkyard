@@ -29,3 +29,8 @@ test('clampMenuPosition leaves an in-bounds position untouched', () => {
   assert.equal(p.x, 100);
   assert.equal(p.y, 100);
 });
+
+test('renderAncestorMenuHTML escapes a hostile level', () => {
+  const html = renderAncestorMenuHTML([{ level: '0"><img src=x onerror=alert(1)>', label: 'div' }]);
+  assert.equal(html.includes('<img'), false);
+});

@@ -425,14 +425,14 @@ func CommitLog(baseRef, headRef, dir string) ([]CommitInfo, error) {
 	return commits, nil
 }
 
-// commitishRe matches a safe git ref token: a hex string 4–40 chars long.
+// hexSHARe matches a safe git ref token: a hex string 4–40 chars long.
 // Restricting to hex rejects option-injection (a token starting with "-")
 // since base+".."+head is passed to git as a single argument.
-var commitishRe = regexp.MustCompile(`^[0-9a-fA-F]{4,40}$`)
+var hexSHARe = regexp.MustCompile(`^[0-9a-fA-F]{4,40}$`)
 
-// isCommitish reports whether s is a safe ref token (hex SHA, 4–40 chars).
-func isCommitish(s string) bool {
-	return commitishRe.MatchString(s)
+// isHexSHA reports whether s is a safe ref token (hex SHA, 4–40 chars).
+func isHexSHA(s string) bool {
+	return hexSHARe.MatchString(s)
 }
 
 // ValidCommitParam reports whether a commit selection from a request is a hex
@@ -442,7 +442,7 @@ func ValidCommitParam(commit string) bool {
 	if _, _, ok := SplitCommitRange(commit); ok {
 		return true
 	}
-	return isCommitish(commit)
+	return isHexSHA(commit)
 }
 
 // splitCommitRange parses a commit query param of the form "<baseSHA>..<headSHA>".
@@ -454,16 +454,23 @@ func SplitCommitRange(commit string) (base, head string, ok bool) {
 		return "", "", false
 	}
 	base, head = commit[:i], commit[i+2:]
-	if !isCommitish(base) || !isCommitish(head) {
+	if !isHexSHA(base) || !isHexSHA(head) {
 		return "", "", false
 	}
 	return base, head, true
 }
 
+// commitFileListArgs lists a commit's files the way FileDiffForCommit diffs
+// them: a root commit against the empty tree, a merge against its first
+// parent.
+func commitFileListArgs(sha string) []string {
+	return []string{"--no-commit-id", "-r", "--root", "--diff-merges=first-parent", "--name-status", "-z", sha}
+}
+
 // ChangedFilesForCommit returns the files changed in a single commit.
 // The dir parameter sets the working directory for the git command.
 func ChangedFilesForCommit(sha, dir string) ([]FileChange, error) {
-	cmd := exec.Command("git", "diff-tree", "--no-commit-id", "-r", "--name-status", "-z", sha)
+	cmd := exec.Command("git", append([]string{"diff-tree"}, commitFileListArgs(sha)...)...)
 	if dir != "" {
 		cmd.Dir = dir
 	}
@@ -907,7 +914,7 @@ func ChangedFilesBetweenSHAs(baseSHA, headSHA, dir string) ([]FileChange, error)
 // When ignoreWhitespace is true, whitespace-only changes collapse to context ("-w").
 func FileDiffBetweenSHAs(path, oldPath, baseSHA, headSHA, dir string, ignoreWhitespace bool) ([]DiffHunk, error) {
 	pathArgs := diffPathArgs(oldPath, path)
-	cmd := exec.Command("git", append(diffBaseArgs(ignoreWhitespace), append([]string{baseSHA + ".." + headSHA, "--"}, pathArgs...)...)...)
+	cmd := exec.Command("git", append(renameDiffArgs(oldPath, ignoreWhitespace), append([]string{baseSHA + ".." + headSHA, "--"}, pathArgs...)...)...)
 	cmd.Env = stripExternalDiffEnv()
 	if dir != "" {
 		cmd.Dir = dir
@@ -1026,9 +1033,9 @@ func untrackedFilesFullScanInDir(dir string) ([]FileChange, error) {
 	return changes, nil
 }
 
-// AllTrackedFiles returns all tracked files plus untracked non-ignored files.
+// ListRepoFiles returns all tracked files plus untracked non-ignored files.
 // Paths are relative to the repo root. dir should be the repo root.
-func AllTrackedFiles(dir string, paths ...string) ([]string, error) {
+func ListRepoFiles(dir string, paths ...string) ([]string, error) {
 	args := []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}
 	if len(paths) > 0 {
 		args = append(append([]string{"--literal-pathspecs"}, args...), "--")
@@ -1112,6 +1119,11 @@ func parseNameStatus(output string) []FileChange {
 			})
 			continue
 		}
+		// A copy (C097\tsource\tcopy) is a new file at the second path.
+		if strings.HasPrefix(status, "C") && len(parts) >= 3 {
+			changes = append(changes, FileChange{Path: parts[2], Status: "added"})
+			continue
+		}
 		switch status {
 		case "A":
 			changes = append(changes, FileChange{Path: path, Status: "added"})
@@ -1188,6 +1200,16 @@ func diffBaseArgs(ignoreWhitespace bool) []string {
 	return args
 }
 
+// renameDiffArgs is diffBaseArgs plus -M for a renamed file, so a user's
+// diff.renames=false cannot turn the pair into a whole-file add and delete.
+func renameDiffArgs(oldPath string, ignoreWhitespace bool) []string {
+	args := diffBaseArgs(ignoreWhitespace)
+	if oldPath != "" {
+		args = append(args, "-M")
+	}
+	return args
+}
+
 // diffPathArgs returns git diff path arguments for a file, pairing old+new
 // paths for renames so git reports rename-only diffs instead of full adds.
 func diffPathArgs(oldPath, path string) []string {
@@ -1217,7 +1239,7 @@ func FileDiffUnifiedCtx(ctx context.Context, path, oldPath, baseRef, dir string,
 		ref = "HEAD"
 	}
 	pathArgs := diffPathArgs(oldPath, path)
-	args := append(diffBaseArgs(ignoreWhitespace), append([]string{ref, "--"}, pathArgs...)...)
+	args := append(renameDiffArgs(oldPath, ignoreWhitespace), append([]string{ref, "--"}, pathArgs...)...)
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = stripExternalDiffEnv()
 	if dir != "" {
@@ -1290,7 +1312,9 @@ func DiffNumstatBetweenSHAs(baseSHA, headSHA, dir string) (map[string]NumstatEnt
 }
 
 func runDiffNumstat(dir string, refs ...string) (map[string]NumstatEntry, error) {
-	args := append([]string{"-c", "diff.external=", "diff", "--no-ext-diff", "--numstat"}, refs...)
+	// -z keeps rename pairs and non-ASCII paths verbatim, so counts key by
+	// the real path instead of "dir/{old => new}" or a quoted escape.
+	args := append([]string{"-c", "diff.external=", "diff", "--no-ext-diff", "--numstat", "-z"}, refs...)
 	cmd := exec.Command("git", args...)
 	cmd.Env = stripExternalDiffEnv()
 	if dir != "" {
@@ -1305,38 +1329,32 @@ func runDiffNumstat(dir string, refs ...string) (map[string]NumstatEntry, error)
 			return nil, fmt.Errorf("git diff --numstat failed: %w", err)
 		}
 	}
-	return parseNumstatOutput(out), nil
-}
-
-func parseNumstatOutput(out []byte) map[string]NumstatEntry {
-	stats := make(map[string]NumstatEntry)
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
-		}
-		parts := strings.SplitN(line, "\t", 3)
-		if len(parts) != 3 {
-			continue
-		}
-		path := parts[2]
-		adds, err1 := strconv.Atoi(parts[0])
-		dels, err2 := strconv.Atoi(parts[1])
-		if err1 != nil || err2 != nil {
-			adds, dels = 0, 0
-		}
-		entry := NumstatEntry{Additions: adds, Deletions: dels}
-		stats[path] = entry
-		// Rename lines look like "old.go => new.go" — index by new path too.
-		if i := strings.Index(path, " => "); i >= 0 {
-			stats[path[i+4:]] = entry
-		}
-	}
-	return stats
+	return parseNumstatZ(out), nil
 }
 
 var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$`)
 
 // ParseUnifiedDiff parses a unified diff string into hunks.
+// hunkFromHeader parses an "@@ -a,b +c,d @@" line into an empty hunk, or
+// returns nil for any other line. A missing count means one line.
+func hunkFromHeader(line string) *DiffHunk {
+	m := hunkHeaderRe.FindStringSubmatch(line)
+	if m == nil {
+		return nil
+	}
+	oldStart, _ := strconv.Atoi(m[1])
+	oldCount := 1
+	if m[2] != "" {
+		oldCount, _ = strconv.Atoi(m[2])
+	}
+	newStart, _ := strconv.Atoi(m[3])
+	newCount := 1
+	if m[4] != "" {
+		newCount, _ = strconv.Atoi(m[4])
+	}
+	return &DiffHunk{OldStart: oldStart, OldCount: oldCount, NewStart: newStart, NewCount: newCount, Header: line}
+}
+
 func ParseUnifiedDiff(diff string) []DiffHunk {
 	var hunks []DiffHunk
 	// TrimRight removes the trailing newline so strings.Split doesn't produce
@@ -1347,32 +1365,24 @@ func ParseUnifiedDiff(diff string) []DiffHunk {
 	oldLine, newLine := 0, 0
 
 	for _, line := range lines {
-		if m := hunkHeaderRe.FindStringSubmatch(line); m != nil {
+		if hunk := hunkFromHeader(line); hunk != nil {
 			if current != nil {
 				hunks = append(hunks, *current)
 			}
-			oldStart, _ := strconv.Atoi(m[1])
-			oldCount := 1
-			if m[2] != "" {
-				oldCount, _ = strconv.Atoi(m[2])
-			}
-			newStart, _ := strconv.Atoi(m[3])
-			newCount := 1
-			if m[4] != "" {
-				newCount, _ = strconv.Atoi(m[4])
-			}
-			current = &DiffHunk{
-				OldStart: oldStart,
-				OldCount: oldCount,
-				NewStart: newStart,
-				NewCount: newCount,
-				Header:   line,
-			}
-			oldLine = oldStart
-			newLine = newStart
+			current = hunk
+			oldLine, newLine = hunk.OldStart, hunk.NewStart
 			continue
 		}
 
+		// A second section for the same or another path starts a new file:
+		// its header lines belong to no hunk.
+		if strings.HasPrefix(line, "diff --git ") {
+			if current != nil {
+				hunks = append(hunks, *current)
+				current = nil
+			}
+			continue
+		}
 		if current == nil {
 			continue
 		}

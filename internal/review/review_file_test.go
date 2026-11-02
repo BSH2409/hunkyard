@@ -271,7 +271,7 @@ func TestResolveReviewPathOutputHomeHunkyardMatchesDefault(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := daemon.SessionKey(resolvedCWD, "", nil)
-	defaultPath, err := daemon.ReviewFilePath(key)
+	defaultPath, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -820,7 +820,7 @@ func TestResolveCommandReviewPathWithSessionArgsFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want, err := daemon.ReviewFilePath(daemon.SessionKey(cwd, "", []string{"plan.md"}))
+	want, err := daemon.ReviewDir(daemon.SessionKey(cwd, "", []string{"plan.md"}))
 	if err != nil {
 		t.Fatal(err)
 	}

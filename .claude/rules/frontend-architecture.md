@@ -46,6 +46,12 @@ All custom JS uses the IIFE + dual-export pattern:
 | `hunkyard-settings-overlay.js` | `window.hunkyard.settingsOverlay` | Settings dialog lifecycle |
 | `hunkyard-settings-panes.js` | `window.hunkyard.settingsPanes` | Settings tab content |
 | `hunkyard-yard.js` | `window.hunkyard.yard` | Preference Yard views (Settings Preferences tab); reads `/api/preferences/*` |
+| `comment-html.js` | `window.hunkyard.commentHtml` | DOMPurify allowlist for comment HTML (GitHub-compatible) |
+| `hunkyard-shortcuts.js` | `window.hunkyard.shortcuts` | Keyboard shortcut registry and persistence |
+| `hunkyard-activity.js` | `window.hunkyard.activity` | Reports reviewer activity so an attended tab postpones the idle pause |
+| `hunkyard-reload.js` | `window.hunkyard.reload` | One page reload at a time; a new reload aborts the one in flight |
+| `hunkyard-tab-ready.js` | `window.hunkyard.createTabReady` | Tab title badge when a round becomes ready while the page is hidden |
+| `hunkyard-glob-match.js` | `window.hunkyard.globMatch` | Gitignore-style glob matcher for auto-viewed patterns |
 
 ## Code-Review Modules (used only by code-review mode)
 
@@ -71,14 +77,21 @@ All custom JS uses the IIFE + dual-export pattern:
 
 ## Injected Frame Scripts (live and preview)
 
-Served from the API port and injected by the proxy, in `AgentScriptFiles` order (`internal/server/server.go`, mirrored in `internal/live/proxy.go`):
+Served from the API port and injected by the proxy (live) or the preview server, in `AgentScriptFiles` order (`internal/server/server.go`, mirrored in `internal/live/proxy.go`):
 
 | File | Namespace | Purpose |
 |------|-----------|---------|
-| `snapdom.min.js` | `window.snapdom` | Vendored SnapDOM: DOM → canvas capture |
+| `agent-protocol.js` | `window.hunkyard.agentProtocol` | Message types and `validateMessage`, shared with the review page |
+| `agent-anchor-utils.js` | `window.hunkyard.agent.anchorUtils` | Anchors, selector escaping, resolution, element fingerprint and `comparePin` |
+| `agent-scroll-utils.js` | `window.hunkyard.agent.scrollUtils` | Scroll helpers for pinned elements |
+| `agent-marker-overlay.js` | `window.hunkyard.agent.markers` | Marker boxes drawn over pinned elements |
+| `agent-mutation-batcher.js` | `window.hunkyard.agent.batcher` | Batches DOM mutations before markers are re-resolved |
+| `agent-resolution.js` | `window.hunkyard.agent.resolution` | Locates every pin and reports its status |
+| `agent-reanchor-state.js` | `window.hunkyard.agent.reanchorState` | State of a pin being re-anchored |
+| `snapdom.min.js` | `window.snapdom` | Vendored SnapDOM: DOM to canvas capture |
 | `agent-pin-marker.js` | `window.hunkyard.agent.pinMarker` | `MARKER_STYLE` (mirrored by `feedback.PinMarker`) and drawing the box |
 | `agent-capture.js` | `window.hunkyard.agent.capture` | Full-page capture around a pinned element, band crop, size cap |
-| `agent-anchor-utils.js` | `window.hunkyard.agent.anchorUtils` | Anchors, resolution, element fingerprint and `comparePin` |
+| `hunkyard-agent.js` | (none) | The entry point: wires the modules above to the parent page |
 
 ## ContentRenderer Interface
 

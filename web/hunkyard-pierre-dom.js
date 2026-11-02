@@ -79,8 +79,10 @@
     if (!filePath) return null;
     const isOld = function(el) { return !!el.closest('code[data-deletions]') || el.dataset.lineType === 'change-deletion'; };
     const side = isOld(endEl) ? 'old' : '';
-    const a = parseInt(startEl.dataset.line, 10);
     const b = parseInt(endEl.dataset.line, 10);
+    // A selection across the removed and added sides spans two numbering
+    // schemes; keep only the line it ends on.
+    const a = isOld(startEl) === isOld(endEl) ? parseInt(startEl.dataset.line, 10) : b;
     const startLine = Math.min(a, b);
     const endLine = Math.max(a, b);
 

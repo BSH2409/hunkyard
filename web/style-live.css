@@ -29,6 +29,10 @@
 .hunkyard-mode-live #fileTreeToggle,
 .hunkyard-mode-live #updateBtn { display: none !important; }
 
+/* Tool findings (hunkyard annotate, rule checks) only exist on code
+   reviews, so the live panel has no Tools filter. */
+.hunkyard-mode-live #commentsFilterPill [data-filter="machine"] { display: none; }
+
 /* The comments-panel survives but is shown for live-mode comments.
    The base stylesheet hides .comments-panel for code-review boot via an
    inline `.comments-panel-hidden` class; we need to undo that for live

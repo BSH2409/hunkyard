@@ -23,7 +23,7 @@ test('ensureStoryLazyFile hydrates a lazy file via loadSingleFile', () => {
   const body = sliceFunction(appSrc, 'ensureStoryLazyFile', 'cloneFileForHunks');
   assert.match(body, /loadSingleFile\s*\(/);
   // Story-visible loads must use the same scope as eager file hydration.
-  assert.match(body, /currentFileDataScope\s*\(/);
+  assert.match(body, /fetchScope\s*\(/);
   assert.doesNotMatch(body, /effectiveDiffScope\s*\(/);
   assert.match(body, /file\.lazy\s*=\s*false/);
   assert.match(body, /file\.diffHunks\s*=\s*loaded\.diffHunks/);

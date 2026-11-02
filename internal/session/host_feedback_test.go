@@ -181,7 +181,7 @@ func TestHostRoundLoopProtocol(t *testing.T) {
 				t.Fatal("selected host skill lost provenance")
 			}
 			decisions := filepath.Join(home, "decisions.json")
-			data, _ = json.Marshal([]feedback.PreferenceDecision{{CommentID: comment.ID, Revision: 1, Kind: "directive", Directive: "Prefer names describing domain behavior.", Scope: "repository", Surfaces: []string{"naming"}}})
+			data, _ = json.Marshal([]feedback.PreferenceClassification{{CommentID: comment.ID, Revision: 1, Kind: "directive", Directive: "Prefer names describing domain behavior.", Scope: "repository", Surfaces: []string{"naming"}}})
 			writeFile(t, decisions, string(data))
 			command("feedback", "learn", "--session", key, "--batch", batch.ID, "--decisions", decisions, "--json")
 			if _, err := os.Stat(filepath.Join(home, "agents", "hunkyard-preferences", "current", "rules.yml")); err != nil {
@@ -239,8 +239,16 @@ func TestHostRoundLoopProtocol(t *testing.T) {
 			if err := json.Unmarshal(nextOutput.Bytes(), &approval); err != nil || len(approval.Batches) != 1 {
 				t.Fatalf("approval: %s %v", nextOutput.String(), err)
 			}
-			if approval.Batches[0].Round <= batch.Round || len(approval.Batches[0].Comments) != 0 {
-				t.Fatalf("second round repeated human revisions or learned from agent replies: first=%+v next=%+v", batch, approval.Batches[0])
+			if approval.Batches[0].Round <= batch.Round {
+				t.Fatalf("second round did not advance: first=%+v next=%+v", batch, approval.Batches[0])
+			}
+			// The agent replied without changing the commented line, so the
+			// comment comes back reopened: same revision, claim_unchanged set,
+			// and no agent reply treated as human evidence.
+			for _, c := range approval.Batches[0].Comments {
+				if c.ID != batch.Comments[0].ID || c.Revision != batch.Comments[0].Revision || !c.ClaimUnchanged {
+					t.Fatalf("second round repeated human revisions or learned from agent replies: first=%+v next=%+v", batch, approval.Batches[0])
+				}
 			}
 			command("feedback", "ack", "--session", key, "--batch", approval.Batches[0].ID, "--json")
 			if output := command("feedback", "await", "--session", key, "--timeout", "1ms", "--json"); !bytes.Contains(output, []byte(`"status":"pending"`)) {

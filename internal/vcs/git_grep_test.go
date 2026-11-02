@@ -10,7 +10,7 @@ func TestGrepTrackedIgnoresUntrackedAndRespectsExclude(t *testing.T) {
 	dir := initTestRepo(t)
 	writeFile(t, filepath.Join(dir, "api.go"), "package a\n\nfunc ServeLogin() {}\n")
 	writeFile(t, filepath.Join(dir, "caller.go"), "package a\n\nfunc x() { ServeLogin() }\n// ServeLoginLater is a different word\n")
-	writeFile(t, filepath.Join(dir, "web: odd name.go"), "ServeLogin()\n")
+	writeFile(t, filepath.Join(dir, "web é odd name.go"), "ServeLogin()\n")
 	gitT(t, dir, "add", ".")
 	gitT(t, dir, "commit", "-m", "grep fixture")
 	writeFile(t, filepath.Join(dir, "untracked.go"), "ServeLogin()\n")
@@ -19,7 +19,7 @@ func TestGrepTrackedIgnoresUntrackedAndRespectsExclude(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := map[string]int{"caller.go": 3, "web: odd name.go": 1}
+	want := map[string]int{"caller.go": 3, "web é odd name.go": 1}
 	if len(hits) != len(want) {
 		t.Fatalf("hits = %+v", hits)
 	}

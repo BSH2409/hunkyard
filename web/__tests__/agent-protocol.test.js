@@ -217,3 +217,13 @@ test('pin-resolution-result accepts only known pin statuses', () => {
   assert.equal(validateMessage({ ...base, pin_status: 'unchecked' }).ok, false);
   assert.equal(validateMessage({ ...base, pin_status: 7 }).ok, false);
 });
+
+test('request-ancestor-menu rejects options without an integer level and a string label', () => {
+  const pointer = { x: 1, y: 2 };
+  const msg = (options) => ({ type: 'request-ancestor-menu', options, pointer });
+  assert.equal(validateMessage(msg([{ level: 0, label: 'div' }])).ok, true);
+  assert.equal(validateMessage(msg([{ level: '0"><img src=x onerror=alert(1)>', label: 'div' }])).ok, false);
+  assert.equal(validateMessage(msg([{ level: -1, label: 'div' }])).ok, false);
+  assert.equal(validateMessage(msg([{ level: 0, label: { toString: () => 'x' } }])).ok, false);
+  assert.equal(validateMessage(msg([null])).ok, false);
+});

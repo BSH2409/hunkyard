@@ -344,15 +344,15 @@ func TestCheckSecFetchSite(t *testing.T) {
 			if tt.site != "" {
 				req.Header.Set("Sec-Fetch-Site", tt.site)
 			}
-			if got := checkSecFetchSite(req); got != tt.want {
-				t.Errorf("checkSecFetchSite = %v, want %v", got, tt.want)
+			if got := secFetchSiteAllowed(req); got != tt.want {
+				t.Errorf("secFetchSiteAllowed = %v, want %v", got, tt.want)
 			}
 		})
 	}
 }
 
 // TestSecFetchSiteCSRF_RejectsCrossSiteCommentPOST pins Vector A: a browser on
-// evil.com POSTing to 127.0.0.1 with Host: loopback (so checkHost passes) must
+// evil.com POSTing to 127.0.0.1 with Host: loopback (so hostAllowed passes) must
 // still be rejected when Sec-Fetch-Site is cross-site. The comment must not
 // be written.
 func TestSecFetchSiteCSRF_RejectsCrossSiteCommentPOST(t *testing.T) {
@@ -2720,7 +2720,7 @@ func TestSetPRInfo_AppearsInConfig(t *testing.T) {
 		State:       "OPEN",
 		BaseRefName: "main",
 		HeadRefName: "fix-branch",
-		AuthorLogin: "testuser",
+		AuthorName:  "testuser",
 	})
 
 	// Config should now include PR fields.

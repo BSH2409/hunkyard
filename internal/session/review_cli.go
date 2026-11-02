@@ -23,8 +23,6 @@ var (
 
 //nolint:gocyclo // CLI review dispatcher
 func RunReview(args []string) error {
-	go backgroundCleanup()
-
 	if ResolveServerConfigFn == nil {
 		return errors.New("ResolveServerConfigFn not wired")
 	}
@@ -35,6 +33,8 @@ func RunReview(args []string) error {
 	if sc == nil {
 		return nil // --version
 	}
+	// The sweep never touches the review this run resumes.
+	go backgroundCleanup(sc.SessionID)
 
 	cwd, _ := daemon.ResolvedCWD()
 
@@ -158,7 +158,7 @@ func movedRangeHeadNote(focus *Focus, vcsOverride string) string {
 func deadSessionListener(key string, stale daemon.SessionEntry, sc *CLIReviewConfig) (daemon.SessionEntry, []string) {
 	reviewDir := stale.ReviewPath
 	if reviewDir == "" {
-		reviewDir, _ = daemon.ReviewFilePath(key)
+		reviewDir, _ = daemon.ReviewDir(key)
 	}
 	_, paused := ReadPausedMarker(reviewDir)
 	if !paused || sc.HostExplicit {

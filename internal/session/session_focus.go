@@ -266,8 +266,22 @@ func (s *Session) SetFocus(f Focus) error {
 	if err != nil {
 		return fmt.Errorf("rebuilding file list for focus: %w", err)
 	}
+	// The rebuild can take seconds, and the review stays writable meanwhile:
+	// flush comments added during it so the reload below brings them back.
+	s.WriteFiles()
+	if beforeFocusSwapForTest != nil {
+		beforeFocusSwapForTest()
+	}
 
 	s.mu.Lock()
+	// Comments accepted after the flush above live only on the old entries;
+	// hold them across the swap and put them back after the reload.
+	heldComments := map[string][]Comment{}
+	for _, old := range s.Files {
+		if len(old.Comments) > 0 {
+			heldComments[old.Path] = append([]Comment(nil), old.Comments...)
+		}
+	}
 	s.Focus = f
 	s.Files = newFiles
 	s.BaseRef = newBaseRef
@@ -292,6 +306,9 @@ func (s *Session) SetFocus(f Focus) error {
 	// would silently no-op this runtime reload.
 	s.mu.Lock()
 	s.loadHunkyardJSONLocked()
+	if s.restoreHeldCommentsLocked(heldComments) {
+		s.scheduleWrite()
+	}
 	s.mu.Unlock()
 
 	if err := s.persistActiveDiffScope(string(f.DiffScope)); err != nil {
@@ -427,6 +444,30 @@ func dropStaleCacheOnPRSwitch(oldFocus, newFocus Focus) {
 	}
 }
 
+// beforeFocusSwapForTest, when set, runs in SetFocus between the last flush
+// and the swap of the file list: the window a browser comment can land in.
+var beforeFocusSwapForTest func()
+
+// restoreHeldCommentsLocked puts back comments held across a focus swap that
+// the reload from disk did not restore, and reports whether it added any.
+// Callers hold s.mu.
+func (s *Session) restoreHeldCommentsLocked(held map[string][]Comment) bool {
+	restored := false
+	for _, f := range s.Files {
+		have := map[string]bool{}
+		for _, c := range f.Comments {
+			have[c.ID] = true
+		}
+		for _, c := range held[f.Path] {
+			if !have[c.ID] {
+				f.Comments = append(f.Comments, c)
+				restored = true
+			}
+		}
+	}
+	return restored
+}
+
 // persistActiveDiffScope updates HunkyardJSON.ActiveDiffScope on disk via
 // saveHunkyardJSONToDisk. Always called on focus change — including when scope is empty
 // (working-tree), so a stale "layer" doesn't linger from a previous range
@@ -436,13 +477,19 @@ func (s *Session) persistActiveDiffScope(scope string) error {
 	if hunkyardPath == "" {
 		return nil
 	}
-	cj, err := readHunkyardJSONFromDisk(hunkyardPath)
-	if err != nil {
-		// File may not exist yet — fall through and create one with just the scope.
-		cj = HunkyardJSON{Files: map[string]HunkyardJSONFile{}}
-	}
-	cj.ActiveDiffScope = scope
-	return saveHunkyardJSONToDisk(hunkyardPath, cj)
+	return WithReviewLock(hunkyardPath, func() error {
+		// A missing file reads as empty and is created with just the scope;
+		// an unreadable one is left alone rather than replaced.
+		cj, err := readHunkyardJSONFromDisk(hunkyardPath)
+		if err != nil {
+			return err
+		}
+		if cj.Files == nil {
+			cj.Files = map[string]HunkyardJSONFile{}
+		}
+		cj.ActiveDiffScope = scope
+		return saveHunkyardJSONToDisk(hunkyardPath, cj)
+	})
 }
 
 // readFileAtSHA returns file content at the given SHA. When RemoteFiles is
@@ -1041,12 +1088,16 @@ func (s *Session) loadScopedFileState(path, scope, commit string) (status, conte
 }
 
 func computeScopedDiffHunks(path, scope, commit, status, oldPath, content, baseRef, repoRoot string, v vcs.VCS, ignoreWhitespace bool) []vcs.DiffHunk {
-	// Pure content-based diffs don't need VCS.
-	if status == "untracked" && (scope == "unstaged" || scope == "all" || scope == "") {
-		return vcs.FileDiffUnifiedNewFile(content)
-	}
-	if status == "added" && addedFileRendersWhole(scope) {
-		return vcs.FileDiffUnifiedNewFile(content)
+	// Pure content-based diffs don't need VCS. content is the working tree,
+	// so they apply only when no commit is pinned: a pinned commit shows
+	// what that commit added, not today's file.
+	if commit == "" {
+		if status == "untracked" && (scope == "unstaged" || scope == "all" || scope == "") {
+			return vcs.FileDiffUnifiedNewFile(content)
+		}
+		if status == "added" && addedFileRendersWhole(scope) {
+			return vcs.FileDiffUnifiedNewFile(content)
+		}
 	}
 	return scopedHunks(vcs.FileChange{Path: path, OldPath: oldPath, Status: status}, scope, commit, baseRef, repoRoot, v, ignoreWhitespace)
 }

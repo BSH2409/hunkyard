@@ -158,3 +158,28 @@ test('loadAllComments stamps _createdInRound on every comment', async () => {
   assert.equal(state.comments[0]._createdInRound, 2, 'persisted review_round wins');
   assert.equal(state.comments[1]._createdInRound, 3, 'falls back to currentRound');
 });
+
+test('a reload keeps open reply and edit composers with their drafts', async () => {
+  const state = {
+    session: { review_round: 1, files: [{ path: '/' }] },
+    currentRound: 1,
+    comments: [
+      { id: 'c1', body: 'pin one', _replyOpen: true, _replyDraft: 'typing a reply' },
+      { id: 'c2', body: 'pin two', _editOpen: true, _editDraft: 'revised text' },
+    ],
+  };
+  const shared = makeShared({
+    '/api/session': { review_round: 1, files: [{ path: '/' }] },
+    '/api/file/comments?path=%2F': [
+      { id: 'c1', body: 'pin one', replies: [{ id: 'r1', body: 'agent reply' }], dom_anchor: { pathname: '/' } },
+      { id: 'c2', body: 'pin two', dom_anchor: { pathname: '/' } },
+    ],
+  });
+  await create({ state, shared }).loadAllComments();
+  const byId = Object.fromEntries(state.comments.map((c) => [c.id, c]));
+  assert.equal(byId.c1._replyOpen, true);
+  assert.equal(byId.c1._replyDraft, 'typing a reply');
+  assert.equal(byId.c1.replies.length, 1);
+  assert.equal(byId.c2._editOpen, true);
+  assert.equal(byId.c2._editDraft, 'revised text');
+});

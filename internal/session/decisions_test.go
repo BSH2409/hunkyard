@@ -11,7 +11,7 @@ import (
 func askFixture(t *testing.T) *Session {
 	t.Helper()
 	s := NewTestSession(t)
-	s.ReviewFilePath = filepath.Join(t.TempDir(), "review")
+	s.ReviewDir = filepath.Join(t.TempDir(), "review")
 	return s
 }
 
@@ -112,7 +112,7 @@ func TestDecisionsRoundTripReviewFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	reloaded := askFixture(t)
-	reloaded.ReviewFilePath = s.ReviewFilePath
+	reloaded.ReviewDir = s.ReviewDir
 	reloaded.loadHunkyardJSON()
 	got := reloaded.Decisions()
 	if len(got) != 1 || got[0].Chosen != "JWT" || got[0].Context == nil || got[0].Context.Line != 3 {
@@ -139,7 +139,7 @@ func TestDecisionAcrossRoundsAndResumeIsPublishedOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	resumed := askFixture(t) // the daemon paused; `hunkyard --session` started a new one
-	resumed.ReviewFilePath = s.ReviewFilePath
+	resumed.ReviewDir = s.ReviewDir
 	resumed.loadHunkyardJSON()
 	resumed.ReviewRound = 3
 	if _, err := resumed.AnswerDecision(d.ID, "JWT", "", false); err != nil {
@@ -149,7 +149,7 @@ func TestDecisionAcrossRoundsAndResumeIsPublishedOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	again := askFixture(t)
-	again.ReviewFilePath = s.ReviewFilePath
+	again.ReviewDir = s.ReviewDir
 	again.loadHunkyardJSON()
 	first := again.DecisionsToPublish()
 	if len(first) != 1 || first[0].Chosen != "JWT" || first[0].AskedRound != 2 {
@@ -160,7 +160,7 @@ func TestDecisionAcrossRoundsAndResumeIsPublishedOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	later := askFixture(t)
-	later.ReviewFilePath = s.ReviewFilePath
+	later.ReviewDir = s.ReviewDir
 	later.loadHunkyardJSON()
 	if got := later.DecisionsToPublish(); len(got) != 0 {
 		t.Fatalf("answered decision published again after a resume: %+v", got)

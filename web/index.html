@@ -347,25 +347,27 @@
       // shared bootstrap (theme pill, settings dialog, shared helpers) keeps working.
       document.documentElement.classList.add('hunkyard-mode-live');
       // Pull in shared helpers + live-mode CSS, then the controller.
-      var sh = document.createElement('script'); sh.src = 'hunkyard-shared.js';
+      // async = false keeps execution in insertion order: later modules read
+      // window.hunkyard.shared as they load.
+      var sh = document.createElement('script'); sh.src = 'hunkyard-shared.js'; sh.async = false;
       document.head.appendChild(sh);
 
-      var cr = document.createElement('script'); cr.src = 'hunkyard-renderer.js';
+      var cr = document.createElement('script'); cr.src = 'hunkyard-renderer.js'; cr.async = false;
       document.head.appendChild(cr);
 
-      var dr = document.createElement('script'); dr.src = 'hunkyard-draft.js';
+      var dr = document.createElement('script'); dr.src = 'hunkyard-draft.js'; dr.async = false;
       document.head.appendChild(dr);
 
-      var ctpl = document.createElement('script'); ctpl.src = 'hunkyard-comment-templates.js';
+      var ctpl = document.createElement('script'); ctpl.src = 'hunkyard-comment-templates.js'; ctpl.async = false;
       document.head.appendChild(ctpl);
 
-      var sse = document.createElement('script'); sse.src = 'hunkyard-sse.js';
+      var sse = document.createElement('script'); sse.src = 'hunkyard-sse.js'; sse.async = false;
       document.head.appendChild(sse);
 
-      var cf = document.createElement('script'); cf.src = 'hunkyard-comment-form.js';
+      var cf = document.createElement('script'); cf.src = 'hunkyard-comment-form.js'; cf.async = false;
       document.head.appendChild(cf);
 
-      var ru = document.createElement('script'); ru.src = 'live-route-utils.js';
+      var ru = document.createElement('script'); ru.src = 'live-route-utils.js'; ru.async = false;
       document.head.appendChild(ru);
 
       // markdown-it powers comment-body rendering inside the shared

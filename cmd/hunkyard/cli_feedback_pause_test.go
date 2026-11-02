@@ -22,7 +22,7 @@ func pausedReview(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	dir, err := daemon.ReviewFilePath(pausedKey)
+	dir, err := daemon.ReviewDir(pausedKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestFollowWaiterWaitsThroughPause(t *testing.T) {
 	var alive atomic.Bool
 	fakeLiveness(t, &alive)
 	go func() { time.Sleep(60 * time.Millisecond); alive.Store(true) }()
-	entry, err := resumedSession(context.Background(), pausedKey, true)
+	entry, err := liveDaemonOrWaitForResume(context.Background(), pausedKey, true)
 	if err != nil || entry.Port != 4321 {
 		t.Fatalf("waiter did not reconnect after the resume: %+v %v", entry, err)
 	}
@@ -64,7 +64,7 @@ func TestWaiterErrorsWithoutPausedMarker(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	var alive atomic.Bool
 	fakeLiveness(t, &alive)
-	_, err := resumedSession(context.Background(), pausedKey, true)
+	_, err := liveDaemonOrWaitForResume(context.Background(), pausedKey, true)
 	if err == nil || !strings.Contains(err.Error(), "is not running") {
 		t.Fatalf("err = %v, want the review reported as not running", err)
 	}
@@ -114,5 +114,79 @@ func TestOneShotFeedbackKeepsASlowDaemonsSessionFile(t *testing.T) {
 	}
 	if _, err := daemon.ReadSessionFile(pausedKey); err != nil {
 		t.Fatalf("a one-shot command removed the daemon's session file: %v", err)
+	}
+}
+
+// After a pause, the waiter reconnects to the resumed daemon, which answers
+// 503 until its session is ready; the waiter keeps waiting for it.
+func TestFollowWaiterWaitsForAResumedDaemonToBeReady(t *testing.T) {
+	requests := 0
+	key := feedbackCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"status":"published","batches":[]}`))
+	})
+	previous, previousReady := lookupSession, readyPollInterval
+	readyPollInterval = time.Millisecond
+	calls := 0
+	lookupSession = func(k string) (daemon.SessionEntry, bool) {
+		calls++
+		if calls == 1 {
+			return daemon.SessionEntry{Host: "127.0.0.1", Port: 1, StartedAt: "paused-run"}, true
+		}
+		entry, err := daemon.ReadSessionFile(k)
+		return entry, err == nil
+	}
+	t.Cleanup(func() { lookupSession, readyPollInterval = previous, previousReady })
+	var out bytes.Buffer
+	if err := feedbackCommand(context.Background(), []string{"await", "--session", key, "--timeout", "1ms", "--follow", "--json"}, &out); err != nil {
+		t.Fatalf("follow gave up on the resumed daemon: %v", err)
+	}
+	if !strings.Contains(out.String(), `"published"`) {
+		t.Fatalf("output = %s", out.String())
+	}
+}
+
+// A follow waiter started while the review is paused picks up the resumed
+// daemon through its first lookup; that daemon's initialization 503s are
+// waited out too, not treated as a failure.
+func TestFollowWaiterStartedWhilePausedWaitsOutInitialization(t *testing.T) {
+	requests := 0
+	key := feedbackCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"status":"published","batches":[]}`))
+	})
+	dir, err := daemon.ReviewDir(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := session.WritePausedMarker(dir, session.PausedMarker{PausedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
+	previous, previousReady, previousPause := lookupSession, readyPollInterval, pausedPollInterval
+	readyPollInterval, pausedPollInterval = time.Millisecond, time.Millisecond
+	calls := 0
+	lookupSession = func(k string) (daemon.SessionEntry, bool) {
+		calls++
+		if calls <= 2 {
+			return daemon.SessionEntry{}, false // still paused
+		}
+		entry, err := daemon.ReadSessionFile(k)
+		return entry, err == nil
+	}
+	t.Cleanup(func() { lookupSession, readyPollInterval, pausedPollInterval = previous, previousReady, previousPause })
+	var out bytes.Buffer
+	if err := feedbackCommand(context.Background(), []string{"await", "--session", key, "--timeout", "1ms", "--follow", "--json"}, &out); err != nil {
+		t.Fatalf("follow gave up on the daemon that resumed: %v", err)
 	}
 }

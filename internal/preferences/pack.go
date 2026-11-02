@@ -186,10 +186,20 @@ func repositoryPackDir(cwd string) (string, error) {
 }
 
 func readPackManifest(dir string) (packManifest, bool, error) {
-	data, err := os.ReadFile(filepath.Join(dir, "pack.json"))
+	// pack.json comes from a repository: like the pack's other files it must
+	// be a small regular file, never a symlink to something unbounded.
+	path := filepath.Join(dir, "pack.json")
+	info, err := os.Lstat(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return packManifest{}, false, nil
 	}
+	if err != nil {
+		return packManifest{}, false, err
+	}
+	if !info.Mode().IsRegular() || info.Size() > packFileLimit {
+		return packManifest{}, true, fmt.Errorf("pack.json must be a regular file of at most 1 MiB")
+	}
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return packManifest{}, false, err
 	}
@@ -275,6 +285,16 @@ func (s *Store) importPack(dir string, target packTarget, dryRun bool) (packResu
 			return err
 		}
 		registry := s.loadPackRegistry()
+		// One installation per pack name: its rules carry only the name, so
+		// importing it for another scope or repository would replace the
+		// first installation's rules.
+		if have, ok := registry.Packs[entry.Name]; ok && (have.Scope != entry.Scope || have.RepoKey != entry.RepoKey) {
+			where := have.Scope
+			if have.RepoKey != "" {
+				where = "repository " + have.RepoKey
+			}
+			return fmt.Errorf("pack %s is already installed for %s; remove it first (preferences pack remove %s)", entry.Name, where, entry.Name)
+		}
 		catalog, err := s.catalogFromGeneration(current)
 		if err != nil {
 			return err

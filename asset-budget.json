@@ -61,8 +61,8 @@
   "globs": [
     {
       "pattern": "web/hunkyard-*.js",
-      "gzipBytes": 133500,
-      "note": "shared renderer/comment/diff modules; recalibrated after moving Mermaid and fullscreen controls out of app.js into the renderer registry (~108 KB gzip), then +4.2 KB for tool annotations, decision requests, the image diff, the impact panel, risk ordering and the paginated agent-questions dock; catches module sprawl"
+      "gzipBytes": 135000,
+      "note": "shared renderer/comment/diff modules; recalibrated after moving Mermaid and fullscreen controls out of app.js into the renderer registry (~108 KB gzip), then +4.2 KB for tool annotations, decision requests, the image diff, the impact panel, risk ordering and the paginated agent-questions dock, then +0.6 KB for the review-fix guards (pending-upload check, draft scope, request id fallback); catches module sprawl"
     }
   ],
   "totalJsGzipBytes": 2300000,

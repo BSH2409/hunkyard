@@ -1240,7 +1240,7 @@
       ? 'Hunkyard — ' + (session.branch || 'review')
       : 'Hunkyard — ' + (session.files || []).map(f => f.path).join(', '));
 
-    files = await loadAllFileData(session.files || [], currentFileDataScope());
+    files = await loadAllFileData(session.files || [], fetchScope());
     hiddenUnresolved = session.hidden_unresolved || 0;
 
     orderFiles();
@@ -1391,8 +1391,9 @@
   const treeFolderState = {}; // { 'src': true, 'src/components': false } — true = collapsed
 
   function buildFileTree(fileList) {
-    // Build a nested tree from flat paths
-    const root = { children: {}, files: [] };
+    // Build a nested tree from flat paths. Directory maps have no prototype,
+    // so a folder named "constructor" or "toString" is just a folder.
+    const root = { children: Object.create(null), files: [] };
     for (let i = 0; i < fileList.length; i++) {
       const f = fileList[i];
       const parts = f.path.split('/');
@@ -1400,7 +1401,7 @@
       for (let j = 0; j < parts.length - 1; j++) {
         const dirName = parts[j];
         if (!node.children[dirName]) {
-          node.children[dirName] = { children: {}, files: [] };
+          node.children[dirName] = { children: Object.create(null), files: [] };
         }
         node = node.children[dirName];
       }
@@ -1412,7 +1413,7 @@
   function collapseCommonPrefixes(tree) {
     // Collapse single-child directories: src/ -> components/ -> Foo.tsx becomes src/components/
     const dirs = Object.keys(tree.children);
-    const result = { children: {}, files: tree.files };
+    const result = { children: Object.create(null), files: tree.files };
     for (let i = 0; i < dirs.length; i++) {
       let name = dirs[i];
       let child = tree.children[name];
@@ -1485,7 +1486,7 @@
     const matchingFiles = files.filter(function(file) { return file.path.toLowerCase().includes(query); });
     let tree;
     if (fileOrder === 'risk' && session.mode === 'git') {
-      tree = { children: {}, files: matchingFiles, ordered: true };
+      tree = { children: Object.create(null), files: matchingFiles, ordered: true };
     } else {
       tree = collapseCommonPrefixes(buildFileTree(matchingFiles));
     }
@@ -2129,7 +2130,7 @@
       return loadSingleFile({
         path: file.path, old_path: file.oldPath, status: file.status, file_type: file.fileType,
         additions: file.additions, deletions: file.deletions, generated: file.generated,
-      }, currentFileDataScope(), signal).then(function(loaded) {
+      }, fetchScope(), signal).then(function(loaded) {
         // A lazy file's hash arrives now; un-view it if it changed since viewed.
         const seen = loaded && file.viewed ? storedViewedState()[file.path] : undefined;
         if (seen && viewedStateFor(seen, loaded.fileHash).changed) {
@@ -3371,14 +3372,18 @@
     }
     // Save expanded reply form state before DOM re-render
     const section = document.getElementById('file-section-' + filePath);
-    if (section) {
-      const expandedForms = section.querySelectorAll('.reply-form.expanded');
-      for (let i = 0; i < expandedForms.length; i++) {
-        const card = expandedForms[i].closest('.comment-card');
-        if (card && card.dataset.commentId) {
-          const ta = expandedForms[i].querySelector('.reply-textarea');
-          activeReplyForms.set(card.dataset.commentId, { text: ta ? ta.value : '', expanded: true });
-        }
+    if (section) rememberExpandedReplyForms(section);
+  }
+
+  // rememberExpandedReplyForms records every open reply form under root by
+  // comment id, so a re-render or scope reload reopens it with its text.
+  function rememberExpandedReplyForms(root) {
+    const expandedForms = root.querySelectorAll('.reply-form.expanded');
+    for (let i = 0; i < expandedForms.length; i++) {
+      const card = expandedForms[i].closest('.comment-card');
+      if (card && card.dataset.commentId) {
+        const ta = expandedForms[i].querySelector('.reply-textarea');
+        activeReplyForms.set(card.dataset.commentId, { text: ta ? ta.value : '', expanded: true });
       }
     }
   }
@@ -5302,10 +5307,27 @@
     textarea.focus();
   }
 
+  // submitComment saves a comment form once: a second Ctrl+Enter or click
+  // while the save runs does nothing, and a body that still holds an image
+  // upload placeholder waits for the upload.
   async function submitComment(body, formObj) {
-    if (!body.trim() || !formObj) return null;
+    if (!body.trim() || !formObj || formObj.submitting) return null;
+    if (window.hunkyard.shared.hasPendingUpload(body)) {
+      window.hunkyard.shared.showToast('Wait for the image to finish uploading.');
+      return null;
+    }
+    formObj.submitting = true;
+    try {
+      return await saveCommentForm(body, formObj);
+    } finally {
+      formObj.submitting = false;
+    }
+  }
+
+  // saveCommentForm posts the form; the draft is cleared only once the
+  // server has the comment, so a failed save keeps the reviewer's text.
+  async function saveCommentForm(body, formObj) {
     rememberKeyboardFocusFromForm(formObj);
-    clearDraft(formObj);
     let created;
     const filePath = formObj.filePath;
     const file = getFileByPath(filePath);
@@ -5361,9 +5383,11 @@
       }
     } catch (err) {
       console.error('Error saving comment:', err);
+      window.hunkyard.shared.showToast('Could not save the comment. Your draft is kept.');
       return null;
     }
 
+    clearDraft(formObj);
     removeForm(formObj.formKey);
     if (getFormsForFile(filePath).length === 0) {
       if (activeFilePath === filePath) {
@@ -5464,9 +5488,11 @@
   function restoreDrafts() {
     let restored = false;
     const keysToProcess = [];
+    draftMod.setScope(session && session.session_key);
+    const prefix = draftMod.keyPrefix();
     for (let i = 0; i < localStorage.length; i++) {
       const k = localStorage.key(i);
-      if (k && k.startsWith('hunkyard-draft-')) keysToProcess.push(k);
+      if (k && k.startsWith(prefix)) keysToProcess.push(k);
     }
     for (let ki = 0; ki < keysToProcess.length; ki++) {
       const key = keysToProcess[ki];
@@ -5923,7 +5949,8 @@
       formObj: formObj,
       headerText: headerText,
       submitText: 'Update Comment',
-      initialBody: comment.body,
+      // A re-render while editing keeps the reviewer's unsaved revision.
+      initialBody: typeof formObj.draftBody === 'string' ? formObj.draftBody : comment.body,
       autoFocus: true
     });
 
@@ -6146,11 +6173,13 @@
 
   function createReviewCommentEditor(comment) {
     const formObj = { scope: 'review', filePath: '', startLine: 0, endLine: 0, editingId: comment.id, formKey: 'review:' + comment.id };
+    // The editor is rebuilt on every render; keep the revision on screen.
+    const onScreen = formTextarea(formObj.formKey);
     const el = createCommentFormUI({
       formObj: formObj,
       headerText: 'Editing comment',
       submitText: 'Save',
-      initialBody: comment.body,
+      initialBody: onScreen ? onScreen.value : comment.body,
       autoFocus: true,
       onSubmit: function(body) { updateReviewComment(comment.id, body); },
       onCancel: function() { cancelReviewCommentForm(); },
@@ -6481,6 +6510,10 @@
     saveBtn.addEventListener('click', async () => {
       const newBody = textarea.value.trim();
       if (!newBody) return;
+      if (window.hunkyard.shared.hasPendingUpload(newBody)) {
+        window.hunkyard.shared.showToast('Wait for the image to finish uploading.');
+        return;
+      }
       try {
         const res = await fetch(replyMutationUrl(commentId, replyId, filePath), {
           method: 'PUT',
@@ -6626,6 +6659,10 @@
     submitBtn.addEventListener('click', async function() {
       const body = activeField().value.trim();
       if (!body) { activeField().focus(); return; }
+      if (window.hunkyard.shared.hasPendingUpload(body)) {
+        window.hunkyard.shared.showToast('Wait for the image to finish uploading.');
+        return;
+      }
       submitBtn.disabled = true;
       try {
         const payload = { body: body };
@@ -7589,13 +7626,13 @@
         clearCommitPins();
 
         // Re-fetch everything on file-changed (round complete)
-        let sessionRes = await hydrateStoryIfMissing(await fetchWhenReady('/api/session?scope=' + enc(currentSessionFetchScope())));
+        let sessionRes = await hydrateStoryIfMissing(await fetchWhenReady('/api/session?scope=' + enc(fetchScope())));
         sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
         session = sessionRes;
         reviewComments = sessionRes.review_comments || [];
 
         // Reload all files
-        files = await loadAllFileData(session.files || [], currentFileDataScope());
+        files = await loadAllFileData(session.files || [], fetchScope());
         hiddenUnresolved = session.hidden_unresolved || 0;
 
         // Restore per-file user state from previous round
@@ -8133,11 +8170,9 @@
     return !!(s && s.focus && s.focus.kind === 'range');
   }
 
-  function currentFileDataScope() {
-    return storyNeedsRawDiff() ? 'all' : effectiveDiffScope();
-  }
-
-  function currentSessionFetchScope() {
+  // fetchScope is the diff scope sent with file and session requests: the
+  // story view needs the raw diff, everything else the range-aware scope.
+  function fetchScope() {
     return storyNeedsRawDiff() ? 'all' : effectiveDiffScope();
   }
 
@@ -8819,7 +8854,7 @@
 
   function reloadForScope() {
     const diffFetchMode = ignoreWhitespace && !storyNeedsRawDiff() ? 'filtered' : 'raw';
-    const key = currentSessionFetchScope() + '\0' + currentFileDataScope() + '\0' + diffCommit + '\0' + diffFetchMode + '\0' + sinceReview;
+    const key = fetchScope() + '\0' + fetchScope() + '\0' + diffCommit + '\0' + diffFetchMode + '\0' + sinceReview;
     return scopeReloader.start(key);
   }
 
@@ -8827,7 +8862,7 @@
     const container = document.getElementById('filesContainer');
     container.setAttribute('aria-busy', 'true');
     try {
-      let sessionUrl = '/api/session?scope=' + enc(currentSessionFetchScope());
+      let sessionUrl = '/api/session?scope=' + enc(fetchScope());
       if (diffCommit) sessionUrl += '&commit=' + enc(diffCommit);
       let sessionRes = await fetchWhenReady(sessionUrl, signal);
       if (signal.aborted) return;
@@ -8838,7 +8873,9 @@
       }
       sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
       if (signal.aborted) return;
-      activeReplyForms.clear();
+      // Keep unsent replies: a comment still in the new scope reopens its
+      // reply form with the text, one outside it keeps it for later.
+      rememberExpandedReplyForms(document);
       // Scope/base/commit changes can replace diff hunks without changing
       // the final file content hash. Cached Story clones are keyed by that
       // hash, so invalidate them before loading the new scoped file data.
@@ -8864,7 +8901,7 @@
         return;
       }
 
-      const loaded = await loadAllFileData(session.files, currentFileDataScope(), signal);
+      const loaded = await loadAllFileData(session.files, fetchScope(), signal);
       if (signal.aborted) return;
       files = loaded;
       hiddenUnresolved = session.hidden_unresolved || 0;
@@ -10539,7 +10576,7 @@
       file_type: file.fileType,
       additions: file.additions,
       deletions: file.deletions,
-    }, currentFileDataScope()).then(function (loaded) {
+    }, fetchScope()).then(function (loaded) {
       file.oldPath = loaded.oldPath;
       file.content = loaded.content;
       file.previousContent = loaded.previousContent;

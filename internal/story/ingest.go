@@ -75,10 +75,10 @@ type Ingest struct {
 
 // Result reports the outcome of an ingest attempt. Coverage is always
 // populated (printed to stdout as JSON on every ingest, success or failure).
-// Saved is true only when the caller should persist Ingest.Story.
+// ShouldSave is true only when the caller should persist Ingest.Story.
 type Result struct {
-	Saved    bool
-	Coverage *session.StoryCoverage
+	ShouldSave bool
+	Coverage   *session.StoryCoverage
 }
 
 // Sentinel errors so callers can distinguish rejection reasons if needed.
@@ -167,7 +167,7 @@ func Run(in Ingest) (Result, error) {
 	// 5. ok is true only when the story saved with zero repairs.
 	coverage.OK = !coverage.AutoRepaired
 	in.Story.Coverage = coverage
-	return Result{Saved: true, Coverage: coverage}, nil
+	return Result{ShouldSave: true, Coverage: coverage}, nil
 }
 
 // ValidateShape enforces the greenfield story contract before a story is

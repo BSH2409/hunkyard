@@ -125,6 +125,9 @@
       }
       case A2C.REQUEST_ANCESTOR_MENU:
         if (!Array.isArray(msg.options) || msg.options.length === 0) return { ok: false, reason: 'menu.options' };
+        if (!msg.options.every(function (o) { return o && Number.isInteger(o.level) && o.level >= 0 && isString(o.label); })) {
+          return { ok: false, reason: 'menu.option' };
+        }
         if (!msg.pointer || !isFiniteNumber(msg.pointer.x) || !isFiniteNumber(msg.pointer.y)) return { ok: false, reason: 'menu.pointer' };
         return { ok: true };
       case A2C.PIN_CLICKED:

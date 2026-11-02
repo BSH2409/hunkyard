@@ -56,8 +56,8 @@ func TestCreateSession_LoadsReviewFromReviewPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sess.ReviewFilePath != reviewDir {
-		t.Errorf("ReviewFilePath = %q, want %q", sess.ReviewFilePath, reviewDir)
+	if sess.ReviewDir != reviewDir {
+		t.Errorf("ReviewDir = %q, want %q", sess.ReviewDir, reviewDir)
 	}
 	if sess.ReviewRound != 2 {
 		t.Errorf("ReviewRound = %d, want 2", sess.ReviewRound)

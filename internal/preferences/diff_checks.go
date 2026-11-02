@@ -193,21 +193,25 @@ func (s *Store) stopHook(input io.Reader, output io.Writer) {
 	if payload == nil || payload["stop_hook_active"] == true || os.Getenv("LEARN_PREFERENCES_MAINTENANCE") == "1" {
 		return
 	}
-	if reason := s.unseenPublication(textField(payload["session_id"])); reason != "" {
+	if reason := s.claimUnseenPublication(textField(payload["session_id"])); reason != "" {
 		response["decision"] = "block"
 		response["reason"] = reason
 		return
 	}
+	cwd, session := textField(payload["cwd"]), textField(payload["session_id"])
+	repo, _ := RepositoryKey(cwd)
 	var checks []guard
-	for _, g := range s.loadGuards() {
-		if g.Kind == "diff_check" && len(g.Patterns) > 0 && diffChecks[g.Patterns[0]] != nil && s.activeRule(g.RuleID) != nil {
-			checks = append(checks, g)
+	for _, binding := range s.diffChecksFor(repo) {
+		for _, g := range s.loadGuards() {
+			if g.Kind == "diff_check" && g.RuleID == binding.ruleID && len(g.Patterns) > 0 && g.Patterns[0] == binding.name {
+				checks = append(checks, g)
+				break
+			}
 		}
 	}
 	if len(checks) == 0 {
 		return
 	}
-	cwd, session := textField(payload["cwd"]), textField(payload["session_id"])
 	state := s.loadSession(session)
 	current := workingDiffDigest(cwd)
 	if current == state.TurnDiffDigest || current == state.StopBlockedTurn {
@@ -242,16 +246,15 @@ func (s *Store) stopHook(input io.Reader, output io.Writer) {
 		return
 	}
 	_ = s.updateSession(session, func(stored *sessionState) { stored.StopBlockedTurn = current })
-	repo, _ := RepositoryKey(cwd)
 	_ = s.recordActivity(ActivityEvent{Kind: activityBlocked, RepoKey: repo, SessionKey: digest(session), Detail: strings.Join(findings, "; ")})
 	response["decision"] = "block"
 	response["reason"] = "Before finishing, fix these preference violations:\n- " + strings.Join(findings, "\n- ")
 }
 
-// unseenPublication returns a stop reason when a review this session owns
+// claimUnseenPublication returns a stop reason when a review this session owns
 // has a published batch the agent has not been told about yet, so feedback
 // published mid-turn is never left unread.
-func (s *Store) unseenPublication(session string) string {
+func (s *Store) claimUnseenPublication(session string) string {
 	notices := s.ownedReviewNotices(session)
 	if len(notices) == 0 {
 		return ""

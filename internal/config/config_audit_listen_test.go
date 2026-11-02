@@ -17,7 +17,7 @@ import (
 //     no_open/quiet/no_integration_check/no_update_check: project wins when
 //     presence bit set (so explicit false overrides global true).
 //   LoadConfig applies Host default "0.0.0.0" when empty.
-//   Consumers (cli_resolve.go + call sites):
+//   Consumers (resolve.go + call sites):
 //     port/output/host -> ResolvePort/ResolveHost/ResolveOutputDir
 //     (flag > env > config), used by internal/live, internal/session plan_cli,
 //     internal/preview; no_open -> f.noOpen || cfg.NoOpen; quiet ->

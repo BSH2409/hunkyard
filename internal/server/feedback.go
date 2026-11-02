@@ -124,6 +124,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 			child.ID = "reply:" + c.ID + ":" + reply.ID
 			child.ParentID = c.ID
 			child.Body = reply.Body
+			// The reply is the reviewer's own words, even under a tool or
+			// rule finding: keep its location, not the finding's provenance.
+			child.Source, child.SourceRef, child.Verdict = "", "", ""
 			batch.Comments = append(batch.Comments, child)
 		}
 	}
@@ -143,7 +146,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	appendReviewerEdits(&batch, sess, files)
 	if request.Summary != "" {
-		batch.Comments = append(batch.Comments, feedback.Comment{ID: "review-summary", Body: request.Summary, Scope: "review"})
+		batch.Comments = append(batch.Comments, feedback.Comment{ID: feedback.SummaryCommentID, Body: request.Summary, Scope: "review"})
 	}
 	if err := sess.SyncWriteFiles(); err != nil {
 		http.Error(w, "cannot persist review comments", 500)
@@ -157,7 +160,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.MarkDecisionsPublished(published.ID, published.Decisions)
 	if request.Disposition == "approve" && !s.statsRecorded && !s.sessionStartedAt.IsZero() && !s.cfg.DisableStats {
-		recordSessionStats(sess, s.author, s.sessionStartedAt, true)
+		session.RecordSessionStats(sess, s.author, s.sessionStartedAt, true)
 		s.statsRecorded = true
 	}
 	sess.SetAwaitingFirstReview(false)
@@ -349,8 +352,8 @@ func (s *Server) handleFeedbackLearn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		BatchID   string                        `json:"batch_id"`
-		Decisions []feedback.PreferenceDecision `json:"decisions"`
+		BatchID   string                              `json:"batch_id"`
+		Decisions []feedback.PreferenceClassification `json:"decisions"`
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
 	if err != nil || strictjson.Decode(data, &request) != nil {

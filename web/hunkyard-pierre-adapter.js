@@ -201,11 +201,15 @@
 
   // Pierre SelectedLineRange → Hunkyard form range. Pierre numbers lines per side;
   // a range that ends on the deletions side is an old-side comment.
+  // Old and new line numbers are separate numbering schemes, so a range that
+  // starts on one side and ends on the other keeps only the line it ends on.
   function formRangeFromSelection(range) {
     if (!range) return null;
+    var endSide = range.endSide || range.side;
+    var side = endSide === 'deletions' ? 'old' : '';
+    if (range.side && range.side !== endSide) return { startLine: range.end, endLine: range.end, side: side };
     var start = Math.min(range.start, range.end);
     var end = Math.max(range.start, range.end);
-    var side = (range.endSide || range.side) === 'deletions' ? 'old' : '';
     return { startLine: start, endLine: end, side: side };
   }
 

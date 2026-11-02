@@ -508,11 +508,11 @@ func TestRunCommentExplicitSessionDoesNotRedirectReplies(t *testing.T) {
 	}
 	const selectedKey = "aaaaaaaaaaaa"
 	const siblingKey = "bbbbbbbbbbbb"
-	selectedPath, err := daemon.ReviewFilePath(selectedKey)
+	selectedPath, err := daemon.ReviewDir(selectedKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	siblingPath, err := daemon.ReviewFilePath(siblingKey)
+	siblingPath, err := daemon.ReviewDir(siblingKey)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -129,7 +129,7 @@ func RunPlan(args []string) error {
 		return savePlanWithoutReview(os.Stdout, os.Stderr, storageDir, slug, content, pc.quiet || config.LoadConfig(cwd).Quiet)
 	}
 
-	go backgroundCleanup()
+	go backgroundCleanup("")
 
 	ver, err := SavePlanVersion(storageDir, content)
 	if err != nil {
@@ -356,7 +356,7 @@ func RunPlanHook() error {
 		return nil
 	}
 
-	go backgroundCleanup()
+	go backgroundCleanup("")
 
 	var event planHookEvent
 	if err := json.NewDecoder(os.Stdin).Decode(&event); err != nil {
@@ -411,7 +411,7 @@ func RunCodexPlanHook() error {
 		return nil
 	}
 
-	go backgroundCleanup()
+	go backgroundCleanup("")
 	runCodexPlanReviewHook(event.SessionID, []byte(plan))
 	return nil
 }

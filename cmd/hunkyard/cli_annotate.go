@@ -19,6 +19,8 @@ import (
 	"github.com/BSH2409/hunkyard/internal/annotate"
 	"github.com/BSH2409/hunkyard/internal/clicmd"
 	"github.com/BSH2409/hunkyard/internal/daemon"
+	"github.com/BSH2409/hunkyard/internal/review"
+	"github.com/BSH2409/hunkyard/internal/vcs"
 )
 
 const annotateUsage = `Usage: hunkyard annotate --format <coverprofile|lcov|sarif|go-test-json> [--tool NAME] [--session ID] [--json] <file|->
@@ -155,6 +157,9 @@ func waitForReviewReady(client *http.Client, base string) error {
 // review running in this directory.
 func annotateSession(key string) (daemon.SessionEntry, error) {
 	if key != "" {
+		if !daemon.ValidSessionKey(key) {
+			return daemon.SessionEntry{}, fmt.Errorf("provide a valid --session ID")
+		}
 		entry, err := daemon.ReadSessionFile(key)
 		if err != nil {
 			return daemon.SessionEntry{}, fmt.Errorf("no active review session %s", key)
@@ -165,7 +170,14 @@ func annotateSession(key string) (daemon.SessionEntry, error) {
 	if err != nil {
 		return daemon.SessionEntry{}, err
 	}
-	entries, keys, err := daemon.ListSessionsForCWDWithKeys(cwd)
+	// Same lookup as `hunkyard comment`: this directory's reviews, then a
+	// review started anywhere in the same repository.
+	backend := vcs.DetectVCS("")
+	branch := ""
+	if backend != nil {
+		branch = backend.CurrentBranch()
+	}
+	entries, keys, err := review.MatchingLiveSessions(cwd, branch, backend)
 	if err != nil {
 		return daemon.SessionEntry{}, err
 	}

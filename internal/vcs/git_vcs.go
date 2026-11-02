@@ -61,7 +61,7 @@ func (g *GitVCS) ChangedFilesScoped(scope, baseRef string) ([]FileChange, error)
 
 func (g *GitVCS) ChangedFilesForCommit(sha, dir string) ([]FileChange, error) {
 	if len(g.paths) > 0 {
-		out, err := g.runSelectedGit(dir, false, "diff-tree", "--no-commit-id", "-r", "--name-status", "-z", sha)
+		out, err := g.runSelectedGit(dir, false, append([]string{"diff-tree"}, commitFileListArgs(sha)...)...)
 		return parseNameStatusZ(out), err
 	}
 	return ChangedFilesForCommit(sha, dir)
@@ -120,8 +120,8 @@ func (g *GitVCS) UntrackedFiles(dir string) ([]FileChange, error) {
 	return untrackedFilesInDir(dir)
 }
 
-func (g *GitVCS) AllTrackedFiles(dir string) ([]string, error) {
-	return AllTrackedFiles(dir, g.paths...)
+func (g *GitVCS) ListRepoFiles(dir string) ([]string, error) {
+	return ListRepoFiles(dir, g.paths...)
 }
 
 func (g *GitVCS) RemoteBranches(dir string) ([]string, error) {
@@ -130,8 +130,8 @@ func (g *GitVCS) RemoteBranches(dir string) ([]string, error) {
 
 func (g *GitVCS) DiffNumstat(baseRef, dir string) (map[string]NumstatEntry, error) {
 	if len(g.paths) > 0 {
-		out, err := g.runSelectedGit(dir, true, "diff", "--no-ext-diff", "--numstat", baseRef)
-		return parseNumstatOutput(out), err
+		out, err := g.runSelectedGit(dir, true, "diff", "--no-ext-diff", "--numstat", "-z", baseRef)
+		return parseNumstatZ(out), err
 	}
 	return DiffNumstatDir(baseRef, dir)
 }

@@ -350,6 +350,9 @@
     if (window.hunkyard.activity) activityTracker = window.hunkyard.activity.start();
     if (shared && shared.applyThemeFromCookie) shared.applyThemeFromCookie();
     state.session = await waitForSession();
+    // Drafts live in localStorage, which is per host and port; scope them to
+    // this review so another review on the same port never sees them.
+    if (window.hunkyard.draft && window.hunkyard.draft.setScope) window.hunkyard.draft.setScope(state.session.session_key);
     if (state.session.review_type !== 'live' && state.session.review_type !== 'preview') {
       console.warn('[live-mode] unexpected review_type:', state.session.review_type);
     }
@@ -376,16 +379,12 @@
     }
 
     // Capture proxyOrigin once for the message handler. The agent
-    // posts from the proxy origin; the chrome lives on the API origin and
+    // posts from the proxy origin (the live proxy, or the preview server
+    // beside the review port); the chrome lives on the API origin and
     // accepts only that source+origin pair.
-    // Preview mode: same-origin (agent served from /preview-content/).
     var s = state.session || {};
     var proxyHost = window.location.hostname || 'localhost';
-    if (state.isPreview) {
-      state.proxyOrigin = window.location.origin;
-    } else {
-      state.proxyOrigin = 'http://' + proxyHost + ':' + (s.proxy_port || 0);
-    }
+    state.proxyOrigin = 'http://' + proxyHost + ':' + (s.proxy_port || 0);
     buildShell();
     // Cache the iframeWindow once buildShell has inserted it.
     state.iframeWindow = els.iframe ? els.iframe.contentWindow : null;
@@ -657,16 +656,13 @@
   // Iframe src wired to proxy_port
   // ============================================================
   function proxyURL(pathname) {
-    if (state.isPreview) {
-      var p = pathname || '/';
-      if (p.indexOf('/preview-content') === 0) p = p.slice('/preview-content'.length) || '/';
-      return '/preview-content' + p;
-    }
     var s = state.session || {};
     var port = s.proxy_port || 0;
     if (!port) return 'about:blank';
+    var p = pathname || '/';
+    if (state.isPreview && p.indexOf('/preview-content') !== 0) p = '/preview-content' + p;
     var host = window.location.hostname || 'localhost';
-    return 'http://' + host + ':' + port + (pathname || '/');
+    return 'http://' + host + ':' + port + p;
   }
 
   // Set when agent-ready arrives for the in-flight iframe navigation.
@@ -1244,6 +1240,10 @@
       if (errEl) { errEl.hidden = false; errEl.textContent = 'Reply body required'; }
       return;
     }
+    if (window.hunkyard.shared.hasPendingUpload(body)) {
+      if (errEl) { errEl.hidden = false; errEl.textContent = 'Wait for the image to finish uploading.'; }
+      return;
+    }
     submitReply(c, path, body, btn, errEl);
   });
 
@@ -1313,6 +1313,10 @@
       ev.stopPropagation();
       var newBody = ta.value.trim();
       if (!newBody) return;
+      if (window.hunkyard.shared.hasPendingUpload(newBody)) {
+        showToast('Wait for the image to finish uploading.');
+        return;
+      }
       saveBtn.disabled = true;
       try {
         var res = await fetch(replyMutationUrl(commentId, replyId, pathname), {
@@ -1557,6 +1561,10 @@
     var body = ta ? ta.value.trim() : '';
     if (!body) {
       if (errEl) { errEl.hidden = false; errEl.textContent = 'Body required'; }
+      return;
+    }
+    if (window.hunkyard.shared.hasPendingUpload(body)) {
+      if (errEl) { errEl.hidden = false; errEl.textContent = 'Wait for the image to finish uploading.'; }
       return;
     }
     submitEdit(c, path, body, btn, errEl);
@@ -1850,6 +1858,10 @@
     if (errEl) { errEl.hidden = true; errEl.textContent = ''; }
     if (!body) {
       if (errEl) { errEl.hidden = false; errEl.textContent = 'Body required'; }
+      return;
+    }
+    if (window.hunkyard.shared.hasPendingUpload(body)) {
+      if (errEl) { errEl.hidden = false; errEl.textContent = 'Wait for the image to finish uploading.'; }
       return;
     }
     // Dedup: Cmd+Enter and Save-button click both call this. A fast
@@ -2429,10 +2441,26 @@
       expectOrigin: state.proxyOrigin,
     });
 
+    // A bounded log of frame messages for tests and debugging. Screenshot
+    // buffers are recorded by size only, so a long session cannot keep
+    // every capture alive.
     window.__hunkyardLiveMessages = [];
+    var LIVE_MESSAGE_LOG_LIMIT = 200;
+    function loggedMessage(data) {
+      if (!data || typeof data !== 'object') return data;
+      var entry = {};
+      Object.keys(data).forEach(function (key) {
+        var value = data[key];
+        entry[key] = (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) ? { byteLength: value.byteLength } : value;
+      });
+      return entry;
+    }
     window.addEventListener('message', function (ev) {
       if (!guard(ev)) return;
-      window.__hunkyardLiveMessages.push(ev.data);
+      var log = window.__hunkyardLiveMessages;
+      if (!Array.isArray(log)) log = window.__hunkyardLiveMessages = [];
+      log.push(loggedMessage(ev.data));
+      if (log.length > LIVE_MESSAGE_LOG_LIMIT) log.splice(0, log.length - LIVE_MESSAGE_LOG_LIMIT);
       try { dispatch(ev.data); } catch (e) { console.error('[live-mode] dispatch error:', e); }
     });
   });

@@ -7,9 +7,10 @@ func (s *Server) HandleFileCommentsForTest(w http.ResponseWriter, r *http.Reques
 	s.handleFileComments(w, r)
 }
 
-// HandlePreviewContentForTest exposes handlePreviewContent for cross-package tests.
+// HandlePreviewContentForTest serves the session's previewed file the way
+// the preview server does, for cross-package tests.
 func (s *Server) HandlePreviewContentForTest(w http.ResponseWriter, r *http.Request) {
-	s.handlePreviewContent(w, r)
+	newPreviewContentHandler("", s.session.Load().Origin, 0).ServeHTTP(w, r)
 }
 
 // ServeIndexHTMLForTest returns the embedded index.html shell handler.

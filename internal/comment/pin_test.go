@@ -595,3 +595,12 @@ func TestReadLivePageHTMLDefault(t *testing.T) {
 		t.Fatal("expected bad route")
 	}
 }
+
+func writePreviewPage(t *testing.T, dir string) string {
+	t.Helper()
+	htmlPath := filepath.Join(dir, "index.html")
+	if err := os.WriteFile(htmlPath, []byte(`<html><body><h1>Hi</h1></body></html>`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return htmlPath
+}

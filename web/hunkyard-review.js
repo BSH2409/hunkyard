@@ -8,6 +8,16 @@
   var pending = null;
   var request = null;
   var fingerprint = '';
+  // crypto.randomUUID exists only on secure origins (localhost, HTTPS); a
+  // review opened on a LAN or container address builds a v4 UUID itself.
+  function newRequestID() {
+    if (typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+    var b = crypto.getRandomValues(new Uint8Array(16));
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    var hex = Array.prototype.map.call(b, function (x) { return (x + 0x100).toString(16).slice(1); }).join('');
+    return hex.slice(0, 8) + '-' + hex.slice(8, 12) + '-' + hex.slice(12, 16) + '-' + hex.slice(16, 20) + '-' + hex.slice(20);
+  }
   window.hunkyardReview = {
     prepare: function (publicationKey) {
       if (pending) return pending;
@@ -32,7 +42,7 @@
           if (context && context.displayed_files) value.displayed_files = context.displayed_files;
           var nextFingerprint = JSON.stringify([value, context]);
           if (!request || fingerprint !== nextFingerprint) {
-            request = crypto.randomUUID();
+            request = newRequestID();
             fingerprint = nextFingerprint;
           }
           value.request_id = request;

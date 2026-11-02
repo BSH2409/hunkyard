@@ -92,9 +92,14 @@ func parseNameStatusZ(out []byte) []FileChange {
 		}
 		i += 2
 		oldPath := ""
-		if status[0] == 'R' && i < len(fields) {
+		// Renames and copies carry two paths; a copy is a new file.
+		if (status[0] == 'R' || status[0] == 'C') && i < len(fields) {
 			oldPath, path = path, fields[i]
 			i++
+		}
+		if status[0] == 'C' {
+			changes = append(changes, FileChange{Path: path, Status: "added"})
+			continue
 		}
 		changes = append(changes, gitStatusChange(status[0], path, oldPath))
 	}

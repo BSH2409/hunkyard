@@ -58,7 +58,7 @@ func (f *fakeFetchVCS) CommitLog(string, string, string) ([]CommitInfo, error) {
 }
 func (f *fakeFetchVCS) WorkingTreeFingerprint() string              { return "" }
 func (f *fakeFetchVCS) UntrackedFiles(string) ([]FileChange, error) { return nil, nil }
-func (f *fakeFetchVCS) AllTrackedFiles(string) ([]string, error)    { return nil, nil }
+func (f *fakeFetchVCS) ListRepoFiles(string) ([]string, error)      { return nil, nil }
 func (f *fakeFetchVCS) RemoteBranches(string) ([]string, error)     { return nil, nil }
 func (f *fakeFetchVCS) DiffNumstat(string, string) (map[string]NumstatEntry, error) {
 	return nil, nil

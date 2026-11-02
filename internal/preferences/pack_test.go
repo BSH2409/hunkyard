@@ -256,3 +256,29 @@ func TestRemovedRepositoryPackStaysDeclinedUntilItChanges(t *testing.T) {
 		t.Fatalf("a changed pack was not offered again: %+v", got)
 	}
 }
+
+func TestImportingASharedPackForAnotherRepositoryKeepsTheFirst(t *testing.T) {
+	s := testStore(t)
+	dir := t.TempDir()
+	writePack(t, dir, "backend", "1.0.0", map[string][]string{"api": {"Return 404 for unknown ids."}})
+	if _, err := s.importPack(dir, packTarget{scope: "repository", repoKey: "orion-0123456789ab"}, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.importPack(dir, packTarget{scope: "repository", repoKey: "vega-0123456789ab"}, false); err == nil {
+		t.Fatal("a second installation silently replaced the first")
+	}
+	rules := packRules(s, "shared-backend")
+	if len(rules) != 1 || record(rules[0]["scope"])["repo_key"] != "orion-0123456789ab" {
+		t.Fatalf("the first repository's rules = %+v", rules)
+	}
+}
+
+func TestPackManifestMustBeASmallRegularFile(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Symlink("/dev/zero", filepath.Join(dir, "pack.json")); err != nil {
+		t.Skip("symlinks unavailable:", err)
+	}
+	if _, _, err := readPackManifest(dir); err == nil {
+		t.Fatal("a symlinked pack.json was read")
+	}
+}

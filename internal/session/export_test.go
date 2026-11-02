@@ -23,7 +23,6 @@ var (
 	applyPlanOverrides      = ApplyPlanOverrides
 	buildPlanDaemonArgs     = BuildPlanDaemonArgs
 	commitAt                = vcs.CommitAtForTest
-	isCommitish             = vcs.IsCommitish
 	newProcessGroup         = daemon.NewProcessGroupForTest
 	terminateProcess        = daemon.TerminateProcess
 	processExists           = daemon.ProcessExists

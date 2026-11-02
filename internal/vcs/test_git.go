@@ -48,11 +48,6 @@ func CommitAtForTest(t *testing.T, dir, path, content, msg string) string {
 	return runGitForTest(t, dir, "rev-parse", "HEAD")
 }
 
-// IsCommitish reports whether s is a safe ref token (hex SHA, 4–40 chars).
-func IsCommitish(s string) bool {
-	return isCommitish(s)
-}
-
 // ClearGitEnvForTest unsets git's repo-location environment variables for the
 // duration of the test, restoring them on cleanup. Git hooks (e.g. pre-commit)
 // export GIT_DIR / GIT_WORK_TREE, which take precedence over a command's working

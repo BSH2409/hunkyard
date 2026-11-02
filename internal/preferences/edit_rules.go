@@ -95,11 +95,11 @@ func pathSurfacesFor(paths []string, cwd string) []string {
 	return sortedUnique(found)
 }
 
-// editRulesResponse adds rules for the edited files that this session has
+// injectEditRules adds rules for the edited files that this session has
 // not seen yet. It never denies an edit.
 //
 //nolint:gocyclo // Scope, status, session and limit filters apply together to each rule.
-func (s *Store) editRulesResponse(payload map[string]any) map[string]any {
+func (s *Store) injectEditRules(payload map[string]any) map[string]any {
 	paths := editedPaths(textField(payload["tool_name"]), record(payload["tool_input"]))
 	surfaces := pathSurfacesFor(paths, textField(payload["cwd"]))
 	if len(surfaces) == 0 {

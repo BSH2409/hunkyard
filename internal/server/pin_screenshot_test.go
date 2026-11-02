@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/BSH2409/hunkyard/internal/feedback"
 	"github.com/BSH2409/hunkyard/internal/session"
 )
 
@@ -24,7 +25,7 @@ func pinServer(t *testing.T) (*Server, *Session) {
 
 func savedShot(t *testing.T, s *Server) string {
 	t.Helper()
-	name, err := saveAttachment(s.reviewPath, pngBytes)
+	name, err := session.SaveAttachment(s.reviewPath, pngBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,7 +65,7 @@ func TestLivePinStoresScreenshot(t *testing.T) {
 
 func TestLivePinRejectsForeignScreenshot(t *testing.T) {
 	s, _ := pinServer(t)
-	jpg, err := saveAttachment(s.reviewPath, []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00"))
+	jpg, err := session.SaveAttachment(s.reviewPath, []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,5 +168,33 @@ func TestReanchorReplacesPinScreenshot(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(dir, newShot)); !os.IsNotExist(err) {
 		t.Errorf("replaced screenshot kept: %v", err)
+	}
+}
+
+func TestReanchorKeepsAScreenshotAPublishedBatchUses(t *testing.T) {
+	s, _ := pinServer(t)
+	oldShot, newShot := savedShot(t, s), savedShot(t, s)
+	rec := postPin(s, pinBody("Pay button", "#pay", shotJSON(oldShot)))
+	var pin session.Comment
+	if err := json.Unmarshal(rec.Body.Bytes(), &pin); err != nil {
+		t.Fatal(err)
+	}
+	store, err := s.feedbackStore()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Publish("published", feedback.Batch{Version: 1, ReviewID: "012345abcdef", SnapshotID: "snapshot_" + strings.Repeat("a", 64), Round: 1, Disposition: "comment", Comments: []feedback.Comment{{
+		ID: pin.ID, Body: "Pay button", Pin: &feedback.PinContext{Route: "/", Selector: "#pay", Screenshot: &feedback.PinShot{URL: "http://localhost:5000/api/attachments/" + oldShot}},
+	}}}); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	anchor := `{"dom_anchor":{"pathname":"/","css_selector":"#pay-now","tag_chain":["BUTTON"],"outer_html":"","viewport_width":1280,"viewport_height":800}`
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodPut, "/api/comment/"+pin.ID+"?path=%2F", strings.NewReader(anchor+shotJSON(newShot)+`}`)))
+	if w.Code != http.StatusOK {
+		t.Fatalf("re-anchor = %d", w.Code)
+	}
+	if _, err := os.Stat(filepath.Join(session.ReviewPathsFor(s.reviewPath).Attachments, oldShot)); err != nil {
+		t.Fatalf("the screenshot a published batch points at was deleted: %v", err)
 	}
 }

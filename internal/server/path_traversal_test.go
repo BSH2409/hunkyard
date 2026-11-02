@@ -36,3 +36,18 @@ func TestCommentPathCannotReadOutsideTheRepo(t *testing.T) {
 		t.Fatalf("comment inside the repo = %d %s", ok.Code, ok.Body)
 	}
 }
+
+func TestFilesHandlerSandboxesServedContent(t *testing.T) {
+	s, sess := newTestServer(t)
+	if err := os.WriteFile(filepath.Join(sess.RepoRoot, "page.html"), []byte("<script>fetch('/api/finish')</script>"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	s.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/files/page.html", nil))
+	if csp := w.Header().Get("Content-Security-Policy"); !strings.HasPrefix(csp, "sandbox") {
+		t.Errorf("Content-Security-Policy = %q, want a sandbox policy", csp)
+	}
+	if w.Header().Get("X-Content-Type-Options") != "nosniff" {
+		t.Error("missing X-Content-Type-Options: nosniff")
+	}
+}

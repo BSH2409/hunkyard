@@ -242,6 +242,9 @@ type FileEntry struct {
 	// Multi-round (markdown files only)
 	PreviousContent  string    `json:"-"`
 	PreviousComments []Comment `json:"-"`
+	// roundBaseline is set once PreviousContent holds what the reviewer saw
+	// this round (files mode), so later edits in the same round keep it.
+	roundBaseline bool
 
 	// Lazy loading: when true, Content and DiffHunks are not yet populated.
 	// Call ensureLoaded() before accessing them. Only used when >lazyFileThreshold files.
@@ -450,7 +453,7 @@ type Session struct {
 	// platforms without preferences).
 	ruleChecker         RuleChecker
 	ruleVerdictRecorder func(ruleID, verdict string) error
-	ReviewFilePath      string // centralized review file path (~/.hunkyard/reviews/<key>.json)
+	ReviewDir           string // the review folder (~/.hunkyard/reviews/<key>/) holding review.json
 	PlanDir             string // managed storage dir for plan mode (empty for git/files)
 	ReviewRound         int
 	IgnorePatterns      []string
@@ -1203,14 +1206,14 @@ func NewSessionFromFiles(paths []string, ignorePatterns []string) (*Session, err
 //
 // Skips the sidecar write when the identity would fall back to RepoRoot —
 // this path runs before applySessionOverrides has a chance to assign
-// ReviewFilePath / OutputDir. The first WriteFiles or round-complete will
+// ReviewDir / OutputDir. The first WriteFiles or round-complete will
 // re-emit the sidecar at the canonical centralized path.
 //
 // Pre-SetSession only — caller is the constructor and no concurrent readers
 // exist. See plan v4 §Lock discipline.
 func (s *Session) captureBaselineAndPersist() {
 	s.captureRoundSnapshot(s.ReviewRound)
-	if s.ReviewFilePath == "" && s.OutputDir == "" {
+	if s.ReviewDir == "" && s.OutputDir == "" {
 		return
 	}
 	if len(s.RoundSnapshots) == 0 {
@@ -2275,7 +2278,100 @@ func (s *Session) isWaitingForAgent() bool {
 // handler, which increments it only after comments have been carried forward from
 // the review file. This prevents a TOCTOU race where GetSessionInfo could observe the
 // new round number before carry-forward is complete, returning empty comments.
+// pendingWriteState reports an unwritten change in memory, and whether
+// review.json is exactly as this daemon last read or wrote it.
+func (s *Session) pendingWriteState() (pending, fileUnchanged bool) {
+	s.mu.RLock()
+	pending, lastMtime := s.pendingWrite, s.lastHunkyardJSONMtime
+	s.mu.RUnlock()
+	if !pending {
+		return false, false
+	}
+	info, err := os.Stat(ReviewPathsFor(s.hunkyardJSONPath()).Review)
+	if err != nil {
+		return true, lastMtime.IsZero()
+	}
+	return true, info.ModTime().Equal(lastMtime)
+}
+
+// addPendingCommentsToChangedFile saves comments still waiting for their
+// debounced write into a review.json another writer changed, leaving every
+// other edit in that file alone: only comments the file does not have yet
+// are added.
+func (s *Session) addPendingCommentsToChangedFile() {
+	hunkyardPath := s.hunkyardJSONPath()
+	if hunkyardPath == "" {
+		return
+	}
+	type pendingFile struct {
+		status   string
+		comments []Comment
+	}
+	s.mu.RLock()
+	files := map[string]pendingFile{}
+	for _, f := range s.Files {
+		if len(f.Comments) > 0 {
+			files[f.Path] = pendingFile{status: f.Status, comments: cloneCommentsWithReplies(f.Comments)}
+		}
+	}
+	reviewLevel := cloneCommentsWithReplies(s.reviewComments)
+	s.mu.RUnlock()
+	_ = WithReviewLock(hunkyardPath, func() error {
+		cj, err := readHunkyardJSONFromDisk(hunkyardPath)
+		if err != nil {
+			return err
+		}
+		if cj.Files == nil {
+			cj.Files = map[string]HunkyardJSONFile{}
+		}
+		changed := false
+		for path, pf := range files {
+			file := cj.Files[path]
+			have := map[string]bool{}
+			for _, c := range file.Comments {
+				have[c.ID] = true
+			}
+			for _, c := range pf.comments {
+				if !have[c.ID] {
+					file.Comments = append(file.Comments, c)
+					changed = true
+				}
+			}
+			if file.Status == "" {
+				file.Status = pf.status
+			}
+			cj.Files[path] = file
+		}
+		haveReview := map[string]bool{}
+		for _, c := range cj.ReviewComments {
+			haveReview[c.ID] = true
+		}
+		for _, c := range reviewLevel {
+			if !haveReview[c.ID] {
+				cj.ReviewComments = append(cj.ReviewComments, c)
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+		return saveHunkyardJSONToDisk(hunkyardPath, cj)
+	})
+}
+
 func (s *Session) SignalRoundComplete() {
+	// Save what the reviewer did in the last debounce window first: the
+	// pending write is cancelled below and the comments cleared. A review
+	// file another writer changed since this daemon last touched it is not
+	// rewritten from memory, which would overwrite that writer's edits; only
+	// the comments it lacks are added.
+	if pending, unchanged := s.pendingWriteState(); pending {
+		if unchanged {
+			_ = s.SyncWriteFiles()
+		} else {
+			s.addPendingCommentsToChangedFile()
+		}
+	}
 	s.mu.Lock()
 	if s.writeTimer != nil {
 		s.writeTimer.Stop()
@@ -2325,6 +2421,7 @@ func (s *Session) ClearAllComments() {
 		f.Comments = []Comment{}
 		f.PreviousComments = nil
 		f.PreviousContent = ""
+		f.roundBaseline = false
 		filtered = append(filtered, f)
 	}
 	s.Files = filtered
@@ -2617,12 +2714,12 @@ func (s *Session) restoreFileCommentsLocked(cj *HunkyardJSON) {
 func (s *Session) loadHunkyardJSONLocked() {
 	identity := s.hunkyardJSONPath()
 
-	// Capture identity-on-entry. If ReviewFilePath / OutputDir were set
+	// Capture identity-on-entry. If ReviewDir / OutputDir were set
 	// BEFORE this call (the canonical resumed-session path in cli_serve),
 	// the on-disk sidecar is already authoritative and we don't need to
 	// rewrite it from in-memory state. Used downstream to skip a
 	// redundant O(N*M) clone+marshal+rename on every cold boot.
-	identityOnEntry := s.ReviewFilePath != "" || s.OutputDir != ""
+	identityOnEntry := s.ReviewDir != "" || s.OutputDir != ""
 
 	// MIGRATION-REMOVAL: trigger v3->v4 folder migration on read.
 	if err := ensureReviewFolder(identity); err != nil {
@@ -2635,7 +2732,7 @@ func (s *Session) loadHunkyardJSONLocked() {
 		// snapshots.json (orphan-snapshots) and we still want to surface that.
 		sidecarHadData := s.loadSnapshotsFromSidecar(identity)
 		// Persist the in-memory R1 baseline that NewSessionFromFiles captured
-		// in case ReviewFilePath / OutputDir was assigned just before this
+		// in case ReviewDir / OutputDir was assigned just before this
 		// call (the canonical constructor-time path).
 		//
 		// Resumed-session optimization (review W5): when the sidecar already
@@ -2687,7 +2784,7 @@ func (s *Session) loadHunkyardJSONLocked() {
 	// Restore round snapshots from the folder sidecar.
 	sidecarHadData := s.loadSnapshotsFromSidecar(s.hunkyardJSONPath())
 
-	// If ReviewFilePath / OutputDir was assigned just before this call (the
+	// If ReviewDir / OutputDir was assigned just before this call (the
 	// canonical constructor-time path in cli_serve), the in-memory R1 baseline
 	// captured by NewSessionFromFiles hasn't been persisted yet. Re-run the
 	// best-effort persist now that the identity is known.

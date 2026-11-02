@@ -203,6 +203,14 @@ func (s *Store) runAutomaticMaintenance(ctx context.Context, p config.Preference
 				return nil
 			}
 			rejection = err.Error()
+			if errors.Is(err, errStaleProposal) {
+				// Observations arrived while the model ran: the retry gets the
+				// current batch, not a second copy of the stale one.
+				if dry, err = s.maintain("dry_run", nil); err != nil {
+					return err
+				}
+				rejection = ""
+			}
 		}
 		fail("rejected")
 		return nil

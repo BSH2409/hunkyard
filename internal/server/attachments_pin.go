@@ -21,7 +21,7 @@ func (s *Server) validatePinScreenshot(shot *session.PinScreenshot, status, reas
 	if shot == nil {
 		return nil
 	}
-	path, mime, err := attachmentPathFor(s.reviewPath, shot.File)
+	path, mime, err := session.AttachmentPathFor(s.reviewPath, shot.File)
 	if err != nil || mime != "image/png" {
 		return errors.New("pin_screenshot.file must be a PNG attachment of this review")
 	}
@@ -32,8 +32,16 @@ func (s *Server) validatePinScreenshot(shot *session.PinScreenshot, status, reas
 }
 
 // removeAttachment deletes an attachment of this review; a missing file is fine.
+// removeAttachment deletes a pin screenshot that was replaced or whose pin
+// was deleted, unless a published batch still points the agent at it (or the
+// publications cannot be read); review cleanup removes those.
 func (s *Server) removeAttachment(filename string) {
-	if path, _, err := attachmentPathFor(s.reviewPath, filename); err == nil {
+	if store, err := s.feedbackStore(); err != nil {
+		return
+	} else if published, err := store.ReferencesAttachment(filename); err != nil || published {
+		return
+	}
+	if path, _, err := session.AttachmentPathFor(s.reviewPath, filename); err == nil {
 		_ = os.Remove(path)
 	}
 }

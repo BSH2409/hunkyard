@@ -28,10 +28,10 @@ func TestRoundSnapshots_Integration(t *testing.T) {
 		t.Fatalf("NewSessionFromFiles: %v", err)
 	}
 	identity := filepath.Join(dir, ".hunkyard")
-	s.ReviewFilePath = identity
+	s.ReviewDir = identity
 
 	// captureBaselineAndPersist already ran in NewSessionFromFiles, but with
-	// an empty ReviewFilePath. Re-run now that the identity is pinned so the
+	// an empty ReviewDir. Re-run now that the identity is pinned so the
 	// sidecar lands in the test tempdir instead of the dev repo root.
 	s.captureBaselineAndPersist()
 
@@ -42,15 +42,12 @@ func TestRoundSnapshots_Integration(t *testing.T) {
 		t.Fatalf("R1 baseline missing after constructor: %+v", s.RoundSnapshots)
 	}
 
-	// Simulate an agent edit: bump the in-memory file content.
+	// The agent edits the file on disk and completes the round before the
+	// watcher polls; R2 must hold the new bytes.
 	r2Body := "# Plan\n\nstep one\nstep two\nstep three\n"
-	s.mu.Lock()
-	s.Files[0].Content = r2Body
-	// status flag is what captureRoundSnapshot looks at to skip "deleted".
-	s.Files[0].Status = "modified"
-	s.mu.Unlock()
-
-	// Round-complete capture: must take R2 BEFORE rereadFileContents.
+	if err := os.WriteFile(planPath, []byte(r2Body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	s.handleRoundCompleteFiles()
 
 	s.mu.RLock()
@@ -95,21 +92,11 @@ func TestRoundSnapshots_Integration(t *testing.T) {
 	}
 }
 
-// TestHandleRoundCompleteFiles_CapturesBeforeReread is a regression test
-// for review N4 / the existing INVARIANT comment in watch.go: the next
-// round's snapshot must capture the agent's in-memory content BEFORE
-// rereadFileContents pulls the latest bytes from disk. If the order is
-// flipped, R(N+1) would record the same content as R(N) (the on-disk file
-// the agent didn't touch in this scenario) and the timeline silently loses
-// what changed in this round.
-//
-// To exercise the order: keep the on-disk file in its R1 state and bump
-// only the in-memory Content (mimicking an agent that has written its
-// edits to s.Files[i].Content but not yet to disk). After
-// handleRoundCompleteFiles, R2's captured Content must match the
-// in-memory edit, and Files[0].Content must have been re-read back to the
-// on-disk (R1) state.
-func TestHandleRoundCompleteFiles_CapturesBeforeReread(t *testing.T) {
+// TestHandleRoundCompleteFiles_CapturesAfterReread pins the order inside
+// handleRoundCompleteFiles: the next round's snapshot is the agent's new
+// on-disk content, read at round complete even when the watcher has not
+// polled yet, and the reviewer's view becomes the diff baseline.
+func TestHandleRoundCompleteFiles_CapturesAfterReread(t *testing.T) {
 	dir := t.TempDir()
 	planPath := filepath.Join(dir, "plan.md")
 	r1Body := "# Plan\n\nstep one\n"
@@ -122,34 +109,32 @@ func TestHandleRoundCompleteFiles_CapturesBeforeReread(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := filepath.Join(dir, ".hunkyard")
-	s.ReviewFilePath = identity
+	s.ReviewDir = identity
 	s.captureBaselineAndPersist()
 
-	// Simulate agent edit: change in-memory content only. Disk still holds r1Body.
-	r2InMemory := "# Plan\n\nstep one\nstep two\n"
-	s.mu.Lock()
-	s.Files[0].Content = r2InMemory
-	s.Files[0].Status = "modified"
-	s.mu.Unlock()
-
+	r2OnDisk := "# Plan\n\nstep one\nstep two\n"
+	if err := os.WriteFile(planPath, []byte(r2OnDisk), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	s.handleRoundCompleteFiles()
 
 	relPath := s.Files[0].Path
 	s.mu.RLock()
 	r2, ok := s.RoundSnapshots[relPath][2]
 	currentContent := s.Files[0].Content
+	previous := s.Files[0].PreviousContent
 	s.mu.RUnlock()
 	if !ok {
 		t.Fatalf("R2 missing after round-complete: %+v", s.RoundSnapshots)
 	}
-	if r2.Content != r2InMemory {
-		t.Errorf("R2 captured the wrong bytes — order assumption broken.\n  got:  %q\n  want: %q", r2.Content, r2InMemory)
+	if r2.Content != r2OnDisk {
+		t.Errorf("R2 = %q, want the new on-disk content %q", r2.Content, r2OnDisk)
 	}
-	// Sanity: rereadFileContents should have replaced the in-memory content
-	// with the disk content (back to r1Body) — confirms the reread did run
-	// after capture.
-	if currentContent != r1Body {
-		t.Errorf("Files[0].Content after round-complete = %q; want disk content %q (proves reread ran)", currentContent, r1Body)
+	if currentContent != r2OnDisk {
+		t.Errorf("Files[0].Content = %q, want %q", currentContent, r2OnDisk)
+	}
+	if previous != r1Body {
+		t.Errorf("PreviousContent = %q, want what the reviewer saw %q", previous, r1Body)
 	}
 }
 
@@ -172,7 +157,7 @@ func TestLoadHunkyardJSON_ResumedSession_DoesNotRewriteSidecar(t *testing.T) {
 		t.Fatalf("NewSessionFromFiles: %v", err)
 	}
 	identity := filepath.Join(dir, ".hunkyard")
-	s1.ReviewFilePath = identity
+	s1.ReviewDir = identity
 	s1.captureBaselineAndPersist()
 	s1.mu.Lock()
 	s1.Files[0].Content = "# Plan\n\nstep one\nstep two\n"
@@ -198,14 +183,14 @@ func TestLoadHunkyardJSON_ResumedSession_DoesNotRewriteSidecar(t *testing.T) {
 		t.Fatalf("re-stat: %v", err)
 	}
 
-	// Second "boot": construct a fresh session, set ReviewFilePath BEFORE
+	// Second "boot": construct a fresh session, set ReviewDir BEFORE
 	// loadHunkyardJSON (matching the cli_serve resumed-session path), then
 	// trigger the load path.
 	s2, err := NewSessionFromFiles([]string{planPath}, nil)
 	if err != nil {
 		t.Fatalf("second NewSessionFromFiles: %v", err)
 	}
-	s2.ReviewFilePath = identity
+	s2.ReviewDir = identity
 	s2.LoadHunkyardJSON()
 
 	afterStat, err := os.Stat(paths.Snapshots)

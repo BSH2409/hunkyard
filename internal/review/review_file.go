@@ -138,7 +138,7 @@ func ResolveReviewPathWithArgs(outputDir string, fileArgs []string) (string, err
 	}
 
 	key := sessionKeyForArgs(cwd, fileArgs)
-	return daemon.ReviewFilePath(key)
+	return daemon.ReviewDir(key)
 }
 
 // identityUnderDataRoot maps --output / config output (a hunkyard data root) to

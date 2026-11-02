@@ -100,7 +100,10 @@ test('fileLevelSide: old side unless the patch marks the file new', function() {
 test('formRangeFromSelection normalizes direction and side', function() {
   assert.deepEqual(a.formRangeFromSelection({ start: 9, end: 4, side: 'additions' }), { startLine: 4, endLine: 9, side: '' });
   assert.deepEqual(a.formRangeFromSelection({ start: 2, end: 2, side: 'deletions' }), { startLine: 2, endLine: 2, side: 'old' });
-  assert.deepEqual(a.formRangeFromSelection({ start: 2, end: 5, side: 'additions', endSide: 'deletions' }), { startLine: 2, endLine: 5, side: 'old' });
+  // Old and new line numbers are different numbering schemes: a range that
+  // crosses sides keeps only the line it ends on.
+  assert.deepEqual(a.formRangeFromSelection({ start: 2, end: 5, side: 'additions', endSide: 'deletions' }), { startLine: 5, endLine: 5, side: 'old' });
+  assert.deepEqual(a.formRangeFromSelection({ start: 120, end: 102, side: 'deletions', endSide: 'additions' }), { startLine: 102, endLine: 102, side: '' });
   assert.equal(a.formRangeFromSelection(null), null);
 });
 

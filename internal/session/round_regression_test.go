@@ -62,7 +62,7 @@ func TestWriteFiles_EmptyDoesNotDeleteSidecar(t *testing.T) {
 	// Pin the review identity to the test tempdir so this test does not
 	// touch the dev-machine's repo root via the hunkyardJSONPath fallback.
 	identity := filepath.Join(dir, ".hunkyard")
-	s.ReviewFilePath = identity
+	s.ReviewDir = identity
 	paths := ReviewPathsFor(identity)
 
 	// Seed the sidecar with two rounds of snapshots in memory and on disk.
