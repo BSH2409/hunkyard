@@ -76,10 +76,18 @@
     return [root, ...chain];
   }
 
+  // cssIdent escapes an id for a selector: React ids (":r5:"), dotted ids
+  // and ids that start with a digit are valid HTML but not CSS identifiers.
+  function cssIdent(value) {
+    if (typeof CSS !== 'undefined' && CSS && typeof CSS.escape === 'function') return CSS.escape(value);
+    var out = String(value).replace(/[^\w-]/g, function (ch) { return '\\' + ch; });
+    return /^\d/.test(out) ? '\\3' + out[0] + ' ' + out.slice(1) : out;
+  }
+
   function cssSelectorFor(el, root) {
     const chain = pathFromRoot(el, root);
     const head = chain[0];
-    const headSel = head.id ? `#${head.id}` : head.tagName.toLowerCase();
+    const headSel = head.id ? `#${cssIdent(head.id)}` : head.tagName.toLowerCase();
     const tail = chain.slice(1).map(node => `${node.tagName.toLowerCase()}:nth-of-type(${indexOfType(node)})`);
     return [headSel, ...tail].join(' > ');
   }
@@ -143,7 +151,8 @@
     if (!el || !Array.isArray(chain) || chain.length === 0) return false;
     const ancestry = [];
     let cur = el;
-    while (cur) { ancestry.push(cur.tagName); cur = cur.parentElement || cur.parentNode || null; }
+    // SVG and MathML elements report lower-case tag names; the chain is upper.
+    while (cur) { ancestry.push(cur.tagName ? String(cur.tagName).toUpperCase() : cur.tagName); cur = cur.parentElement || cur.parentNode || null; }
     if (ancestry.length < chain.length) return false;
     for (let i = 0; i < chain.length; i++) {
       const fromAncestry = ancestry[chain.length - 1 - i];

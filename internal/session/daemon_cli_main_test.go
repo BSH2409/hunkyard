@@ -78,7 +78,7 @@ func TestBackgroundCleanupUsesGlobalStaleReviewDays(t *testing.T) {
 	thirtyDaysOld := writeReview("thirty-days-old", 30*24*time.Hour)
 	hundredDaysOld := writeReview("hundred-days-old", 100*24*time.Hour)
 
-	backgroundCleanup()
+	backgroundCleanup("")
 
 	if _, err := os.Stat(thirtyDaysOld); err != nil {
 		t.Fatalf("30-day-old review should remain with stale_review_days=90: %v", err)
@@ -128,4 +128,34 @@ func TestHintMissingIntegrations(t *testing.T) {
 			t.Errorf("printed = %v, want nothing", *printed)
 		}
 	})
+}
+
+func TestBackgroundCleanupKeepsTheReviewBeingResumed(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	reviewsDir := filepath.Join(home, ".hunkyard", "reviews")
+	if err := os.MkdirAll(reviewsDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	old := time.Now().Add(-100 * 24 * time.Hour).UTC().Format(time.RFC3339)
+	paths := map[string]string{}
+	for _, key := range []string{"aaaaaaaaaaaa", "bbbbbbbbbbbb"} {
+		data, err := json.Marshal(HunkyardJSON{Branch: key, UpdatedAt: old, Files: map[string]HunkyardJSONFile{}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		paths[key] = filepath.Join(reviewsDir, key+".json")
+		if err := os.WriteFile(paths[key], data, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	backgroundCleanup("aaaaaaaaaaaa")
+
+	if _, err := os.Stat(paths["aaaaaaaaaaaa"]); err != nil {
+		t.Fatalf("the review being resumed was deleted: %v", err)
+	}
+	if _, err := os.Stat(paths["bbbbbbbbbbbb"]); !os.IsNotExist(err) {
+		t.Fatalf("another stale review was kept, stat error: %v", err)
+	}
 }

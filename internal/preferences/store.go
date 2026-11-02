@@ -939,6 +939,11 @@ func validateSourceMetadata(packs map[string]any, rules []rule) error {
 		if !ok {
 			return fmt.Errorf("source rule lacks citation")
 		}
+		// A superseded rule keeps the citation it was created from; only live
+		// rules must cite the current source files.
+		if r["status"] == "superseded" {
+			continue
+		}
 		files, _ := pack["files"].(map[string]any)
 		if hash, ok := files[fmt.Sprint(ref["file"])]; !ok || hash != ref["digest"] {
 			return fmt.Errorf("source rule citation does not match metadata")

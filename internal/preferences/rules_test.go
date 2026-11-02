@@ -214,3 +214,54 @@ func TestRuleReferenceParity(t *testing.T) {
 		})
 	}
 }
+
+func TestExplicitCaptureAdoptsAnImportedRule(t *testing.T) {
+	c := testCatalog(t, testStore(t))
+	scope := map[string]any{"kind": "global", "repo_key": nil}
+	directive := "Prefer table-driven tests in Go."
+	r, err := c.upsertExplicit(observationFixture("obs-a", "s1", "alpha-a1b2c3d4e5f6"), directive, scope, []string{"testing"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, imported := range []map[string]any{
+		{"origin": "team_pack", "pack": "backend"},
+		{"origin": "source_pack", "source_pack": "go", "source_ref": "reference/testing.md", "load_tier": "core"},
+	} {
+		for i := range c.rules {
+			if c.rules[i]["id"] == r["id"] {
+				for k, v := range imported {
+					c.rules[i][k] = v
+				}
+			}
+		}
+		got, err := c.upsertExplicit(observationFixture("obs-"+imported["origin"].(string), "s2", "alpha-a1b2c3d4e5f6"), directive, scope, []string{"testing"})
+		if err != nil {
+			t.Fatalf("explicit capture over a %s rule: %v", imported["origin"], err)
+		}
+		for _, field := range []string{"pack", "source_pack", "source_ref", "load_tier"} {
+			if _, ok := got[field]; ok || got["origin"] != "feedback" {
+				t.Fatalf("personal rule kept %s: %v", field, got)
+			}
+		}
+	}
+}
+
+func TestRestatingARetiredRuleReactivatesIt(t *testing.T) {
+	c := testCatalog(t, testStore(t))
+	scope := map[string]any{"kind": "global", "repo_key": nil}
+	directive := "Prefer early returns over nested conditionals."
+	r, err := c.upsertExplicit(observationFixture("obs-a", "s1", "alpha-a1b2c3d4e5f6"), directive, scope, []string{"ruby"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.retire(r["id"].(string)); err != nil {
+		t.Fatal(err)
+	}
+	again, err := c.upsertExplicit(observationFixture("obs-b", "s2", "alpha-a1b2c3d4e5f6"), directive, scope, []string{"ruby"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again["status"] != "active" {
+		t.Fatalf("restated rule status = %v, want active", again["status"])
+	}
+}

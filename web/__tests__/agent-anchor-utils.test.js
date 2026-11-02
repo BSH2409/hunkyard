@@ -418,3 +418,19 @@ test('resolvePin does not guess when several elements share the role and name', 
   const single = { querySelector: () => null, querySelectorAll: () => [{ tagName: 'MAIN', getAttribute: () => null, querySelectorAll: () => [a] }] };
   assert.equal(u.resolvePin(anchor, single).status, 'drifted-recoverable', 'a unique match is still recovered');
 });
+
+test('cssSelectorFor escapes ids that are not plain CSS identifiers', () => {
+  for (const [id, head] of [['a.b', '#a\\.b'], [':r5:', '#\\:r5\\:'], ['1x', '#\\31 x']]) {
+    const span = n('span');
+    const main = n('main', { id, children: [span] });
+    assert.equal(u.cssSelectorFor(span, main), head + ' > span:nth-of-type(1)');
+  }
+});
+
+test('verifyTagChain matches SVG elements, whose tagName is lower case', () => {
+  const path = n('path');
+  const svg = n('svg', { children: [path] });
+  path.tagName = 'path';
+  svg.tagName = 'svg';
+  assert.equal(u.verifyTagChain(path, ['SVG', 'PATH']), true);
+});

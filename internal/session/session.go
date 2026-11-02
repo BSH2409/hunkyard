@@ -242,6 +242,9 @@ type FileEntry struct {
 	// Multi-round (markdown files only)
 	PreviousContent  string    `json:"-"`
 	PreviousComments []Comment `json:"-"`
+	// roundBaseline is set once PreviousContent holds what the reviewer saw
+	// this round (files mode), so later edits in the same round keep it.
+	roundBaseline bool
 
 	// Lazy loading: when true, Content and DiffHunks are not yet populated.
 	// Call ensureLoaded() before accessing them. Only used when >lazyFileThreshold files.
@@ -2275,7 +2278,31 @@ func (s *Session) isWaitingForAgent() bool {
 // handler, which increments it only after comments have been carried forward from
 // the review file. This prevents a TOCTOU race where GetSessionInfo could observe the
 // new round number before carry-forward is complete, returning empty comments.
+// hasPendingWriteOverUnchangedFile reports an unwritten change in memory
+// while review.json is exactly as this daemon last read or wrote it.
+func (s *Session) hasPendingWriteOverUnchangedFile() bool {
+	s.mu.RLock()
+	pending, lastMtime := s.pendingWrite, s.lastHunkyardJSONMtime
+	s.mu.RUnlock()
+	if !pending {
+		return false
+	}
+	info, err := os.Stat(ReviewPathsFor(s.hunkyardJSONPath()).Review)
+	if err != nil {
+		return lastMtime.IsZero()
+	}
+	return info.ModTime().Equal(lastMtime)
+}
+
 func (s *Session) SignalRoundComplete() {
+	// Write what the reviewer did in the last debounce window first: the
+	// pending write is cancelled below and the comments cleared. A review
+	// file another writer changed since this daemon last touched it is left
+	// alone: the round reads that file, and a rewrite from memory would
+	// overwrite the other writer's edits.
+	if s.hasPendingWriteOverUnchangedFile() {
+		_ = s.SyncWriteFiles()
+	}
 	s.mu.Lock()
 	if s.writeTimer != nil {
 		s.writeTimer.Stop()
@@ -2325,6 +2352,7 @@ func (s *Session) ClearAllComments() {
 		f.Comments = []Comment{}
 		f.PreviousComments = nil
 		f.PreviousContent = ""
+		f.roundBaseline = false
 		filtered = append(filtered, f)
 	}
 	s.Files = filtered

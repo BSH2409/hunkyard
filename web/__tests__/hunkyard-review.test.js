@@ -26,3 +26,18 @@ test('publication retries keep their identity until the review data changes', as
   publisher.published();
   assert.notEqual((await publish()).request_id, changed.request_id);
 });
+
+test('publishing works on a plain-HTTP LAN address, where crypto.randomUUID is missing', async () => {
+  const form = new EventTarget(); form.querySelector = () => null;
+  const dialog = new EventTarget(); dialog.querySelector = () => form; dialog.showModal = () => {}; dialog.close = () => {};
+  const summary = { value: '', focus: () => {} };
+  const elements = { publishReviewDialog: dialog, publishSummary: summary, publishReviewSubmit: {}, publishReviewCancel: new EventTarget() };
+  let counter = 0;
+  const crypto = { getRandomValues: (bytes) => { for (let i = 0; i < bytes.length; i++) bytes[i] = (counter++ * 37) & 255; return bytes; } };
+  const context = { window: {}, document: { getElementById: id => elements[id], activeElement: null }, crypto, Uint8Array, FormData: class { get() { return 'approve'; } } };
+  vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../hunkyard-review.js'), 'utf8'), context);
+  const pending = context.window.hunkyardReview.prepare(() => null);
+  form.dispatchEvent(new Event('submit', { cancelable: true }));
+  const value = await pending;
+  assert.match(value.request_id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+});

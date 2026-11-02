@@ -32,7 +32,15 @@ func (s *Server) validatePinScreenshot(shot *session.PinScreenshot, status, reas
 }
 
 // removeAttachment deletes an attachment of this review; a missing file is fine.
+// removeAttachment deletes a pin screenshot that was replaced or whose pin
+// was deleted, unless a published batch still points the agent at it (or the
+// publications cannot be read); review cleanup removes those.
 func (s *Server) removeAttachment(filename string) {
+	if store, err := s.feedbackStore(); err != nil {
+		return
+	} else if published, err := store.ReferencesAttachment(filename); err != nil || published {
+		return
+	}
 	if path, _, err := attachmentPathFor(s.reviewPath, filename); err == nil {
 		_ = os.Remove(path)
 	}

@@ -54,6 +54,8 @@ func (s *Server) pauseIfIdle(idle time.Duration, now time.Time) bool {
 	sess.Notify(session.SSEEvent{Type: "paused", Content: string(payload)})
 	if err := session.WritePausedMarker(s.reviewPath, session.PausedMarker{PausedAt: now.UTC(), Port: s.port, Host: s.listenHost, CWD: sess.CWD, CliArgs: sess.CLIArgs}); err != nil {
 		log.Printf("Warning: could not record the pause: %v", err)
+	} else if err := session.RecordPausedReview(sess.SessionKey, s.reviewPath); err != nil {
+		log.Printf("Warning: could not record where the paused review lives: %v", err)
 	}
 	if s.stopDaemon != nil {
 		s.stopDaemon()

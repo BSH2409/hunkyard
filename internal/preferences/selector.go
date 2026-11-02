@@ -252,7 +252,9 @@ func selectCore(rules []rule, repoKey string) Selection {
 		if scope["kind"] != "global" && (scope["kind"] != "repository" || scope["repo_key"] != repoKey) {
 			continue
 		}
-		if isCoreRule(r) {
+		// Only live rules load: a source-pack rule keeps its core tier after
+		// maintenance supersedes or quarantines it.
+		if status := r["status"]; isCoreRule(r) && (status == "core" || status == "active") {
 			selected = append(selected, r)
 		}
 	}

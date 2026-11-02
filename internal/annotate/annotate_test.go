@@ -103,3 +103,42 @@ func TestParseGoTestJoinsThePackageDirectory(t *testing.T) {
 		t.Fatalf("findings = %#v", got.Findings)
 	}
 }
+
+// Two packages with a test of the same name: a passing test's log lines in
+// one package must not become the other package's failure location.
+func TestParseGoTestKeepsPackagesApart(t *testing.T) {
+	stream := `{"Action":"output","Package":"example.com/demo/a","Test":"TestParse","Output":"    parse_test.go:12: just a log line\n"}
+{"Action":"pass","Package":"example.com/demo/a","Test":"TestParse"}
+{"Action":"output","Package":"example.com/demo/b","Test":"TestParse","Output":"    parse_test.go:40: wrong result\n"}
+{"Action":"fail","Package":"example.com/demo/b","Test":"TestParse"}
+`
+	got, err := Parse("go-test-json", strings.NewReader(stream), "", Options{ModulePath: "example.com/demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Findings) != 1 || got.Findings[0].Path != "b/parse_test.go" || got.Findings[0].Line != 40 || strings.Contains(got.Findings[0].Message, "log line") {
+		t.Fatalf("findings = %#v", got.Findings)
+	}
+}
+
+// `go test -coverpkg=./... -coverprofile` writes a block once per test
+// binary, and merged lcov files repeat SF records: a line is uncovered only
+// when no run covered it.
+func TestCoverageSumsRepeatedEntries(t *testing.T) {
+	profile := "mode: set\nexample.com/demo/a.go:3.1,5.2 2 0\nexample.com/demo/a.go:3.1,5.2 2 1\nexample.com/demo/a.go:7.1,8.2 1 0\nexample.com/demo/a.go:7.1,8.2 1 0\n"
+	got, err := Parse("coverprofile", strings.NewReader(profile), "", Options{ModulePath: "example.com/demo"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marks := got.Marks["a.go"]; len(marks) != 1 || marks[0].Start != 7 {
+		t.Fatalf("coverprofile marks = %+v, want only lines 7-8", marks)
+	}
+	lcov := "SF:a.go\nDA:3,0\nDA:7,0\nend_of_record\nSF:a.go\nDA:3,2\nDA:7,0\nend_of_record\n"
+	got, err = Parse("lcov", strings.NewReader(lcov), "", Options{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if marks := got.Marks["a.go"]; len(marks) != 1 || marks[0].Start != 7 {
+		t.Fatalf("lcov marks = %+v, want only line 7", marks)
+	}
+}

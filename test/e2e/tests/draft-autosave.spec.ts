@@ -72,25 +72,35 @@ test.describe('Draft Autosave', () => {
     await expect.poll(() => draftCount(page)).toBe(0);
   });
 
-  test('stale drafts (>24h) are discarded on load while fresh ones are restored', async ({ page }) => {
+  test('stale drafts (>24h) are discarded on load while fresh ones are restored', async ({ page, request }) => {
+    // Drafts are stored under the review's session key, so two reviews on one
+    // port never restore each other's drafts.
+    const reviewKey = (await (await request.get('/api/session')).json()).session_key;
+    expect(reviewKey).toBeTruthy();
+    const prefix = `hunkyard-draft-${reviewKey}:`;
     // Seed both before the page loads. The fresh draft is the proof that the
     // restore pass ran: once its form is open, a stale one would be too.
-    await page.addInitScript(() => {
+    await page.addInitScript((storagePrefix) => {
       // Different lines, so a wrongly restored stale draft adds a second form.
       const base = { filePath: 'plan.md', editingId: null, side: '' };
-      localStorage.setItem('hunkyard-draft-stale', JSON.stringify({
+      localStorage.setItem(storagePrefix + 'stale', JSON.stringify({
         ...base, startLine: 3, endLine: 3, afterBlockIndex: 1, body: 'Old stale draft',
         savedAt: Date.now() - (25 * 60 * 60 * 1000), // 25 hours ago
       }));
-      localStorage.setItem('hunkyard-draft-fresh', JSON.stringify({
+      localStorage.setItem(storagePrefix + 'fresh', JSON.stringify({
         ...base, startLine: 1, endLine: 1, afterBlockIndex: 0, body: 'Fresh draft', savedAt: Date.now(),
       }));
-    });
+      // Another review's draft on the same port: left alone, never restored.
+      localStorage.setItem('hunkyard-draft-another-review:other', JSON.stringify({
+        ...base, startLine: 2, endLine: 2, afterBlockIndex: 0, body: 'Another review', savedAt: Date.now(),
+      }));
+    }, prefix);
 
     await loadPage(page);
     const section = await mdSection(page);
     await expect(section.locator('.comment-form textarea')).toHaveValue('Fresh draft');
     await expect(page.locator('.comment-form')).toHaveCount(1);
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('hunkyard-draft-stale'))).toBeNull();
+    await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), prefix + 'stale')).toBeNull();
+    expect(await page.evaluate(() => localStorage.getItem('hunkyard-draft-another-review:other'))).not.toBeNull();
   });
 });

@@ -63,6 +63,8 @@ type writeFilesSnapshot struct {
 	reviewComments []Comment
 	cliArgs        []string
 	cwd            string
+	reviewType     string
+	origin         string
 	// story is the session's in-memory narrative (nil if none). Carried into
 	// HunkyardJSON like the other daemon-managed fields above so `hunkyard story`'s
 	// daemon-side mutators (set via s.SetStory) are actually persisted —
@@ -158,6 +160,12 @@ func buildHunkyardJSON(snap writeFilesSnapshot) HunkyardJSON {
 	// pointer back to its working tree.
 	if snap.cwd != "" {
 		cj.CWD = snap.cwd
+	}
+	// A live or preview review records what it shows, so `hunkyard comment
+	// --selector` and resume know the review's kind from the file alone.
+	if snap.reviewType != "" {
+		cj.ReviewType = snap.reviewType
+		cj.Origin = snap.origin
 	}
 	cj.Story = snap.story
 	cj.ToolMarks = snap.toolMarks
@@ -259,7 +267,7 @@ func mergeFileSnapshotIntoHunkyardJSON(cj *HunkyardJSON, fs writeFileSnapshot) {
 }
 
 func hunkyardJSONIsEmpty(cj HunkyardJSON) bool {
-	return len(cj.Files) == 0 && len(cj.ReviewComments) == 0 &&
+	return cj.ReviewType == "" && len(cj.Files) == 0 && len(cj.ReviewComments) == 0 &&
 		cj.Story == nil && len(cj.PendingRemoteDeletes) == 0 && len(cj.ToolMarks) == 0 && len(cj.Decisions) == 0
 }
 
@@ -392,6 +400,17 @@ func (s *Session) clearWrittenDeletedCommentIDs(written map[string]map[string]st
 	}
 }
 
+// cloneCommentsWithReplies copies comments and their reply slices, which
+// reply edits change in place under s.mu while a write marshals the copy.
+func cloneCommentsWithReplies(comments []Comment) []Comment {
+	out := make([]Comment, len(comments))
+	copy(out, comments)
+	for i := range out {
+		out[i].Replies = append([]Reply(nil), out[i].Replies...)
+	}
+	return out
+}
+
 // snapshotForWrite captures all session state needed by WriteFiles under RLock.
 // The returned snapshot owns its own copies of comment slices, so it is safe
 // to use after the lock is released.
@@ -399,8 +418,7 @@ func (s *Session) snapshotForWrite(hunkyardPath string) writeFilesSnapshot {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	rc := make([]Comment, len(s.reviewComments))
-	copy(rc, s.reviewComments)
+	rc := cloneCommentsWithReplies(s.reviewComments)
 	pendDeletes := append([]RemoteRef(nil), s.pendingRemoteDeletes...)
 	lastLoaded := make(map[RemoteRef]struct{}, len(s.lastLoadedPendingDeletes))
 	for ref := range s.lastLoadedPendingDeletes {
@@ -422,6 +440,8 @@ func (s *Session) snapshotForWrite(hunkyardPath string) writeFilesSnapshot {
 		reviewComments:          rc,
 		cliArgs:                 s.CLIArgs,
 		cwd:                     s.CWD,
+		reviewType:              s.ReviewType,
+		origin:                  s.Origin,
 		story:                   s.story,
 		toolMarks:               cloneToolMarks(s.toolMarks),
 		decisions:               cloneDecisions(s.decisions),
@@ -431,8 +451,7 @@ func (s *Session) snapshotForWrite(hunkyardPath string) writeFilesSnapshot {
 		files:                   make([]writeFileSnapshot, len(s.Files)),
 	}
 	for i, f := range s.Files {
-		comments := make([]Comment, len(f.Comments))
-		copy(comments, f.Comments)
+		comments := cloneCommentsWithReplies(f.Comments)
 		snap.files[i] = writeFileSnapshot{
 			path:     f.Path,
 			status:   f.Status,

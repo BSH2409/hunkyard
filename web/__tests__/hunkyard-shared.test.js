@@ -1321,3 +1321,9 @@ test('a paused tab resumes only when its own review is serving the port', async 
   // A pause notice without an id (older server) keeps the old behaviour.
   assert.equal(await shared.isOwnReviewServing('', serving(200, { session_key: 'any' })), true);
 });
+
+test('hasPendingUpload spots an image paste still uploading', () => {
+  assert.equal(shared.hasPendingUpload('see ![uploading…](hunkyard-pending-3) here'), true);
+  assert.equal(shared.hasPendingUpload('see ![shot.png](/api/attachments/a.png)'), false);
+  assert.equal(shared.hasPendingUpload(''), false);
+});

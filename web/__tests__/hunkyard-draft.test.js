@@ -45,3 +45,21 @@ describe('hunkyard-draft', () => {
     assert.equal(draft.loadDraft('nonexistent'), null);
   });
 });
+
+describe('hunkyard-draft review scope', () => {
+  beforeEach(() => {
+    Object.keys(store).forEach(k => delete store[k]);
+  });
+
+  it('keeps two reviews on the same port apart', () => {
+    draft.setScope('review-a');
+    draft.saveDraftImmediate('README.md:3', { body: 'from review a' });
+    assert.ok(draft.keyPrefix().startsWith('hunkyard-draft-review-a:'));
+    draft.setScope('review-b');
+    assert.equal(draft.loadDraft('README.md:3'), null);
+    draft.saveDraftImmediate('README.md:3', { body: 'from review b' });
+    draft.setScope('review-a');
+    assert.deepEqual(draft.loadDraft('README.md:3'), { body: 'from review a' });
+    draft.setScope('');
+  });
+});

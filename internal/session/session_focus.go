@@ -266,6 +266,9 @@ func (s *Session) SetFocus(f Focus) error {
 	if err != nil {
 		return fmt.Errorf("rebuilding file list for focus: %w", err)
 	}
+	// The rebuild can take seconds, and the review stays writable meanwhile:
+	// flush comments added during it so the reload below brings them back.
+	s.WriteFiles()
 
 	s.mu.Lock()
 	s.Focus = f
@@ -436,13 +439,19 @@ func (s *Session) persistActiveDiffScope(scope string) error {
 	if hunkyardPath == "" {
 		return nil
 	}
-	cj, err := readHunkyardJSONFromDisk(hunkyardPath)
-	if err != nil {
-		// File may not exist yet — fall through and create one with just the scope.
-		cj = HunkyardJSON{Files: map[string]HunkyardJSONFile{}}
-	}
-	cj.ActiveDiffScope = scope
-	return saveHunkyardJSONToDisk(hunkyardPath, cj)
+	return WithReviewLock(hunkyardPath, func() error {
+		// A missing file reads as empty and is created with just the scope;
+		// an unreadable one is left alone rather than replaced.
+		cj, err := readHunkyardJSONFromDisk(hunkyardPath)
+		if err != nil {
+			return err
+		}
+		if cj.Files == nil {
+			cj.Files = map[string]HunkyardJSONFile{}
+		}
+		cj.ActiveDiffScope = scope
+		return saveHunkyardJSONToDisk(hunkyardPath, cj)
+	})
 }
 
 // readFileAtSHA returns file content at the given SHA. When RemoteFiles is
@@ -1041,12 +1050,16 @@ func (s *Session) loadScopedFileState(path, scope, commit string) (status, conte
 }
 
 func computeScopedDiffHunks(path, scope, commit, status, oldPath, content, baseRef, repoRoot string, v vcs.VCS, ignoreWhitespace bool) []vcs.DiffHunk {
-	// Pure content-based diffs don't need VCS.
-	if status == "untracked" && (scope == "unstaged" || scope == "all" || scope == "") {
-		return vcs.FileDiffUnifiedNewFile(content)
-	}
-	if status == "added" && addedFileRendersWhole(scope) {
-		return vcs.FileDiffUnifiedNewFile(content)
+	// Pure content-based diffs don't need VCS. content is the working tree,
+	// so they apply only when no commit is pinned: a pinned commit shows
+	// what that commit added, not today's file.
+	if commit == "" {
+		if status == "untracked" && (scope == "unstaged" || scope == "all" || scope == "") {
+			return vcs.FileDiffUnifiedNewFile(content)
+		}
+		if status == "added" && addedFileRendersWhole(scope) {
+			return vcs.FileDiffUnifiedNewFile(content)
+		}
 	}
 	return scopedHunks(vcs.FileChange{Path: path, OldPath: oldPath, Status: status}, scope, commit, baseRef, repoRoot, v, ignoreWhitespace)
 }

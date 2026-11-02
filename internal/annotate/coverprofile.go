@@ -14,6 +14,7 @@ func parseCoverprofile(r io.Reader, opts Options) (Annotations, error) {
 	out := Annotations{Tool: "coverage", Marks: map[string][]Mark{}}
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 1<<20)
+	var totals coverageTotals
 	prefix := ""
 	if opts.ModulePath != "" {
 		prefix = strings.TrimSuffix(opts.ModulePath, "/") + "/"
@@ -38,16 +39,46 @@ func parseCoverprofile(r io.Reader, opts Options) (Annotations, error) {
 		if err != nil {
 			return Annotations{}, fmt.Errorf("malformed coverprofile line %q", line)
 		}
-		if count > 0 {
-			continue
-		}
 		if prefix != "" && strings.HasPrefix(file, prefix) {
 			file = strings.TrimPrefix(file, prefix)
 		}
-		file = relativePath(file, opts)
-		out.Marks[file] = append(out.Marks[file], Mark{Start: start, End: end, Kind: markUncovered})
+		totals.add(relativePath(file, opts), start, end, count)
 	}
+	totals.markUncovered(out.Marks)
 	return out, scanner.Err()
+}
+
+// coverageTotals sums hit counts per file range across repeated entries
+// (one per test binary with -coverpkg, or merged lcov records), keeping the
+// order ranges first appeared in.
+type coverageTotals struct {
+	order []coverageRange
+	hits  map[coverageRange]int
+}
+
+type coverageRange struct {
+	file       string
+	start, end int
+}
+
+func (c *coverageTotals) add(file string, start, end, hits int) {
+	key := coverageRange{file, start, end}
+	if c.hits == nil {
+		c.hits = map[coverageRange]int{}
+	}
+	if _, seen := c.hits[key]; !seen {
+		c.order = append(c.order, key)
+	}
+	c.hits[key] += hits
+}
+
+// markUncovered adds a mark for every range no entry covered.
+func (c *coverageTotals) markUncovered(marks map[string][]Mark) {
+	for _, key := range c.order {
+		if c.hits[key] == 0 {
+			marks[key.file] = append(marks[key.file], Mark{Start: key.start, End: key.end, Kind: markUncovered})
+		}
+	}
 }
 
 func coverRange(spec string) (int, int, error) {

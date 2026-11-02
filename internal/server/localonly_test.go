@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -58,15 +60,19 @@ func TestReviewPageMayFrameTheProxyOnItsOwnHost(t *testing.T) {
 }
 
 func TestPreviewContentLoadsItsOwnResourcesByDefault(t *testing.T) {
-	s, _ := newTestServer(t)
+	htmlFile := filepath.Join(t.TempDir(), "index.html")
+	if err := os.WriteFile(htmlFile, []byte("<html><body>x</body></html>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	handler := newPreviewContentHandler("", htmlFile, 5000)
 	response := httptest.NewRecorder()
-	s.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/preview-content/", nil))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/preview-content/", nil))
 	if csp := response.Header().Get("Content-Security-Policy"); csp != "" {
 		t.Errorf("preview content policy = %q, want none by default", csp)
 	}
 	t.Setenv("HUNKYARD_BLOCK_EXTERNAL", "1")
 	response = httptest.NewRecorder()
-	s.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/preview-content/", nil))
+	handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/preview-content/", nil))
 	if csp := response.Header().Get("Content-Security-Policy"); !strings.Contains(csp, "connect-src 'self'") {
 		t.Errorf("preview content policy with HUNKYARD_BLOCK_EXTERNAL=1 = %q, want the strict policy", csp)
 	}

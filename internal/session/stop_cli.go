@@ -59,8 +59,12 @@ func RunStop(args []string) error {
 	cwd, _ := daemon.ResolvedCWD()
 
 	if all {
-		if err := stopAllDaemons(cwd); err != nil {
-			return err
+		stopErr := stopAllDaemons(cwd)
+		if err := ForgetAllPausedReviews(); err != nil {
+			stopErr = errors.Join(stopErr, err)
+		}
+		if stopErr != nil {
+			return stopErr
 		}
 		fmt.Println("All daemons stopped.")
 		return nil
@@ -74,6 +78,12 @@ func RunStop(args []string) error {
 	// If file args were given, use the exact key (user knows which session).
 	if len(fileArgs) > 0 {
 		key := daemon.SessionKey(cwd, branch, fileArgs)
+		if stopped, err := stopPausedReview(key); err != nil || stopped {
+			if err == nil {
+				fmt.Println("Paused review stopped.")
+			}
+			return err
+		}
 		if err := stopDaemonByKey(key); err != nil {
 			return err
 		}
@@ -89,6 +99,13 @@ func RunStop(args []string) error {
 		}
 		fmt.Println("Daemon stopped.")
 		return nil
+	}
+
+	if stopped, err := stopPausedReview(key); err != nil || stopped {
+		if err == nil {
+			fmt.Println("Paused review stopped.")
+		}
+		return err
 	}
 
 	// Exact key not found — fall back to scanning by cwd + branch.
@@ -130,12 +147,9 @@ func stopPausedReview(key string) (bool, error) {
 	if _, alive := daemon.FindAliveSession(key); alive {
 		return false, nil
 	}
-	dir, err := daemon.ReviewFilePath(key)
-	if err != nil {
-		return false, err
-	}
-	if _, paused := ReadPausedMarker(dir); !paused {
+	dir, paused := PausedReviewDir(key)
+	if !paused {
 		return false, nil
 	}
-	return true, RemovePausedMarker(dir)
+	return true, ForgetPausedReview(key, dir)
 }

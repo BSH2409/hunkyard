@@ -2,6 +2,7 @@ package feedback
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -122,5 +123,101 @@ func TestPublishReanchoringIsNotHumanRevision(t *testing.T) {
 	batch, err := store.Publish("reanchored", input)
 	if err != nil || len(batch.Comments) != 0 {
 		t.Fatalf("automatic anchor change counted as human feedback: %#v %v", batch, err)
+	}
+}
+
+func TestPublishRedeliversChangedReviewState(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := sampleBatch()
+	if _, err := store.Publish("r1", input); err != nil {
+		t.Fatal(err)
+	}
+	input.Comments[0].ClaimUnchanged = true
+	input.Comments[0].Label = "issue"
+	input.Comments[0].Blocking = true
+	second, err := store.Publish("r2", input)
+	if err != nil || len(second.Comments) != 1 {
+		t.Fatalf("changed review state not delivered: %#v %v", second, err)
+	}
+	if c := second.Comments[0]; c.Revision != 1 || !c.ClaimUnchanged || !c.Blocking {
+		t.Fatalf("redelivered comment = %#v, want revision 1 with the new state", c)
+	}
+	if again, err := store.Publish("r3", input); err != nil || len(again.Comments) != 0 {
+		t.Fatalf("unchanged comment repeated: %#v %v", again, err)
+	}
+	resolved := input
+	resolved.Comments = nil
+	if _, err := store.Publish("r4", resolved); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := store.Publish("r5", input)
+	if err != nil || len(reopened.Comments) != 1 || reopened.Comments[0].Revision != 1 {
+		t.Fatalf("reopened comment not delivered: %#v %v", reopened, err)
+	}
+}
+
+func TestPublishDeliversEverySummary(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := sampleBatch()
+	input.Comments = []Comment{{ID: "review-summary", Body: "LGTM", Scope: "review"}}
+	for _, request := range []string{"first", "second"} {
+		batch, err := store.Publish(request, input)
+		if err != nil || len(batch.Comments) != 1 {
+			t.Fatalf("%s summary not delivered: %#v %v", request, batch, err)
+		}
+	}
+}
+
+func TestAckAcceptsARevisionClassifiedInAnEarlierBatch(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := sampleBatch()
+	first, err := store.Publish("r1", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.transaction(func(state *journal) error {
+		state.Preferences = map[string]preferenceCheckpoint{checkpointKey(first.ID, first.Comments[0]): {DecisionHash: digest("ignored"), Outcome: PreferenceOutcome{CommentID: first.Comments[0].ID, Revision: 1, Status: "ignored"}}}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input.Comments[0].ClaimUnchanged = true
+	second, err := store.Publish("r2", input)
+	if err != nil || len(second.Comments) != 1 {
+		t.Fatalf("redelivery: %#v %v", second, err)
+	}
+	if err := store.Ack(second.ID); err != nil {
+		t.Fatalf("ack of a redelivered, already classified revision: %v", err)
+	}
+}
+
+func TestPublishAcceptsAFileOutsideTheRepository(t *testing.T) {
+	store, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, name := range []string{"/home/u/notes/plan.md", "C:/Users/u/notes/plan.md"} {
+		input := sampleBatch()
+		input.Comments[0].ID = fmt.Sprintf("outside-%d", i)
+		input.Comments[0].Path = name
+		if _, err := store.Publish(fmt.Sprintf("outside-%d", i), input); err != nil {
+			t.Errorf("%s: %v", name, err)
+		}
+	}
+	for i, name := range []string{"/home/u/../etc/passwd", "../secret", "a\\b", "/home/u//x"} {
+		input := sampleBatch()
+		input.Comments[0].Path = name
+		if _, err := store.Publish(fmt.Sprintf("bad-%d", i), input); err == nil {
+			t.Errorf("%s accepted", name)
+		}
 	}
 }

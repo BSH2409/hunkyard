@@ -13,6 +13,7 @@ func parseLcov(r io.Reader, opts Options) (Annotations, error) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 64*1024), 1<<20)
 	file := ""
+	var totals coverageTotals
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		switch {
@@ -27,11 +28,12 @@ func parseLcov(r io.Reader, opts Options) (Annotations, error) {
 			}
 			n, err1 := strconv.Atoi(parts[0])
 			hits, err2 := strconv.Atoi(parts[1])
-			if err1 != nil || err2 != nil || hits > 0 {
+			if err1 != nil || err2 != nil {
 				continue
 			}
-			out.Marks[file] = append(out.Marks[file], Mark{Start: n, End: n, Kind: markUncovered})
+			totals.add(file, n, n, hits)
 		}
 	}
+	totals.markUncovered(out.Marks)
 	return out, scanner.Err()
 }

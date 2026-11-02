@@ -27,7 +27,7 @@ type ResolvedTemplate struct {
 // Project values override global. Returns nil when no custom template is configured.
 func ResolveFinishTemplate(globalPrompts, projectPrompts map[string]string, projectDir, homeDir, hook, mode string, useProject bool) (*ResolvedTemplate, error) {
 	if v, key := LookupPrompt(projectPrompts, hook, mode); v != "" && useProject {
-		text, err := LoadTemplate(v, projectDir)
+		text, err := LoadProjectTemplate(v, projectDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: loading project prompt %s: %v\n", key, err)
 		} else {
@@ -84,7 +84,7 @@ func ResolveFinishTemplateSpecific(globalPrompts, projectPrompts map[string]stri
 		key, _ = ResolveHookKey(hook, mode)
 	}
 	if v, ok := projectPrompts[key]; ok && strings.TrimSpace(v) != "" && useProject {
-		text, err := LoadTemplate(v, projectDir)
+		text, err := LoadProjectTemplate(v, projectDir)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Warning: loading project prompt %s: %v\n", key, err)
 		} else {

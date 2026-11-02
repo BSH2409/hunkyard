@@ -30,8 +30,12 @@ func TestOwnerSessionKeyIsolation(t *testing.T) {
 	if file != SessionKey("/same/repo", "other-branch", []string{"notes.md"}) {
 		t.Fatal("file review became branch-dependent")
 	}
+	live := LiveSessionKey("/same/repo", "http://localhost:3000")
 	t.Setenv("HUNKYARD_OWNER_ID", "claude:two")
 	if first == SessionKey("/same/repo", "feature", nil) || file == SessionKey("/same/repo", "feature", []string{"notes.md"}) {
 		t.Fatal("different launching sessions shared a review key")
+	}
+	if live == LiveSessionKey("/same/repo", "http://localhost:3000") {
+		t.Fatal("different launching sessions shared a live review key")
 	}
 }

@@ -147,8 +147,6 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 
 	// Preview-mode routes — NOT wrapped in withReady (page loads before session).
 	mux.HandleFunc("/preview", s.serveIndexHTML())
-	mux.HandleFunc("/preview-content/", s.handlePreviewContent)
-	mux.HandleFunc("/preview-content", s.handlePreviewContent)
 
 	// Theme preview page — static samples, no session needed.
 	mux.HandleFunc("/themes", s.serveHTML("themes.html"))
@@ -277,17 +275,7 @@ func isLoopbackHost(host string) bool {
 // its own listen host, since a rebinding page always arrives under a DNS name
 // of its own; other names need --public-url.
 func (s *Server) checkHost(r *http.Request) bool {
-	host := requestHost(r.Host)
-	if s.publicURLHost != "" && strings.EqualFold(host, s.publicURLHost) {
-		return true
-	}
-	if s.listenHost == "" || isLoopbackHost(host) {
-		return true
-	}
-	if isLoopbackHost(s.listenHost) {
-		return false
-	}
-	return net.ParseIP(host) != nil || strings.EqualFold(host, s.listenHost)
+	return config.HostAllowed(s.listenHost, s.publicURLHost, r.Host)
 }
 
 func requestHost(hostport string) string {
@@ -303,13 +291,7 @@ func requestHost(hostport string) string {
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if strings.HasPrefix(r.URL.Path, "/preview-content") {
-		if policy := localonly.PagePolicy(); policy != "" {
-			w.Header().Set("Content-Security-Policy", policy)
-		}
-	} else {
-		w.Header().Set("Content-Security-Policy", localonly.ReviewPolicy(requestHost(r.Host)))
-	}
+	w.Header().Set("Content-Security-Policy", localonly.ReviewPolicy(requestHost(r.Host)))
 	w.Header().Set("Referrer-Policy", "no-referrer")
 	if s.localOnly && r.URL.Path == "/api/agent/request" {
 		http.Error(w, "local-only build: remote integration is unavailable", http.StatusForbidden)
@@ -2408,6 +2390,11 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Repository files are shown as images in documents, never run: a
+	// sandbox keeps an HTML or SVG file opened directly from acting as the
+	// review page.
+	w.Header().Set("Content-Security-Policy", "sandbox")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
 	http.ServeFile(w, r, cleanPath)
 }
 

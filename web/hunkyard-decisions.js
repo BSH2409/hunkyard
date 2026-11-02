@@ -154,7 +154,7 @@
     pages(list).forEach(function (d) {
       if (known.indexOf(d.id) < 0) { known.push(d.id); fresh = true; }
     });
-    return { state: fresh || previous !== 'closed' ? 'open' : 'closed', seen: known };
+    return { state: fresh || previous === 'open' ? 'open' : 'closed', seen: known };
   }
 
   function shellHTML() {

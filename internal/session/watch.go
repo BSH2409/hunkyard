@@ -244,6 +244,13 @@ func rewriteReviewJSONRenames(hunkyardPath string, renames []pathRename) {
 	if hunkyardPath == "" || len(renames) == 0 {
 		return
 	}
+	_ = WithReviewLock(hunkyardPath, func() error {
+		rewriteReviewJSONRenamesLocked(hunkyardPath, renames)
+		return nil
+	})
+}
+
+func rewriteReviewJSONRenamesLocked(hunkyardPath string, renames []pathRename) {
 	reviewPath := ReviewPathsFor(hunkyardPath).Review
 	data, err := os.ReadFile(reviewPath)
 	if err != nil {
@@ -488,11 +495,14 @@ func (s *Session) watchFileMtimes(stop <-chan struct{}) {
 					s.mu.Unlock()
 					continue
 				}
-				// Snapshot on first edit of a round (markdown files)
-				if f.FileType == "markdown" && s.pendingEdits == 0 {
+				// Snapshot what the reviewer saw on this file's first edit of
+				// the round, for every file type: carry-forward remaps
+				// comments from it, and markdown diffs show it.
+				if !f.roundBaseline {
 					f.PreviousContent = f.Content
 					f.PreviousComments = make([]Comment, len(f.Comments))
 					copy(f.PreviousComments, f.Comments)
+					f.roundBaseline = true
 				}
 				f.Content = string(data)
 				f.FileHash = hash
@@ -657,11 +667,13 @@ func (s *Session) rereadFileContents(snapshotMarkdown bool) {
 		if err != nil {
 			continue
 		}
-		if snapshotMarkdown && f.FileType == "markdown" && f.PreviousContent == "" {
+		hash := fileHash(data)
+		if snapshotMarkdown && !f.roundBaseline && hash != f.FileHash {
 			f.PreviousContent = f.Content
+			f.roundBaseline = true
 		}
 		f.Content = string(data)
-		f.FileHash = fileHash(data)
+		f.FileHash = hash
 	}
 }
 
@@ -879,6 +891,14 @@ func (s *Session) handleRoundCompleteFiles() {
 	s.refreshFilesFromCLIDirs()
 
 	s.loadResolvedComments()
+
+	// Re-read every file before remapping: the agent may have signalled the
+	// round before the watcher's next poll saw its edits. A file whose bytes
+	// changed since the watcher last read it takes its baseline here.
+	s.mu.Lock()
+	s.rereadFileContents(true)
+	s.mu.Unlock()
+
 	s.carryForwardComments()
 
 	s.mu.Lock()
@@ -888,20 +908,18 @@ func (s *Session) handleRoundCompleteFiles() {
 	// Restore phantom entries for files that disappeared but have comments in the review file.
 	s.restoreOrphanedComments()
 
-	// Re-read all file contents and update hashes.
-	// (snapshot markdown PreviousContent in case watcher hasn't polled yet)
-	//
-	// Capture the round we are about to commit BEFORE rereadFileContents and
-	// BEFORE incrementing ReviewRound. On the first round-complete after boot,
+	// Capture the round we are about to start, from the content just read,
+	// before incrementing ReviewRound. On the first round-complete after boot,
 	// ReviewRound == 1 (R1 baseline already captured at construction), so this
 	// captures R2.
 	s.mu.Lock()
 	nextRound := s.ReviewRound + 1
-	// INVARIANT: captureRoundSnapshot MUST run before rereadFileContents(true); reordering would snapshot the new on-disk content as the previous round and silently corrupt the timeline.
 	s.captureRoundSnapshot(nextRound)
 	sidecarPath := ReviewPathsFor(s.hunkyardJSONPath()).Snapshots
 	sf := SnapshotsFile{RoundSnapshots: CloneRoundSnapshots(s.RoundSnapshots)}
-	s.rereadFileContents(true)
+	for _, f := range s.Files {
+		f.roundBaseline = false
+	}
 	prev := s.ReviewRound
 	s.ReviewRound++
 	rt := s.ReviewType

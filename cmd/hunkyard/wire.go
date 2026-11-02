@@ -58,6 +58,7 @@ var (
 	CurrentBranch  = vcs.CurrentBranch
 
 	bindProxyServer    = live.BindProxyServer
+	bindPreviewServer  = server.BindPreviewServer
 	recordSessionStats = session.RecordSessionStats
 	atomicWriteFile    = session.AtomicWriteFile
 )

@@ -74,3 +74,26 @@ func ErrUnauthenticatedNetwork(host, publicURL string) error {
 		AllowUnauthenticatedNetworkEnv,
 	)
 }
+
+// HostAllowed is the DNS-rebinding defense shared by the review server and
+// the page servers beside it. A loopback listen host accepts only loopback
+// Host headers. Any other listen host (the default 0.0.0.0, for Docker) also
+// accepts IP literals and its own name, since a rebinding page always arrives
+// under a DNS name of its own; publicHost, when set, is accepted too.
+func HostAllowed(listenHost, publicHost, hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	if publicHost != "" && strings.EqualFold(host, publicHost) {
+		return true
+	}
+	if listenHost == "" || IsLoopbackHost(host) {
+		return true
+	}
+	if IsLoopbackHost(listenHost) {
+		return false
+	}
+	return net.ParseIP(host) != nil || strings.EqualFold(host, listenHost)
+}

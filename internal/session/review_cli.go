@@ -23,8 +23,6 @@ var (
 
 //nolint:gocyclo // CLI review dispatcher
 func RunReview(args []string) error {
-	go backgroundCleanup()
-
 	if ResolveServerConfigFn == nil {
 		return errors.New("ResolveServerConfigFn not wired")
 	}
@@ -35,6 +33,8 @@ func RunReview(args []string) error {
 	if sc == nil {
 		return nil // --version
 	}
+	// The sweep never touches the review this run resumes.
+	go backgroundCleanup(sc.SessionID)
 
 	cwd, _ := daemon.ResolvedCWD()
 

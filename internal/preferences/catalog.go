@@ -93,8 +93,13 @@ func (c *catalog) upsertExplicit(observation map[string]any, directive string, s
 	if err != nil {
 		next = newRule(directive, scope, surfaces, "feedback", c.store.config.Clock())
 	}
+	// An explicit restatement makes the rule the user's own: it drops the
+	// provenance of an imported pack and undoes a retirement (a rule
+	// superseded by another rule stays superseded).
 	next["origin"] = "feedback"
-	delete(next, "load_tier")
+	for _, field := range []string{"load_tier", "pack", "source_pack", "source_ref", "retired_at"} {
+		delete(next, field)
+	}
 	if err := addObservation(next, observation, true, c.store.config.Clock()); err != nil {
 		return nil, err
 	}

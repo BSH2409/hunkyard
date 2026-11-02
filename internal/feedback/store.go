@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 
 	"github.com/BSH2409/hunkyard/internal/strictjson"
 )
@@ -19,6 +20,10 @@ type publication struct {
 	InputHash string `json:"input_hash"`
 	Batch     Batch  `json:"batch"`
 	Acked     bool   `json:"acked"`
+	// Seen maps every comment the reviewer had open at publication, delivered
+	// or not, to its delivery state, so the next publication can tell a
+	// changed or reopened comment from one the agent already has.
+	Seen map[string]string `json:"seen"`
 }
 type journal struct {
 	Version      int                             `json:"version"`
@@ -158,13 +163,23 @@ func (s *Store) Publish(requestID string, batch Batch) (Batch, error) {
 				latest[c.ID] = c
 			}
 		}
+		var lastSeen map[string]string
+		if n := len(state.Publications); n > 0 {
+			lastSeen = state.Publications[n-1].Seen
+		}
+		seen := map[string]string{}
 		comments := []Comment{}
 		for _, c := range batch.Comments {
 			previous, exists := latest[c.ID]
+			seen[c.ID] = deliveryHash(c)
 			if exists && revisionHash(previous) == revisionHash(c) {
+				c.Revision = previous.Revision
+			} else {
+				c.Revision = previous.Revision + 1
+			}
+			if exists && c.ID != SummaryCommentID && !stateChanged(previous, c, lastSeen) {
 				continue
 			}
-			c.Revision = previous.Revision + 1
 			comments = append(comments, c)
 		}
 		batch.Comments = comments
@@ -172,7 +187,7 @@ func (s *Store) Publish(requestID string, batch Batch) (Batch, error) {
 			RequestID string
 			Batch     Batch
 		}{requestID, batch})
-		state.Publications = append(state.Publications, publication{RequestID: requestID, InputHash: inputHash, Batch: batch})
+		state.Publications = append(state.Publications, publication{RequestID: requestID, InputHash: inputHash, Batch: batch, Seen: seen})
 		published = batch
 		return nil
 	})
@@ -200,7 +215,7 @@ func (s *Store) Ack(batchID string) error {
 		for i := range state.Publications {
 			if state.Publications[i].Batch.ID == batchID {
 				for _, c := range humanComments(state.Publications[i].Batch.Comments) {
-					if !completedPreference(state.Preferences[checkpointKey(batchID, c)].Outcome.Status) {
+					if !revisionClassified(state, c) {
 						return fmt.Errorf("classify every human revision with feedback learn before acknowledging")
 					}
 				}
@@ -210,6 +225,38 @@ func (s *Store) Ack(batchID string) error {
 		}
 		return fmt.Errorf("feedback batch not found")
 	})
+}
+
+// revisionClassified reports whether c's revision was classified in any
+// batch: a comment delivered again for a state change keeps its revision, and
+// its earlier classification stands.
+func revisionClassified(state *journal, c Comment) bool {
+	for _, p := range state.Publications {
+		if completedPreference(state.Preferences[checkpointKey(p.Batch.ID, c)].Outcome.Status) {
+			return true
+		}
+	}
+	return false
+}
+
+// ReferencesAttachment reports whether a published batch points the agent
+// at the attachment file: published batches are immutable, so the file
+// must outlive edits to the pin until the review is cleaned up.
+func (s *Store) ReferencesAttachment(file string) (bool, error) {
+	suffix := "/api/attachments/" + file
+	found := false
+	err := s.transaction(func(state *journal) error {
+		for _, p := range state.Publications {
+			for _, c := range p.Batch.Comments {
+				if c.Pin != nil && c.Pin.Screenshot != nil && strings.HasSuffix(c.Pin.Screenshot.URL, suffix) {
+					found = true
+					return nil
+				}
+			}
+		}
+		return nil
+	})
+	return found, err
 }
 
 func (s *Store) HasPublications() (bool, error) {

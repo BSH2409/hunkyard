@@ -116,3 +116,36 @@ func TestOneShotFeedbackKeepsASlowDaemonsSessionFile(t *testing.T) {
 		t.Fatalf("a one-shot command removed the daemon's session file: %v", err)
 	}
 }
+
+// After a pause, the waiter reconnects to the resumed daemon, which answers
+// 503 until its session is ready; the waiter keeps waiting for it.
+func TestFollowWaiterWaitsForAResumedDaemonToBeReady(t *testing.T) {
+	requests := 0
+	key := feedbackCLIServer(t, func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if requests <= 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.Write([]byte(`{"status":"published","batches":[]}`))
+	})
+	previous, previousReady := lookupSession, readyPollInterval
+	readyPollInterval = time.Millisecond
+	calls := 0
+	lookupSession = func(k string) (daemon.SessionEntry, bool) {
+		calls++
+		if calls == 1 {
+			return daemon.SessionEntry{Host: "127.0.0.1", Port: 1, StartedAt: "paused-run"}, true
+		}
+		entry, err := daemon.ReadSessionFile(k)
+		return entry, err == nil
+	}
+	t.Cleanup(func() { lookupSession, readyPollInterval = previous, previousReady })
+	var out bytes.Buffer
+	if err := feedbackCommand(context.Background(), []string{"await", "--session", key, "--timeout", "1ms", "--follow", "--json"}, &out); err != nil {
+		t.Fatalf("follow gave up on the resumed daemon: %v", err)
+	}
+	if !strings.Contains(out.String(), `"published"`) {
+		t.Fatalf("output = %s", out.String())
+	}
+}

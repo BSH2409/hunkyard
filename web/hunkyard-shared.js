@@ -849,6 +849,13 @@
     textarea.dispatchEvent(new Event('input', { bubbles: true }));
   }
 
+  // hasPendingUpload reports whether body still holds the placeholder of an
+  // image paste that has not finished uploading: saving it then would keep
+  // the placeholder instead of the image.
+  function hasPendingUpload(body) {
+    return /\]\(hunkyard-pending-\d+\)/.test(body || '');
+  }
+
   function uploadAndInsertImage(textarea, file) {
     var seq = ++pendingImageSeq;
     var placeholder = '![uploading…](hunkyard-pending-' + seq + ')';
@@ -1218,6 +1225,7 @@
     installSidebarResize,
     computeResizeDelta,
     attachImageUploads,
+    hasPendingUpload,
     showDisconnected,
     showPaused,
     pausedOverlayHTML,

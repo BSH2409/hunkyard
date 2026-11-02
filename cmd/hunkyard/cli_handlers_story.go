@@ -44,6 +44,10 @@ type storyFlags struct {
 	scopeArgs []string
 }
 
+// storyHTTPClient talks to the local review daemon; the timeout keeps a
+// stuck daemon from hanging `hunkyard story`.
+var storyHTTPClient = &http.Client{Timeout: 30 * time.Second}
+
 // storyStartDaemon spawns the review daemon for the post-ingest flow. It is a
 // package var so tests can stub the spawn without launching a real process.
 var storyStartDaemon = daemon.StartDaemon
@@ -197,7 +201,7 @@ func runStoryE(args []string) error {
 
 	// --clear: drop the story and save. No-op if none present.
 	if f.clear {
-		return clearStory(f, hunkyardPath, cj)
+		return clearStory(f, hunkyardPath)
 	}
 
 	// --prep: write the prep text + snapshot scope, print path, exit 0.
@@ -223,7 +227,7 @@ func runStoryE(args []string) error {
 	}
 }
 
-func clearStory(f storyFlags, hunkyardPath string, cj review.HunkyardJSON) error {
+func clearStory(f storyFlags, hunkyardPath string) error {
 	key, _, keyErr := storyReviewSessionKey(f)
 	if keyErr == nil {
 		if entry, alive := storyDaemonAlive(key); alive {
@@ -235,12 +239,25 @@ func clearStory(f storyFlags, hunkyardPath string, cj review.HunkyardJSON) error
 			}
 		}
 	}
-	cj.Story = nil
-	if err := review.SaveHunkyardJSON(hunkyardPath, cj); err != nil {
+	if err := setReviewStory(hunkyardPath, nil); err != nil {
 		return clicmd.ExitError{Code: 1, Err: err}
 	}
 	fmt.Fprintln(os.Stderr, "Cleared story from review.")
 	return nil
+}
+
+// setReviewStory replaces only the review's story, on a copy read under the
+// review lock: the story is prepared over seconds, and comments added in the
+// meantime must survive.
+func setReviewStory(hunkyardPath string, st *session.Story) error {
+	return session.WithReviewLock(hunkyardPath, func() error {
+		cj, err := review.LoadHunkyardJSON(hunkyardPath)
+		if err != nil {
+			return err
+		}
+		cj.Story = st
+		return review.SaveHunkyardJSON(hunkyardPath, cj)
+	})
 }
 
 func wantsStoryHelp(args []string) bool {
@@ -513,7 +530,7 @@ func runStoryIngestFile(f storyFlags, hunkyardPath string, cj review.HunkyardJSO
 		return clicmd.ExitError{Code: 1, Err: ingestErr}
 	}
 
-	return saveStory(f, hunkyardPath, cj, &st)
+	return saveStory(f, hunkyardPath, &st)
 }
 
 // runStorySkipLLM writes a stub story with all hunks in a single support entry
@@ -551,7 +568,7 @@ func runStorySkipLLM(f storyFlags, hunkyardPath string, cj review.HunkyardJSON) 
 		},
 	}
 	printCoverage(st.Coverage)
-	return saveStory(f, hunkyardPath, cj, &st)
+	return saveStory(f, hunkyardPath, &st)
 }
 
 // runStoryLLM is the default path: exec agent_cmd with a prompt-by-reference
@@ -616,7 +633,7 @@ func runStoryLLM(f storyFlags, hunkyardPath string, cj review.HunkyardJSON) erro
 		return clicmd.ExitError{Code: 1, Err: ingestErr}
 	}
 
-	return saveStory(f, hunkyardPath, cj, st)
+	return saveStory(f, hunkyardPath, st)
 }
 
 // generateStory execs agent_cmd with the story prompt, extracts+parses the JSON
@@ -760,9 +777,8 @@ func resolveStorySessionKey(scopeArgs []string) string {
 // then runs the post-ingest flow (§4.1): notify a running daemon so the open
 // review re-renders, or spawn the daemon detached and open the browser. It
 // never blocks — the post-ingest step is best-effort and returns exit 0.
-func saveStory(f storyFlags, hunkyardPath string, cj review.HunkyardJSON, st *session.Story) error {
-	cj.Story = st
-	if err := review.SaveHunkyardJSON(hunkyardPath, cj); err != nil {
+func saveStory(f storyFlags, hunkyardPath string, st *session.Story) error {
+	if err := setReviewStory(hunkyardPath, st); err != nil {
 		return clicmd.ExitError{Code: 1, Err: err}
 	}
 	fmt.Fprintln(os.Stderr, "Story saved.")
@@ -879,7 +895,7 @@ func postStoryToDaemon(entry daemon.SessionEntry, st *session.Story) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.Post(base+"/api/story", "application/json", bytes.NewReader(body))
+	resp, err := storyHTTPClient.Post(base+"/api/story", "application/json", bytes.NewReader(body))
 	if err != nil {
 		return err
 	}
@@ -900,7 +916,7 @@ func deleteStoryFromDaemon(entry daemon.SessionEntry) error {
 	if err != nil {
 		return err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := storyHTTPClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -921,7 +937,7 @@ var daemonReadyPollInterval = 200 * time.Millisecond
 func waitDaemonReady(base string) error {
 	deadline := time.Now().Add(30 * time.Second)
 	for {
-		resp, err := http.Get(base + "/api/session")
+		resp, err := storyHTTPClient.Get(base + "/api/session")
 		if err != nil {
 			return fmt.Errorf("could not reach daemon: %w", err)
 		}

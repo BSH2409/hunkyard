@@ -179,6 +179,60 @@ func gitLines(dir string, args ...string) []string {
 	return strings.Fields(string(out))
 }
 
+// pathsStagedByCommand lists the new and modified files a `git add` earlier in
+// the same shell command will stage: the index is read before the command
+// runs, so `git add . && git commit` would otherwise pass unchecked.
+func pathsStagedByCommand(command, dir string) []string {
+	var paths []string
+	for _, words := range shellSegments(command) {
+		segmentDir, rest, ok := gitSubcommand(words, dir)
+		if !ok || rest[0] != "add" {
+			continue
+		}
+		var specs []string
+		for _, arg := range rest[1:] {
+			switch {
+			case arg == "-A" || arg == "--all" || arg == "-u" || arg == "--update":
+				specs = append(specs, ".")
+			case arg == "--" || strings.HasPrefix(arg, "-"):
+			default:
+				specs = append(specs, arg)
+			}
+		}
+		if len(specs) == 0 {
+			continue
+		}
+		paths = append(paths, gitLines(segmentDir, append([]string{"ls-files", "--others", "--modified", "--exclude-standard", "--"}, specs...)...)...)
+	}
+	return paths
+}
+
+// gitSubcommand splits a `git [-C dir] [-c k=v] <subcommand> ...` command into
+// the directory it runs in and the words from the subcommand on.
+func gitSubcommand(words []string, dir string) (segmentDir string, rest []string, ok bool) {
+	if len(words) < 2 || words[0] != "git" {
+		return "", nil, false
+	}
+	segmentDir = dir
+	i := 1
+	for i < len(words) && strings.HasPrefix(words[i], "-") {
+		if (words[i] == "-C" || words[i] == "-c") && i+1 < len(words) {
+			if words[i] == "-C" {
+				segmentDir = words[i+1]
+				if !filepath.IsAbs(segmentDir) {
+					segmentDir = filepath.Join(dir, segmentDir)
+				}
+			}
+			i++
+		}
+		i++
+	}
+	if i >= len(words) {
+		return "", nil, false
+	}
+	return segmentDir, words[i:], true
+}
+
 // guardFinding explains why a guard blocks an action, or "" when it passes.
 //
 //nolint:gocyclo // One case per guard kind keeps each check beside its message.
@@ -192,6 +246,7 @@ func guardFinding(g guard, action gitAction, command, dir string, state sessionS
 		if action.All {
 			paths = append(paths, gitLines(dir, "diff", "--name-only")...)
 		}
+		paths = append(paths, pathsStagedByCommand(command, dir)...)
 		for _, name := range paths {
 			for _, pattern := range g.Patterns {
 				if matchGuardPattern(pattern, name) {
@@ -298,7 +353,10 @@ func (s *Store) evaluateCommand(guards []guard, action gitAction, command, cwd s
 			dir = filepath.Join(cwd, dir)
 		}
 	}
-	repo, _ := RepositoryKey(cwd)
+	// Rules apply by the repository the action runs in (`git -C other`),
+	// not the one the agent's shell sits in.
+	repo, _ := RepositoryKey(dir)
+	var blockers []guardVerdict
 	for _, g := range guards {
 		r := s.activeRule(g.RuleID)
 		if r == nil {
@@ -315,14 +373,36 @@ func (s *Store) evaluateCommand(guards []guard, action gitAction, command, cwd s
 		if !apply {
 			return verdict
 		}
-		if s.consumeOverride(g.RuleID) {
-			_ = s.recordActivity(ActivityEvent{Kind: activityOverridden, RuleID: g.RuleID, RepoKey: repo, SessionKey: digest(session), Detail: finding})
-			continue
+		blockers = append(blockers, verdict)
+	}
+	// The command passes only when every blocking rule has an allow-once;
+	// otherwise none is spent, so the user's override survives for a retry.
+	for _, v := range blockers {
+		if !s.hasOverride(v.ruleID) {
+			_ = s.recordActivity(ActivityEvent{Kind: activityBlocked, RuleID: v.ruleID, RepoKey: repo, SessionKey: digest(session), Detail: v.finding})
+			return v
 		}
-		_ = s.recordActivity(ActivityEvent{Kind: activityBlocked, RuleID: g.RuleID, RepoKey: repo, SessionKey: digest(session), Detail: finding})
-		return verdict
+	}
+	consumed := map[string]bool{}
+	for _, v := range blockers {
+		if !consumed[v.ruleID] && s.consumeOverride(v.ruleID) {
+			consumed[v.ruleID] = true
+		}
+		_ = s.recordActivity(ActivityEvent{Kind: activityOverridden, RuleID: v.ruleID, RepoKey: repo, SessionKey: digest(session), Detail: v.finding})
 	}
 	return guardVerdict{}
+}
+
+// hasOverride reports whether an unexpired allow-once exists for ruleID,
+// without spending it.
+func (s *Store) hasOverride(ruleID string) bool {
+	now := s.config.Clock()
+	for _, o := range s.loadOverrides() {
+		if expires, err := time.Parse(time.RFC3339, o.ExpiresAt); err == nil && now.Before(expires) && o.RuleID == ruleID {
+			return true
+		}
+	}
+	return false
 }
 
 // exampleTriggers evaluates one guard example without git or side effects:

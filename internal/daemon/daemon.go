@@ -128,14 +128,15 @@ func AdvertisedURL(publicURL, listenHost string, port int, path string) string {
 		}
 		return base + path
 	}
-	dh := HostForDisplay(listenHost)
+	// JoinHostPort brackets an IPv6 host, which a URL requires.
+	base := "http://" + net.JoinHostPort(HostForDisplay(listenHost), strconv.Itoa(port))
 	if path == "" {
-		return fmt.Sprintf("http://%s:%d", dh, port)
+		return base
 	}
 	if !strings.HasPrefix(path, "/") {
 		path = "/" + path
 	}
-	return fmt.Sprintf("http://%s:%d%s", dh, port, path)
+	return base + path
 }
 
 // ConnURL uses loopback for wildcard listeners so owner requests remain local.
@@ -216,7 +217,7 @@ func LiveSessionKey(cwd, origin string) string {
 	h.Write([]byte(cwd))
 	h.Write([]byte("\x00live\x00"))
 	h.Write([]byte(origin))
-	return hex.EncodeToString(h.Sum(nil))[:12]
+	return OwnerScopedKey(hex.EncodeToString(h.Sum(nil))[:12])
 }
 
 // ValidSessionKey reports whether key looks like a hunkyard session ID (12 lowercase hex chars).
@@ -519,6 +520,13 @@ func ListSessionsForRepoRoot(repoRoot string) ([]SessionEntry, []string) {
 		if entryCWD != repoRootSlash && !strings.HasPrefix(entryCWD, prefix) {
 			continue
 		}
+		// Same owner rule as scanSessionsForCWD: another agent session's
+		// review in this repository is not this session's to write to.
+		if localonly.Enabled() {
+			if _, err := LoadSessionOwner(key); err != nil {
+				continue
+			}
+		}
 		if isDaemonAlive(entry) {
 			alive = append(alive, entry)
 			keys = append(keys, key)
@@ -649,6 +657,18 @@ func isFileAt(f *os.File, path string) bool {
 }
 
 // releaseSessionLock unlocks, closes, and removes the lock file.
+// WithSessionLock runs fn while holding key's session lock, the lock a
+// daemon start takes for the same key.
+func WithSessionLock(key string, fn func()) error {
+	lock, err := acquireSessionLock(key)
+	if err != nil {
+		return err
+	}
+	defer releaseSessionLock(lock)
+	fn()
+	return nil
+}
+
 func releaseSessionLock(f *os.File) {
 	unlockAndRemove(f)
 }

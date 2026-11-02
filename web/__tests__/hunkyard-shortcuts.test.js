@@ -87,3 +87,9 @@ test('all modified question-mark chords are reserved', () => {
   assert.equal(shortcuts.isReservedBinding('Ctrl+Shift+/'), true);
   assert.equal(shortcuts.isReservedBinding('Meta+Alt+Shift+/'), true);
 });
+
+test('two disabled shortcuts are not a conflict', () => {
+  const { shortcuts } = loadShortcuts({ shortcuts: { next_block: '', previous_block: '' } });
+  assert.equal(shortcuts.getBinding('next_block'), '');
+  assert.equal(shortcuts.getBinding('previous_block'), '');
+});

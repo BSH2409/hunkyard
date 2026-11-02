@@ -398,3 +398,29 @@ func TestEvaluateTrust_HookFileSourcesInConfig(t *testing.T) {
 		t.Fatalf("sources = %v, want config + file hook paths", st.Sources)
 	}
 }
+
+func TestLoadProjectTemplateStaysInsideTheProject(t *testing.T) {
+	project := t.TempDir()
+	outside := t.TempDir()
+	secret := filepath.Join(outside, "secret.txt")
+	if err := os.WriteFile(secret, []byte("secret"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(project, "review.md"), []byte("ok"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if text, err := prompt.LoadProjectTemplate("file:review.md", project); err != nil || text != "ok" {
+		t.Fatalf("in-project file: %q, %v", text, err)
+	}
+	rel, _ := filepath.Rel(project, secret)
+	for _, value := range []string{"file:" + secret, "file:" + rel} {
+		if text, err := prompt.LoadProjectTemplate(value, project); err == nil || text == "secret" {
+			t.Errorf("%s was read: %q", value, text)
+		}
+	}
+	if err := os.Symlink(secret, filepath.Join(project, "link.md")); err == nil {
+		if text, err := prompt.LoadProjectTemplate("file:link.md", project); err == nil || text == "secret" {
+			t.Errorf("symlink out of the project was read: %q", text)
+		}
+	}
+}

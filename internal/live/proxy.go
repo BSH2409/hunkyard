@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"github.com/BSH2409/hunkyard/internal/config"
 	"github.com/BSH2409/hunkyard/internal/localonly"
 	"html"
 	"io"
@@ -83,6 +84,14 @@ func newLiveProxy(upstreamOrigin string, apiPort int, upstreamCookies string) (h
 			pr.Out.Header.Del("Accept-Encoding")
 			pr.Out.Header.Del("If-None-Match")
 			pr.Out.Header.Del("If-Modified-Since")
+			// A cross-site request (another site's form or script) goes to
+			// the upstream as the browser sent it: without the configured
+			// session cookies and with its own Origin, so the app's CSRF
+			// check sees the real sender. Legitimate cross-site callbacks
+			// such as OAuth form_post still reach the app.
+			if pr.In.Header.Get("Sec-Fetch-Site") == "cross-site" {
+				return
+			}
 			if upstreamCookies != "" {
 				pr.Out.Header.Set("Cookie", upstreamCookies)
 			}
@@ -461,7 +470,7 @@ func BindProxyServer(host, upstreamOrigin string, apiPort int, upstreamCookies s
 	if err != nil {
 		return nil, nil, fmt.Errorf("proxy port %d already in use: %w", proxyPort, err)
 	}
-	handler, err := newLiveProxy(upstreamOrigin, apiPort, upstreamCookies)
+	handler, err := newGuardedLiveProxy(host, upstreamOrigin, apiPort, upstreamCookies)
 	if err != nil {
 		ln.Close()
 		return nil, nil, err
@@ -472,6 +481,23 @@ func BindProxyServer(host, upstreamOrigin string, apiPort int, upstreamCookies s
 		IdleTimeout: 60 * time.Second,
 	}
 	return ln, srv, nil
+}
+
+// newGuardedLiveProxy is the live proxy behind the review server's
+// DNS-rebinding defense: a loopback listen host accepts only loopback Host
+// headers; any other listen host also accepts IP literals and its own name.
+func newGuardedLiveProxy(listenHost, upstreamOrigin string, apiPort int, upstreamCookies string) (http.Handler, error) {
+	proxy, err := newLiveProxy(upstreamOrigin, apiPort, upstreamCookies)
+	if err != nil {
+		return nil, err
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !config.HostAllowed(listenHost, "", r.Host) {
+			http.Error(w, "live proxy: host not allowed", http.StatusForbidden)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}), nil
 }
 
 // rewriteReferer swaps in the upstream origin but keeps the referring page's own path

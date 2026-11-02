@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/BSH2409/hunkyard/internal/review"
 	"github.com/BSH2409/hunkyard/internal/session"
 )
 
@@ -27,18 +26,13 @@ func (e BulkCommentEntry) pinRoute() string {
 
 // addPinComment appends a DOM pin to a live or preview review and writes it.
 func addPinComment(hunkyardPath, selector, route, body, author string) (session.Comment, error) {
-	cj, err := review.LoadHunkyardJSON(hunkyardPath)
-	if err != nil {
-		return session.Comment{}, err
-	}
-	c, err := appendPin(&cj, selector, route, body, author, nil)
-	if err != nil {
-		return session.Comment{}, err
-	}
-	if err := review.SaveHunkyardJSON(hunkyardPath, cj); err != nil {
-		return session.Comment{}, err
-	}
-	return c, nil
+	var c session.Comment
+	err := updateReviewFile(hunkyardPath, func(cj *session.HunkyardJSON) error {
+		var err error
+		c, err = appendPin(cj, selector, route, body, author, nil)
+		return err
+	})
+	return c, err
 }
 
 // appendPin adds a live-mode pin to cj. The file key is the page route, matching

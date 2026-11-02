@@ -40,6 +40,17 @@ func ensureReviewFolder(identity string) error {
 		return fmt.Errorf("stat review identity: %w", err)
 	}
 
+	// A migration interrupted after moving review.json into its temp folder
+	// left the review only there: finish the rename.
+	tmp := identity + migrateTmpSuffix
+	if _, err := os.Stat(filepath.Join(tmp, "review.json")); err == nil {
+		if err := os.Rename(tmp, identity); err != nil {
+			return fmt.Errorf("recovering interrupted review migration: %w", err)
+		}
+		fmt.Fprintf(os.Stderr, "hunkyard: recovered interrupted review migration: %s\n", identity)
+		return nil
+	}
+
 	// Legacy <identity>.json path (folder or flat). The v4 identity does not
 	// carry the .json extension; both shapes are pre-v4 and need renaming.
 	legacy := identity + ".json"
@@ -86,9 +97,17 @@ func renameLegacyJSONFolder(legacyFolder, identity string) error {
 // flat file or the folder exists", not "the file is fully written or not at
 // all". Reusing AtomicWriteFile would require re-reading and re-writing the
 // review JSON for no benefit. (review W6)
+// migrateTmpSuffix names the folder a migration builds before renaming it
+// into place.
+const migrateTmpSuffix = ".hunkyard-migrate.tmp"
+
 func migrateFlatToFolder(flatPath, identity string) error {
-	tmp := identity + ".hunkyard-migrate.tmp"
-	// A previous crash may have left tmp/ behind. Wipe.
+	tmp := identity + migrateTmpSuffix
+	// A previous crash may have left tmp/ behind. Wipe it only when it does
+	// not hold a review: that one may be the only copy left.
+	if _, err := os.Stat(filepath.Join(tmp, "review.json")); err == nil {
+		return fmt.Errorf("migration temp folder %s holds a review; move it into place by hand", tmp)
+	}
 	_ = os.RemoveAll(tmp)
 
 	if err := os.MkdirAll(tmp, 0o755); err != nil {

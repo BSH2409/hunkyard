@@ -3,9 +3,21 @@
 
   var DEBOUNCE_MS = 500;
   var timers = {};
+  // localStorage is per host and port, and reviews reuse ports: drafts are
+  // kept under the review's session key so one review never restores or
+  // deletes another's.
+  var scope = '';
+
+  function setScope(reviewKey) {
+    scope = reviewKey || '';
+  }
+
+  function keyPrefix() {
+    return 'hunkyard-draft-' + (scope ? scope + ':' : '');
+  }
 
   function storageKey(formKey) {
-    return 'hunkyard-draft-' + formKey;
+    return keyPrefix() + formKey;
   }
 
   function saveDraft(formKey, data) {
@@ -52,7 +64,7 @@
       var toRemove = [];
       for (var i = 0; i < localStorage.length; i++) {
         var key = localStorage.key(i);
-        if (key && key.indexOf('hunkyard-draft-' + (prefix || '')) === 0) {
+        if (key && key.indexOf(keyPrefix() + (prefix || '')) === 0) {
           toRemove.push(key);
         }
       }
@@ -78,6 +90,8 @@
     clearDraft: clearDraft,
     clearAllDrafts: clearAllDrafts,
     flushAll: flushAll,
+    setScope: setScope,
+    keyPrefix: keyPrefix,
   };
 
   window.hunkyard = window.hunkyard || {};

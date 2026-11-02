@@ -80,3 +80,8 @@ test('the dock opens for questions it has not shown yet', () => {
   assert.deepEqual(decisions.dockState([first], ['d_1'], 'closed'), { state: 'closed', seen: ['d_1'] });
   assert.equal(decisions.dockState([], [], 'open').state, 'hidden');
 });
+
+test('a page load with only answered questions keeps the dock minimised', () => {
+  assert.equal(decisions.dockState([answered], [], undefined).state, 'closed');
+  assert.equal(decisions.dockState([answered], [], 'open').state, 'open');
+});

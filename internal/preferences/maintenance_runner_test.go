@@ -191,3 +191,37 @@ func TestCronUsesAutoMaintenance(t *testing.T) {
 		t.Fatalf("cron line: %q %v", rendered, err)
 	}
 }
+
+// A capture while the model runs makes its proposal stale; the retry must be
+// built from the new batch, or it is stale again and both paid runs fail.
+func TestAutomaticMaintenanceRetriesAStaleProposalOnTheNewBatch(t *testing.T) {
+	s := storeWithPending(t)
+	calls := 0
+	runner := func(ctx context.Context, argv, env []string, dir string, stdin []byte) ([]byte, error) {
+		calls++
+		if calls == 1 {
+			batch, _, err := s.buildMaintenanceBatch(false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			late := captureInput()
+			late.Feedback, late.TurnID = "Always name Go receivers with one letter", "turn-late"
+			if _, err := s.Capture(late); err != nil {
+				t.Fatal(err)
+			}
+			return ignoredProposal(t, batch), nil
+		}
+		if !strings.Contains(string(stdin), "name Go receivers with one letter") {
+			t.Fatal("the retry was sent the stale batch")
+		}
+		batch, _, err := s.buildMaintenanceBatch(false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return ignoredProposal(t, batch), nil
+	}
+	result, err := s.runAutomaticMaintenance(context.Background(), claudeMaintenance, false, runner)
+	if err != nil || result["status"] != "success" || calls != 2 {
+		t.Fatalf("result %v err %v calls %d", result, err, calls)
+	}
+}

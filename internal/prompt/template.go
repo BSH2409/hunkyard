@@ -35,6 +35,42 @@ func LoadTemplate(value, baseDir string) (string, error) {
 	}
 }
 
+// LoadProjectTemplate is LoadTemplate for a project config layer: a file:
+// value must name a file inside projectDir, after symlinks are resolved, so
+// an untrusted repository cannot read files elsewhere on the machine.
+func LoadProjectTemplate(value, projectDir string) (string, error) {
+	if !strings.HasPrefix(value, prefixFile) {
+		return LoadTemplate(value, projectDir)
+	}
+	path, err := projectFilePath(strings.TrimPrefix(value, prefixFile), projectDir)
+	if err != nil {
+		return "", err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
+func projectFilePath(path, projectDir string) (string, error) {
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(projectDir, path)
+	}
+	root, err := filepath.EvalSymlinks(projectDir)
+	if err != nil {
+		return "", err
+	}
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return "", err
+	}
+	if !strings.HasPrefix(resolved, root+string(filepath.Separator)) {
+		return "", fmt.Errorf("project prompt file %q is outside the project", path)
+	}
+	return resolved, nil
+}
+
 // Render executes a Go text/template with the given context.
 func Render(tmplText string, ctx Context) (string, error) {
 	return RenderData(tmplText, ctx.TemplateData())

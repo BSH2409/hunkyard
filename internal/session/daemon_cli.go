@@ -2,6 +2,7 @@ package session
 
 import (
 	"fmt"
+	"io/fs"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -139,28 +140,57 @@ func stopDaemonOnApproval(approved bool, entry daemon.SessionEntry, key string, 
 	})
 }
 
-func backgroundCleanup() {
+// backgroundCleanup deletes stale reviews other than keep, the review this
+// run resumes. Each deletion holds the review's session lock, which a daemon
+// start also takes, and rechecks staleness under it.
+func backgroundCleanup(keep string) {
 	revDir, err := daemon.ReviewsDir()
 	if err == nil {
 		global, _, _ := config.LoadConfigFile(config.GlobalConfigPath())
-		stale := findStaleReviews(revDir, global.StaleReviewDaysOrDefault())
-		deleteStaleReviewsSilent(stale)
+		days := global.StaleReviewDaysOrDefault()
+		stale := findStaleReviews(revDir, days)
+		deleteStaleReviewsSilent(revDir, stale, keep, days)
 	}
 	daemon.CleanOrphanedSessions()
 }
 
-func deleteStaleReviewsSilent(stale []staleReview) {
+func deleteStaleReviewsSilent(revDir string, stale []staleReview, keep string, days int) {
 	sessDir, _ := daemon.SessionsDir()
+	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	for _, s := range stale {
-		if !removeStaleReviewPath(s.path) {
+		if s.key == keep {
 			continue
 		}
-		if sessDir != "" {
-			os.Remove(filepath.Join(sessDir, s.key+".json"))
-			os.Remove(filepath.Join(sessDir, s.key+".lock"))
-			os.Remove(filepath.Join(sessDir, s.key+".log"))
-		}
+		_ = daemon.WithSessionLock(s.key, func() {
+			if sessDir != "" {
+				if _, err := os.Stat(filepath.Join(sessDir, s.key+".json")); err == nil {
+					return // a daemon started on it since the scan
+				}
+			}
+			if !stillStale(revDir, s, cutoff) || !removeStaleReviewPath(s.path) {
+				return
+			}
+			if sessDir != "" {
+				os.Remove(filepath.Join(sessDir, s.key+".log"))
+			}
+		})
 	}
+}
+
+// stillStale repeats the staleness check for one review after the lock is
+// held, since a resume may have written it after the scan.
+func stillStale(revDir string, s staleReview, cutoff time.Time) bool {
+	info, err := os.Lstat(s.path)
+	if err != nil {
+		return false
+	}
+	de := fs.FileInfoToDirEntry(info)
+	if info.IsDir() {
+		_, ok := checkStaleReviewFolder(revDir, de, s.key, cutoff)
+		return ok
+	}
+	_, ok := checkStaleReview(revDir, de, s.key, cutoff)
+	return ok
 }
 
 func removeStaleReviewPath(path string) bool {

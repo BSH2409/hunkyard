@@ -80,7 +80,7 @@ func (s *Store) audit(duplicates bool) auditResult {
 				add("source_pack_stale")
 			}
 			for _, r := range current.Rules.rules {
-				if r["origin"] == "source_pack" && source.validateCitation(record(r["source_ref"])) != nil {
+				if r["origin"] == "source_pack" && r["status"] != "superseded" && source.validateCitation(record(r["source_ref"])) != nil {
 					add("source_pack_stale")
 				}
 			}

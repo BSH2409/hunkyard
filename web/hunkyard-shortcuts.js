@@ -93,6 +93,8 @@
     });
     Object.keys(candidates).forEach(function (id) {
       var binding = candidates[id];
+      // An empty binding disables the action; disabled actions never clash.
+      if (binding === '') { valid[id] = binding; return; }
       var conflict = false;
       groups.some(function (group) {
         return group.shortcuts.some(function (other) {

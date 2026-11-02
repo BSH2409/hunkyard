@@ -178,3 +178,52 @@ func writeAliveSession(t *testing.T, key string, entry daemon.SessionEntry) {
 		t.Fatal(err)
 	}
 }
+
+func pauseReviewForTest(t *testing.T, key, dir string) {
+	t.Helper()
+	if err := WritePausedMarker(dir, PausedMarker{Port: 4321}); err != nil {
+		t.Fatal(err)
+	}
+	if err := RecordPausedReview(key, dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestRunStopAllClearsPausedReviews(t *testing.T) {
+	testutil.SetHome(t, t.TempDir())
+	inReviews, err := daemon.ReviewFilePath("aaaaaaaaaaaa")
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseReviewForTest(t, "aaaaaaaaaaaa", inReviews)
+	pauseReviewForTest(t, "bbbbbbbbbbbb", filepath.Join(t.TempDir(), "plan", ".hunkyard"))
+	if err := RunStop([]string{"--all"}); err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"aaaaaaaaaaaa", "bbbbbbbbbbbb"} {
+		if _, paused := PausedReviewDir(key); paused {
+			t.Errorf("%s still paused after stop --all", key)
+		}
+	}
+}
+
+func TestRunStopClearsThisDirectorysPausedReview(t *testing.T) {
+	testutil.SetHome(t, t.TempDir())
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	key := daemon.SessionKey(dir, "", nil)
+	reviewDir, err := daemon.ReviewFilePath(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pauseReviewForTest(t, key, reviewDir)
+	if err := RunStop(nil); err != nil {
+		t.Fatalf("RunStop: %v", err)
+	}
+	if _, paused := PausedReviewDir(key); paused {
+		t.Fatal("hunkyard stop left this directory's review paused")
+	}
+}

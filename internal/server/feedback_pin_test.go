@@ -106,3 +106,25 @@ func TestFeedbackPinBlocks(t *testing.T) {
 		t.Errorf("failed capture = %+v", f)
 	}
 }
+
+func TestHumanReplyToAToolFindingIsHumanEvidence(t *testing.T) {
+	s, sess := newTestServer(t)
+	sess.ReplaceMachineComments("tool", "golangci-lint", []session.MachineComment{{Path: "test.md", Line: 1, Body: "unused variable"}})
+	var finding session.Comment
+	for _, c := range sess.GetVisibleComments()["test.md"] {
+		finding = c
+	}
+	if _, ok := sess.AddReply("test.md", finding.ID, "Always use domain names here.", "reviewer"); !ok {
+		t.Fatal("reply not added")
+	}
+	batch := publishWithOwner(t, s)
+	for _, c := range batch.Comments {
+		if c.ParentID == finding.ID {
+			if c.MachineAuthored() || c.Verdict != "" {
+				t.Fatalf("human reply published as machine output: %+v", c)
+			}
+			return
+		}
+	}
+	t.Fatalf("human reply missing from batch: %+v", batch.Comments)
+}

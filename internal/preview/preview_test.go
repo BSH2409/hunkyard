@@ -356,21 +356,6 @@ func TestHandlePreviewContent_MethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestHandlePreviewContent_NoSession(t *testing.T) {
-	s, err := NewServer(nil, frontendFS, "", "test", 0, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest("GET", "/preview-content/", nil)
-	w := httptest.NewRecorder()
-	s.HandlePreviewContentForTest(w, req)
-
-	if w.Code != http.StatusServiceUnavailable {
-		t.Errorf("status = %d, want 503", w.Code)
-	}
-}
-
 func TestHandlePreviewContent_NotFound(t *testing.T) {
 	dir := t.TempDir()
 	writeTestFile(t, filepath.Join(dir, "index.html"), "<html></html>")

@@ -124,6 +124,9 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 			child.ID = "reply:" + c.ID + ":" + reply.ID
 			child.ParentID = c.ID
 			child.Body = reply.Body
+			// The reply is the reviewer's own words, even under a tool or
+			// rule finding: keep its location, not the finding's provenance.
+			child.Source, child.SourceRef, child.Verdict = "", "", ""
 			batch.Comments = append(batch.Comments, child)
 		}
 	}
@@ -143,7 +146,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	appendReviewerEdits(&batch, sess, files)
 	if request.Summary != "" {
-		batch.Comments = append(batch.Comments, feedback.Comment{ID: "review-summary", Body: request.Summary, Scope: "review"})
+		batch.Comments = append(batch.Comments, feedback.Comment{ID: feedback.SummaryCommentID, Body: request.Summary, Scope: "review"})
 	}
 	if err := sess.SyncWriteFiles(); err != nil {
 		http.Error(w, "cannot persist review comments", 500)

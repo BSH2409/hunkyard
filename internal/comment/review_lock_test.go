@@ -7,42 +7,83 @@ import (
 
 	"github.com/BSH2409/hunkyard/internal/review"
 	"github.com/BSH2409/hunkyard/internal/session"
+	"github.com/BSH2409/hunkyard/internal/testutil"
 )
 
-func TestCLIReplyWaitsForTheDaemonsReviewLock(t *testing.T) {
-	identity := filepath.Join(t.TempDir(), "review-id")
-	cj := session.HunkyardJSON{Files: map[string]session.HunkyardJSONFile{
-		"plan.md": {Comments: []session.Comment{{ID: "c_1", StartLine: 1, EndLine: 1, Body: "x"}}},
-	}}
-	if err := review.SaveHunkyardJSON(identity, cj); err != nil {
-		t.Fatal(err)
-	}
-	held, release, done := make(chan struct{}), make(chan struct{}), make(chan error, 1)
+// writeWhileLocked holds hunkyardPath's review lock, as the daemon does
+// while it writes, and adds a marker file entry before releasing it. write
+// starts while the lock is held; it must wait and keep the marker.
+func writeWhileLocked(t *testing.T, hunkyardPath string, write func() error) {
+	t.Helper()
+	locked := make(chan struct{})
+	held := make(chan error, 1)
 	go func() {
-		_ = session.WithReviewLock(identity, func() error {
-			close(held)
-			<-release
-			return nil
+		held <- session.WithReviewLock(hunkyardPath, func() error {
+			close(locked)
+			cj, err := review.LoadHunkyardJSON(hunkyardPath)
+			if err != nil {
+				return err
+			}
+			time.Sleep(200 * time.Millisecond)
+			cj.Files["daemon-write.md"] = HunkyardJSONFile{Status: "added", Comments: []session.Comment{}}
+			return review.SaveHunkyardJSON(hunkyardPath, cj)
 		})
 	}()
-	<-held
-	go func() { done <- addReplyToHunkyardJSONAtPath("c_1", "Fixed", "agent", false, identity, "") }()
-	select {
-	case err := <-done:
-		t.Fatalf("the CLI wrote while the daemon held the review lock (err %v)", err)
-	case <-time.After(200 * time.Millisecond):
+	<-locked
+	if err := write(); err != nil {
+		t.Fatal(err)
 	}
-	close(release)
-	select {
-	case err := <-done:
-		if err != nil {
-			t.Fatal(err)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("the CLI reply never finished after the lock was released")
+	if err := <-held; err != nil {
+		t.Fatal(err)
 	}
-	got, err := review.LoadHunkyardJSON(identity)
-	if err != nil || len(got.Files["plan.md"].Comments[0].Replies) != 1 {
-		t.Fatalf("reply not saved: %+v %v", got.Files["plan.md"], err)
+	cj, err := review.LoadHunkyardJSON(hunkyardPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := cj.Files["daemon-write.md"]; !ok {
+		t.Fatal("the write ignored the review lock and dropped the daemon's change")
+	}
+}
+
+func TestAddPinCommentWaitsForTheReviewLock(t *testing.T) {
+	dir := t.TempDir()
+	htmlPath := writePreviewPage(t, dir)
+	seedPinReview(t, dir, HunkyardJSON{ReviewType: "preview", Origin: htmlPath, ReviewRound: 1, Files: map[string]HunkyardJSONFile{}})
+	hunkyardPath, err := review.ResolveReviewPath(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeWhileLocked(t, hunkyardPath, func() error {
+		_, err := addPinComment(hunkyardPath, "h1", "/", "body", "bot")
+		return err
+	})
+	if pins := loadOutputReview(t, dir).Files["/preview-content"].Comments; len(pins) != 1 {
+		t.Fatalf("pin lost: %+v", pins)
+	}
+}
+
+func TestRedirectedBulkReplyWaitsForTheTargetReviewLock(t *testing.T) {
+	home := t.TempDir()
+	testutil.SetHome(t, home)
+	reviews := filepath.Join(home, ".hunkyard", "reviews")
+	primary := filepath.Join(reviews, "aaaaaaaaaaaa")
+	target := filepath.Join(reviews, "bbbbbbbbbbbb")
+	if err := review.SaveHunkyardJSON(primary, HunkyardJSON{Files: map[string]HunkyardJSONFile{}}); err != nil {
+		t.Fatal(err)
+	}
+	if err := review.SaveHunkyardJSON(target, HunkyardJSON{Files: map[string]HunkyardJSONFile{
+		"a.go": {Status: "modified", Comments: []session.Comment{{ID: "c_target", Body: "fix this", StartLine: 1, EndLine: 1}}},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	writeWhileLocked(t, target, func() error {
+		return bulkAddCommentsToHunkyardJSONAtPath([]BulkCommentEntry{{ReplyTo: "c_target", Body: "done"}}, "bot", primary, inheritedScope{})
+	})
+	cj, err := review.LoadHunkyardJSON(target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if replies := cj.Files["a.go"].Comments[0].Replies; len(replies) != 1 {
+		t.Fatalf("reply lost: %+v", cj.Files["a.go"].Comments[0])
 	}
 }

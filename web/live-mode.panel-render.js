@@ -172,10 +172,10 @@
         c.review_round == null ? '' : c.review_round,
         c.pin_status || '',
         reviewRound,
+        // Draft text is left out: typing must not rebuild the card and take
+        // the caret away; the open flags decide whether a composer shows.
         c._replyOpen ? '1' : '0',
-        c._replyDraft || '',
         c._editOpen ? '1' : '0',
-        c._editDraft == null ? '' : c._editDraft,
         anchorKey,
         replies,
       ].join('\x1f');

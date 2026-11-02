@@ -47,7 +47,13 @@ func NewLiveSession(liveOrigin, reviewPath string) (*Session, error) {
 					Status:   fe.Status,
 				})
 			}
+			s.reviewComments = cj.ReviewComments
+			s.toolMarks = cloneToolMarks(cj.ToolMarks)
+			s.decisions = cloneDecisions(cj.Decisions)
 		}
+		// Record the review's kind on disk from the start, so a CLI pin
+		// before the first browser comment finds a live review.
+		s.WriteFiles()
 	}
 	return s, nil
 }
@@ -88,6 +94,7 @@ func NewPreviewSession(previewFile, reviewPath string) (*Session, error) {
 	if reviewPath != "" {
 		s.ReviewFilePath = reviewPath
 		s.loadHunkyardJSON()
+		s.WriteFiles()
 	}
 	return s, nil
 }

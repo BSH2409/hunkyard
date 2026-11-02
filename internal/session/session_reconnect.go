@@ -65,19 +65,19 @@ func daemonArgsFromCliArgs(sessionKey string, cliArgs []string) []string {
 	if len(cliArgs) == 0 {
 		return args
 	}
+	// _serve takes the live origin and preview file as flags; a positional
+	// argument would start a files review of a path named after them.
 	if len(cliArgs) >= 2 && cliArgs[0] == "live" {
-		return append(args, "live", cliArgs[1])
+		return append(args, "--live-origin", cliArgs[1])
 	}
 	if len(cliArgs) >= 2 && cliArgs[0] == "preview" {
-		return append(args, "preview", cliArgs[1])
+		return append(args, "--preview-file", cliArgs[1])
 	}
-	if len(cliArgs) == 1 {
-		switch {
-		case strings.HasPrefix(cliArgs[0], "pr:"):
-			return append(args, "--pr", strings.TrimPrefix(cliArgs[0], "pr:"))
-		case strings.HasPrefix(cliArgs[0], "range:"):
-			return append(args, "--range", strings.TrimPrefix(cliArgs[0], "range:"))
-		}
+	switch {
+	case strings.HasPrefix(cliArgs[0], "pr:"):
+		return append(append(args, "--pr", strings.TrimPrefix(cliArgs[0], "pr:")), cliArgs[1:]...)
+	case strings.HasPrefix(cliArgs[0], "range:"):
+		return append(append(args, "--range", strings.TrimPrefix(cliArgs[0], "range:")), cliArgs[1:]...)
 	}
 	return append(args, cliArgs...)
 }
@@ -97,6 +97,9 @@ func resolveReconnectReviewDir(key string, stale daemon.SessionEntry) (string, e
 			return "", fmt.Errorf("stat review for session %s: %w", key, err)
 		}
 		return stale.ReviewPath, nil
+	}
+	if dir, paused := PausedReviewDir(key); paused {
+		return dir, nil
 	}
 	return daemon.ReviewFilePath(key)
 }
