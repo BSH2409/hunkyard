@@ -8,7 +8,7 @@ test.describe('Page Loading', () => {
     await clearAllComments(request);
   });
 
-  test('git-mode page loads with branch context, diff toggle, no PR button, and no mermaid', async ({ page }) => {
+  test('git-mode page loads with branch context, diff toggle, the overview button, and no mermaid', async ({ page }) => {
     // Pluggable renderers load their libraries on first use: a
     // review without diagrams keeps today's page weight.
     const requested: string[] = [];
@@ -25,8 +25,9 @@ test.describe('Page Loading', () => {
     await expect(page).toHaveTitle(/Hunkyard — feat\/add-auth/);
 
     await expect(page.locator('#diffModeToggle')).toBeVisible();
-    // No PR exists.
-    await expect(page.locator('.pr-toggle-btn')).not.toBeVisible();
+    // No PR exists: the same button opens the git-mode review overview.
+    await expect(page.locator('.pr-toggle-btn')).toBeVisible();
+    await expect(page.locator('.pr-toggle-btn')).toHaveAttribute('aria-label', 'Review overview');
 
     const doc = await switchToDocumentView(page);
     await expect(doc.locator('.line-block').first()).toBeVisible();

@@ -6,7 +6,12 @@ import (
 	"math"
 	"os"
 	"path/filepath"
+	"sort"
+	"strconv"
+	"strings"
 	"time"
+
+	"github.com/BSH2409/hunkyard/internal/preferences"
 )
 
 type statsFile struct {
@@ -32,6 +37,10 @@ type sessionRecord struct {
 	Rounds    int      `json:"rounds"`
 	ReviewKey string   `json:"review_key,omitempty"`
 	Args      []string `json:"args,omitempty"`
+	// Approved marks a record written when the reviewer approved; ApprovedAt
+	// is that moment. Records from before this field count as not approved.
+	Approved   bool   `json:"approved,omitempty"`
+	ApprovedAt string `json:"approved_at,omitempty"`
 }
 
 func statsFilePath() (string, error) {
@@ -117,7 +126,7 @@ func sessionActivity(sess *Session, author string) (files, comments int) {
 // recordSessionStats builds a sessionRecord from the current session state and
 // appends it to ~/.hunkyard/stats.json. Called from handleFinish (on approve) and
 // during daemon shutdown. Skips sessions with no meaningful activity.
-func recordSessionStats(sess *Session, author string, startedAt time.Time) {
+func recordSessionStats(sess *Session, author string, startedAt time.Time, approved bool) {
 	now := time.Now().UTC()
 	duration := int(math.Round(now.Sub(startedAt).Seconds()))
 
@@ -142,6 +151,10 @@ func recordSessionStats(sess *Session, author string, startedAt time.Time) {
 		Mode:      mode,
 		Rounds:    sess.GetReviewRound(),
 		Args:      sess.CLIArgs,
+		Approved:  approved,
+	}
+	if approved {
+		rec.ApprovedAt = rec.EndedAt
 	}
 
 	if sess.ReviewFilePath != "" {
@@ -155,12 +168,27 @@ func recordSessionStats(sess *Session, author string, startedAt time.Time) {
 
 // --- CLI output ---
 
-// RunStats prints review session statistics.
+// RunStats prints review session statistics and, for the last --days
+// (default 30, 0 for all time), how the reviews went.
 func RunStats(args []string) {
 	jsonOutput := false
-	for _, a := range args {
-		if a == "--json" {
+	days := 30
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--json":
 			jsonOutput = true
+		case "--days":
+			if i+1 >= len(args) {
+				fmt.Fprintln(os.Stderr, "Error: --days needs a number of days (0 for all time)")
+				os.Exit(2)
+			}
+			n, err := strconv.Atoi(args[i+1])
+			if err != nil || n < 0 {
+				fmt.Fprintln(os.Stderr, "Error: --days needs a number of days (0 for all time)")
+				os.Exit(2)
+			}
+			days = n
+			i++
 		}
 	}
 
@@ -169,26 +197,98 @@ func RunStats(args []string) {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+	insights, err := ComputeReviewInsights(days, time.Now(), preferenceInsightSources())
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	if jsonOutput {
-		data, _ := json.MarshalIndent(sf, "", "  ")
+		data, _ := json.MarshalIndent(map[string]any{"totals": sf.Totals, "sessions": sf.Sessions, "insights": insights}, "", "  ")
 		fmt.Println(string(data))
 		return
 	}
 
-	if sf.Totals.Sessions == 0 {
+	if len(sf.Sessions) == 0 {
 		fmt.Println("No review sessions recorded yet.")
 		return
 	}
 
 	fmt.Println(formatTotalsLine(sf.Totals))
 
-	if insights := computeInsights(sf.Sessions); len(insights) > 0 {
+	if lines := computeInsights(sf.Sessions); len(lines) > 0 {
 		fmt.Println()
-		for _, ins := range insights {
-			fmt.Println(ins)
+		for _, line := range lines {
+			fmt.Println(line)
 		}
 	}
+	fmt.Println()
+	for _, line := range formatReviewInsights(insights) {
+		fmt.Println(line)
+	}
+}
+
+// preferenceInsightSources reads rule names and verdicts from the local
+// preference store when this platform supports one.
+func preferenceInsightSources() InsightSources {
+	if !preferences.SupportedPlatform {
+		return InsightSources{}
+	}
+	store, err := preferences.Open(preferences.Config{})
+	if err != nil {
+		return InsightSources{}
+	}
+	return InsightSources{RulesForObservations: store.RulesForObservations, RuleVerdicts: store.RuleVerdictCounts}
+}
+
+// formatReviewInsights renders insights as short lines for the terminal.
+func formatReviewInsights(ri ReviewInsights) []string {
+	window := "All time"
+	if ri.WindowDays > 0 {
+		window = fmt.Sprintf("Last %d days", ri.WindowDays)
+	}
+	lines := []string{fmt.Sprintf("%s: %d %s, %d approved", window, ri.Reviews, pluralize(ri.Reviews, "review", "reviews"), ri.Approved)}
+	if ri.Reviews == 0 {
+		return lines
+	}
+	lines = append(lines,
+		fmt.Sprintf("Rounds per review: median %s, max %s", trimFloat(ri.RoundsPerReview.Median), trimFloat(ri.RoundsPerReview.Max)),
+		fmt.Sprintf("Comments per round: %.1f", ri.CommentsPerRound))
+	if ri.Approved > 0 {
+		lines = append(lines, fmt.Sprintf("Time to approve: median %s, max %s", formatDuration(int(ri.ApproveSeconds.Median)), formatDuration(int(ri.ApproveSeconds.Max))))
+	}
+	if len(ri.ByLabel) > 0 {
+		labels := make([]string, 0, len(ri.ByLabel))
+		for label := range ri.ByLabel {
+			labels = append(labels, label)
+		}
+		sort.Strings(labels)
+		parts := make([]string, len(labels))
+		for i, label := range labels {
+			parts[i] = fmt.Sprintf("%s %d", label, ri.ByLabel[label])
+		}
+		lines = append(lines, "Comments by label: "+strings.Join(parts, ", "))
+		r := ri.ByResolution
+		lines = append(lines, fmt.Sprintf("Resolved %d, open %d, claimed fixed but unchanged %d", r.Resolved, r.Unresolved, r.ClaimUnchanged))
+	}
+	for _, repo := range ri.ByRepository {
+		lines = append(lines, fmt.Sprintf("  %s: %d %s, %d comments", repo.Repository, repo.Reviews, pluralize(repo.Reviews, "review", "reviews"), repo.Comments))
+	}
+	if len(ri.Rules) > 0 {
+		lines = append(lines, "Rules behind comments:")
+		for _, rule := range ri.Rules {
+			name := rule.Directive
+			if name == "" {
+				name = rule.RuleID
+			}
+			lines = append(lines, fmt.Sprintf("  %s — %d comments, %d confirmed, %d dismissed", name, rule.Comments, rule.Confirmed, rule.Dismissed))
+		}
+	}
+	return lines
+}
+
+func trimFloat(f float64) string {
+	return strconv.FormatFloat(f, 'f', -1, 64)
 }
 
 func formatTotalsLine(t statsTotals) string {

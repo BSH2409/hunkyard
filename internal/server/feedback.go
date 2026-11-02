@@ -73,6 +73,10 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "resolve blocking comments before approving", http.StatusConflict)
 		return
 	}
+	if request.Disposition == "approve" && sess.OpenBlockingDecisions() > 0 {
+		http.Error(w, "answer blocking decisions before approving", http.StatusConflict)
+		return
+	}
 	snapshot, err := sess.CaptureReviewSnapshot()
 	if err != nil {
 		http.Error(w, fmt.Sprintf("cannot capture review: %v", err), http.StatusConflict)
@@ -102,7 +106,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	batch := feedback.Batch{Version: 1, ReviewID: s.ownerReviewID, SnapshotID: snapshot.ID, Round: snapshot.Round, Disposition: request.Disposition, Summary: request.Summary, SkillIDs: request.SkillIDs, Comments: []feedback.Comment{}}
 	appendComment := func(path string, c session.Comment) {
 		file, exists := files[path]
-		parent := feedback.Comment{ID: c.ID, Body: c.Body, Path: path, OldPath: file.OldPath, Scope: c.Scope, Side: c.Side, StartLine: c.StartLine, EndLine: c.EndLine, Quote: c.Quote, Anchor: c.Anchor, HeadSHA: c.HeadSHA, FocusKey: c.FocusKey, ContentID: c.ContentID, ViewID: c.ViewID, Outdated: path != "" && (!exists || (c.ContentID != "" && c.ContentID != file.ContentID)), Label: c.Label, Blocking: c.Blocking, ClaimUnchanged: c.ClaimUnchangedRound > 0 && !c.Resolved}
+		parent := feedback.Comment{ID: c.ID, Body: c.Body, Path: path, OldPath: file.OldPath, Scope: c.Scope, Side: c.Side, StartLine: c.StartLine, EndLine: c.EndLine, Quote: c.Quote, Anchor: c.Anchor, HeadSHA: c.HeadSHA, FocusKey: c.FocusKey, ContentID: c.ContentID, ViewID: c.ViewID, Outdated: path != "" && (!exists || (c.ContentID != "" && c.ContentID != file.ContentID)), Label: c.Label, Blocking: c.Blocking, ClaimUnchanged: c.ClaimUnchangedRound > 0 && !c.Resolved, Source: c.Source, SourceRef: c.SourceRef, Verdict: c.Verdict}
 		if c.DOMAnchor != nil {
 			parent.Path, parent.OldPath, parent.Outdated = "", "", false
 			parent.Pin = s.pinContext(c, sess.ReviewRound)
@@ -145,10 +149,16 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "cannot persist review comments", 500)
 		return
 	}
+	batch.Decisions = sess.DecisionsToPublish()
 	published, err := store.Publish(request.RequestID, batch)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusConflict)
 		return
+	}
+	sess.MarkDecisionsPublished(published.ID, published.Decisions)
+	if request.Disposition == "approve" && !s.statsRecorded && !s.sessionStartedAt.IsZero() && !s.cfg.DisableStats {
+		recordSessionStats(sess, s.author, s.sessionStartedAt, true)
+		s.statsRecorded = true
 	}
 	sess.SetAwaitingFirstReview(false)
 	sess.SetWaitingForAgent(true)

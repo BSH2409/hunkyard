@@ -32,8 +32,10 @@ func rendererPrecedence(r rule) []string {
 		kind = "0"
 	}
 	origin := "0"
-	if r["origin"] == "source_pack" {
+	if r["origin"] == "team_pack" {
 		origin = "1"
+	} else if r["origin"] == "source_pack" {
+		origin = "2"
 	}
 	tier := "1"
 	if isCoreRule(r) {
@@ -80,13 +82,13 @@ func renderPersona(rules []rule) (map[string]string, map[string]any) {
 	for name, pathRules := range byPath {
 		personal := map[string]bool{}
 		for _, r := range pathRules {
-			if r["origin"] != "source_pack" {
+			if !importedDefault(r) {
 				personal[directiveKey(r)] = true
 			}
 		}
 		selected := []rule{}
 		for _, r := range pathRules {
-			if r["origin"] == "source_pack" && personal[directiveKey(r)] {
+			if importedDefault(r) && personal[directiveKey(r)] {
 				continue
 			}
 			if path.Base(name) == "core.md" && estimatedTokens(personaMarkdown(append(append([]rule{}, selected...), r))) > 600 {

@@ -29,6 +29,13 @@ async function acknowledgeFixtureFeedback(request: APIRequestContext) {
   }
 }
 
+// Ask the reviewer a question as the launching agent would (`hunkyard ask`).
+export async function askFixtureDecision(request: APIRequestContext, data: Record<string, unknown>) {
+  const response = await request.post('/api/feedback/ask', { headers: await fixtureHostHeaders(request), data });
+  await expect(response).toBeOK();
+  return response.json();
+}
+
 export async function publishFixtureReview(request: APIRequestContext) {
   return request.post('/api/finish', { data: { request_id: randomUUID(), disposition: 'comment' } });
 }

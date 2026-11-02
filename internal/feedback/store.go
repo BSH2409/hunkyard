@@ -199,7 +199,7 @@ func (s *Store) Ack(batchID string) error {
 	return s.transaction(func(state *journal) error {
 		for i := range state.Publications {
 			if state.Publications[i].Batch.ID == batchID {
-				for _, c := range state.Publications[i].Batch.Comments {
+				for _, c := range humanComments(state.Publications[i].Batch.Comments) {
 					if !completedPreference(state.Preferences[checkpointKey(batchID, c)].Outcome.Status) {
 						return fmt.Errorf("classify every human revision with feedback learn before acknowledging")
 					}

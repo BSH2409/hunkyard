@@ -69,10 +69,11 @@ func (s *Store) sessionStartHook(input io.Reader, output io.Writer) {
 		return
 	}
 	cwd, session := textField(payload["cwd"]), textField(payload["session_id"])
-	repo, err := repositoryKey(cwd)
+	repo, err := RepositoryKey(cwd)
 	if err != nil {
 		return
 	}
+	s.syncRepositoryPack(cwd, repo)
 	current, err := s.loadCurrent()
 	if err != nil {
 		return
@@ -178,7 +179,7 @@ func (s *Store) promptSubmitHook(input io.Reader, output, errorOutput io.Writer)
 	health["payload_fields"] = fields
 	cwd := textField(payload["cwd"])
 	prompt := textField(payload["prompt"])
-	repo, err := repositoryKey(cwd)
+	repo, err := RepositoryKey(cwd)
 	if err != nil {
 		diagnose("internal_error")
 		return
@@ -585,6 +586,6 @@ func (s *Store) interruptHook(input io.Reader, output io.Writer) {
 	_ = s.updateSession(session, func(state *sessionState) {
 		state.InterruptedAt = s.config.Clock().UTC().Format(time.RFC3339)
 	})
-	repo, _ := repositoryKey(textField(payload["cwd"]))
+	repo, _ := RepositoryKey(textField(payload["cwd"]))
 	_ = s.recordActivity(ActivityEvent{Kind: activityInterrupted, RepoKey: repo, SessionKey: digest(session)})
 }

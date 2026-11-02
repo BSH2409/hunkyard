@@ -73,7 +73,7 @@ func (s *Store) prepareObservation(input CaptureInput) (observation, CaptureResu
 		repo = ""
 	} else if repo == "" && input.CWD != "" {
 		var err error
-		repo, err = repositoryKey(input.CWD)
+		repo, err = RepositoryKey(input.CWD)
 		if err != nil {
 			return observation{}, CaptureResult{}, err
 		}

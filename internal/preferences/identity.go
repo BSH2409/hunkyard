@@ -28,7 +28,9 @@ func repositoryLabel(path string) string {
 	return truncate(name, 64)
 }
 
-func repositoryKey(cwd string) (string, error) {
+// RepositoryKey names the repository at cwd for repository-scoped rules: a
+// readable label plus a digest of the git common directory.
+func RepositoryKey(cwd string) (string, error) {
 	root, err := filepath.Abs(cwd)
 	if err != nil {
 		return "", err

@@ -22,7 +22,7 @@ type commandDescriptor struct {
 // commandRegistry is the single source of truth for command dispatch, help,
 // ordering, and public visibility.
 var commandRegistry = []commandDescriptor{
-	{name: "preferences", handler: func(args []string) { os.Exit(preferences.Run(args, os.Stdin, os.Stdout, os.Stderr)) }, help: "Usage: hunkyard preferences <capture|search|select|build|audit|retire|maintain|migrate|install-hook|install-cron|status|hook|guard|allow|doctor|statusline> [options]\n\nLocal Go preference engine. Maintenance accepts --proposal FILE, or --auto to use the Claude or Codex CLI set in preferences_maintenance (global config)."},
+	{name: "preferences", handler: func(args []string) { os.Exit(preferences.Run(args, os.Stdin, os.Stdout, os.Stderr)) }, help: "Usage: hunkyard preferences <capture|search|select|build|audit|retire|maintain|migrate|install-hook|install-cron|status|hook|guard|allow|doctor|statusline|pack|export> [options]\n\nLocal Go preference engine. Maintenance accepts --proposal FILE, or --auto to use the Claude or Codex CLI set in preferences_maintenance (global config).\nTeam packs: pack import DIR | pack export --name N --version V --out DIR | pack list | pack remove NAME; export --scope repository --to FILE."},
 	{name: "feedback", handler: runFeedback, help: "Usage: hunkyard feedback <await|learn|ack> --session ID [--timeout 45s] [--follow] [--batch ID] [--decisions FILE] [--json]\n\nReceive or acknowledge locally published feedback in the launching CLI session.\nFor await, --follow silently renews pending waits until feedback is published; --timeout bounds each request."},
 	{name: "install", handler: runInstall, helpFn: printInstallUsage},
 	{name: "config", handler: runConfig, bareHelp: true, helpFn: config.PrintConfigHelp},
@@ -45,6 +45,8 @@ Options:
   -e, --event <type>     comment, approve, or request-changes
   -m, --message <text>   Review-level message
   -o, --output <dir>     Hunkyard data root for reviews`},
+	{name: "annotate", handler: runAnnotate, help: annotateUsage},
+	{name: "ask", handler: runAsk, help: askUsage},
 	{name: "comment", handler: runComment, help: `Usage: hunkyard comment [options] <body>
        hunkyard comment [options] <path> <body>
        hunkyard comment [options] <path>:<line[-end]> <body>
@@ -149,9 +151,13 @@ Options:
 Any other option is passed through to the review, so flags like --no-open work.
 Reviews stored outside ~/.hunkyard/reviews are not listed: reopen a plan with
 hunkyard plan --name <slug>, and an --output review with hunkyard --session <id>.`},
-	{name: "stats", handler: runStats, help: `Usage: hunkyard stats [--json]
+	{name: "inbox", handler: runInbox, help: inboxUsage},
+	{name: "stats", handler: runStats, help: `Usage: hunkyard stats [--days N] [--json]
 
-Show lifetime review statistics.`},
+Show lifetime review statistics and how the reviews of the last N days went
+(default 30, 0 for all time): rounds, comments per round, time to approve,
+comments by label and resolution, repositories, and the learned rules most
+often behind comments.`},
 	{name: "cleanup", handler: runCleanup, help: `Usage: hunkyard cleanup [--days N] [--force]
 
 Delete stale review files. The default age is seven days.`},
@@ -250,6 +256,8 @@ CLI feedback:
   hunkyard feedback ack --session ID --batch ID --json
   hunkyard comment --session ID --reply-to ID --author NAME 'Reply'
   hunkyard comments --session ID --json
+  hunkyard annotate --format sarif FILE  Import tool findings and coverage into the review
+  hunkyard ask --session ID --option A --option B 'Question?'  Ask the reviewer to decide
 
 Setup and management:
   hunkyard install --global codex      Install the Codex review skills

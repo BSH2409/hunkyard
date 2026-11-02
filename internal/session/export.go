@@ -37,8 +37,8 @@ func SessionActivity(sess *Session, author string) (files, comments int) {
 	return sessionActivity(sess, author)
 }
 
-func RecordSessionStats(sess *Session, author string, startedAt time.Time) {
-	recordSessionStats(sess, author, startedAt)
+func RecordSessionStats(sess *Session, author string, startedAt time.Time, approved bool) {
+	recordSessionStats(sess, author, startedAt, approved)
 }
 
 func PlanStorageDir(slug string) (string, error) {

@@ -74,7 +74,7 @@ func (c *catalog) applyActions(actions []map[string]any, observations []map[stri
 			}
 			switch kind {
 			case "confirm_rule":
-				if r["origin"] == "source_pack" || !slices.Contains([]string{"candidate", "active", "core"}, textField(r["status"])) {
+				if importedDefault(r) || !slices.Contains([]string{"candidate", "active", "core"}, textField(r["status"])) {
 					return proposalError("cannot confirm an inactive or source rule")
 				}
 			case "mark_dormant":
@@ -339,7 +339,7 @@ func (c *catalog) applyAction(action map[string]any, index map[string]map[string
 			return err
 		}
 		successor, successorErr := c.mutableRule(id)
-		if successorErr == nil && successor["origin"] == "source_pack" {
+		if successorErr == nil && importedDefault(successor) {
 			return proposalError("cannot rewrite source successor")
 		}
 		if action["proposed_rule"] != nil {

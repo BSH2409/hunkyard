@@ -7,7 +7,7 @@ test('the Preferences tab shows rules, pipeline, persona and activity', async ({
   await expect(page.locator('#tab-yard')).toHaveText(/^Preferences\d*$/);
   await page.click('#tab-yard');
   const yard = page.locator('#yardPane .yard');
-  await expect(yard.locator('.yard-nav-item')).toHaveText(['This review', 'Rules', 'Pipeline', 'Persona', 'Loads', 'Activity', /^Health\d*$/]);
+  await expect(yard.locator('.yard-nav-item')).toHaveText(['This review', 'Rules', 'Pipeline', 'Persona', 'Loads', 'Activity', 'Insights', /^Health\d*$/]);
 
   await yard.locator('[data-yard-view="rules"]').click();
   await expect(yard.locator('.yard-row', { hasText: 'Write method definitions over multiple lines.' })).toBeVisible();
@@ -54,7 +54,7 @@ test('the Preferences tab is wide, its views are real tabs pinned above the cont
 
   const yard = page.locator('#yardPane .yard');
   const tabs = yard.getByRole('tablist', { name: 'Preferences views' });
-  await expect(tabs.getByRole('tab')).toHaveCount(7);
+  await expect(tabs.getByRole('tab')).toHaveCount(8);
   await expect(tabs.getByRole('tab', { name: 'This review' })).toHaveAttribute('aria-selected', 'true');
   await tabs.getByRole('tab', { name: 'This review' }).focus();
   await page.keyboard.press('ArrowRight');
@@ -134,4 +134,16 @@ test('picking a persona file keeps the file list where it was', async ({ page })
   expect(await tree.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
   await expect(tree.locator('[data-persona-file="ruby.md"]')).toHaveAttribute('aria-current', 'true');
   await expect(tree.locator('[data-persona-file="ruby.md"]')).toBeFocused();
+});
+
+test('the Insights view shows how reviews went and switches window', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.locator('.loading')).toBeHidden();
+  await page.click('#settingsToggle');
+  await page.click('#tab-yard');
+  const yard = page.locator('#yardPane .yard');
+  await yard.locator('[data-yard-view="insights"]').click();
+  await expect(yard.locator('.yard-empty, .yard-insights')).toBeVisible();
+  await yard.locator('[data-yard-days="0"]').click();
+  await expect(yard.locator('[data-yard-days="0"]')).toHaveAttribute('aria-pressed', 'true');
 });

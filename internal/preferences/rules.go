@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"regexp"
 	"slices"
 	"sort"
 	"strconv"
@@ -160,7 +161,7 @@ func validateRule(r rule) error {
 	if r == nil {
 		return invalidRecord("rule must be a hash")
 	}
-	if err := exactFields(r, strings.Fields("created_at directive evidence examples id observations origin scope status surfaces updated_at"), strings.Fields("conflicts_with load_tier retired_at source_pack source_ref superseded_by supersedes")); err != nil {
+	if err := exactFields(r, strings.Fields("created_at directive evidence examples id observations origin scope status surfaces updated_at"), strings.Fields("conflicts_with load_tier pack retired_at source_pack source_ref superseded_by supersedes")); err != nil {
 		return err
 	}
 	if id, ok := r["id"].(string); !ok || !generationIDPattern.MatchString(id) {
@@ -177,7 +178,7 @@ func validateRule(r rule) error {
 		return err
 	}
 	origin, ok := r["origin"].(string)
-	if !ok || !slices.Contains([]string{"feedback", "inferred", "legacy_seed", "source_pack"}, origin) {
+	if !ok || !slices.Contains([]string{"feedback", "inferred", "legacy_seed", "source_pack", "team_pack"}, origin) {
 		return invalidRecord("invalid origin")
 	}
 	status, ok := r["status"].(string)
@@ -196,6 +197,9 @@ func validateRule(r rule) error {
 		if present != (origin == "source_pack") {
 			return invalidRecord("incomplete or misplaced source provenance")
 		}
+	}
+	if pack, present := r["pack"]; present != (origin == "team_pack") || present && !packNamePattern.MatchString(textField(pack)) {
+		return invalidRecord("incomplete or misplaced team pack provenance")
 	}
 	if origin == "source_pack" {
 		if r["load_tier"] != "core" && r["load_tier"] != "surface" {
@@ -403,7 +407,7 @@ func recomputeRule(r rule, now time.Time) error {
 		r["status"] = "superseded"
 	case len(conflicts) > 0:
 		r["status"] = "conflicted"
-	case r["origin"] == "source_pack":
+	case importedDefault(r):
 		r["status"] = "active"
 	case len(unique) >= 5 && len(sessions) >= 3 && globalReady:
 		r["status"] = "core"
@@ -434,3 +438,14 @@ func normalizeRules(rules []rule, now time.Time) ([]rule, error) {
 	sort.Slice(result, func(i, j int) bool { return result[i]["id"].(string) < result[j]["id"].(string) })
 	return result, validateRuleGraph(result)
 }
+
+// importedDefault reports whether a rule came from a pack (the code-like-him
+// source pack or a team pack) rather than the user's own feedback. Imported
+// rules are always active, rank below personal rules, and are never edited
+// by maintenance proposals.
+func importedDefault(r rule) bool {
+	return r["origin"] == "source_pack" || r["origin"] == "team_pack"
+}
+
+// packNamePattern names a team pack: "shared-<name>" or "repo-<repo key>".
+var packNamePattern = regexp.MustCompile(`^(?:shared|repo)-[a-z0-9][a-z0-9-]{0,80}$`)

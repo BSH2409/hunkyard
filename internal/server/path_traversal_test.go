@@ -21,7 +21,7 @@ func TestCommentPathCannotReadOutsideTheRepo(t *testing.T) {
 		if post.Code < 400 || strings.Contains(post.Body.String(), "TOP-SECRET") {
 			t.Errorf("POST comment on %q = %d %s", path, post.Code, post.Body)
 		}
-		for _, get := range []string{"/api/file?path=", "/api/file/diff?path="} {
+		for _, get := range []string{"/api/file?path=", "/api/file/diff?path=", "/api/file/impact?path=", "/api/file/image?side=head&path="} {
 			rec := httptest.NewRecorder()
 			s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, get+path, nil))
 			if strings.Contains(rec.Body.String(), "TOP-SECRET") {

@@ -21,8 +21,8 @@ func commentsAtOrBeforeRound(comments []Comment, round int) []Comment {
 	return session.CommentsAtOrBeforeRound(comments, round)
 }
 
-func recordSessionStats(sess *Session, author string, startedAt time.Time) {
-	session.RecordSessionStats(sess, author, startedAt)
+func recordSessionStats(sess *Session, author string, startedAt time.Time, approved bool) {
+	session.RecordSessionStats(sess, author, startedAt, approved)
 }
 
 func filterPathsIgnored(paths []string, patterns []string) []string {

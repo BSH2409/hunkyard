@@ -58,6 +58,11 @@ All custom JS uses the IIFE + dual-export pattern:
 | `hunkyard-renderers.js` | `window.hunkyard.renderers` | Pluggable renderer registry (fence + file renderers, render targets, anchorFor clicks). See `docs/renderers.md` |
 | `hunkyard-diagram-overlay.js` | `window.hunkyard.diagramOverlay` | Fullscreen pan/zoom view for rendered SVG output |
 | `hunkyard-find.js` | `window.hunkyard.find` | Find bar for the review list (Cmd/Ctrl+F): searches the file model, highlights matches in Pierre's shadow roots |
+| `hunkyard-annotations.js` | `window.hunkyard.annotations` | Tool marks from `hunkyard annotate`: coverage line for the file header, uncovered ranges for line tints |
+| `hunkyard-decisions.js` | `window.hunkyard.decisions` | "Decisions needed" section: questions from `hunkyard ask`, answer buttons, blocking count |
+| `hunkyard-image-diff.js` | `window.hunkyard.imageDiff` | Image diff for changed PNG/JPEG/GIF/WebP: side by side, slider, onion skin |
+| `hunkyard-impact.js` | `window.hunkyard.impact` | Impact pill and panel: callers and tests of what a file's diff changes |
+| `hunkyard-risk.js` | `window.hunkyard.risk` | Explainable risk score per file for the overview's "By risk" order |
 | `hunkyard-renderer-mermaid.js` | (registers `mermaid` twice) | Built-in Mermaid renderer: a fence registration for ```` ```mermaid ````, a file registration for `*.mermaid` / `*.mmd` |
 | `hunkyard-code-highlight.js` | `window.hunkyard.codeHighlight` | Shiki highlighting for fenced code (comments, documents) via Pierre's worker pool |
 | `hunkyard-diff-renderer.js` | `window.hunkyard.diffRenderer` | Word-level diff for the rendered markdown diff (files mode rounds) |

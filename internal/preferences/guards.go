@@ -298,7 +298,7 @@ func (s *Store) evaluateCommand(guards []guard, action gitAction, command, cwd s
 			dir = filepath.Join(cwd, dir)
 		}
 	}
-	repo, _ := repositoryKey(cwd)
+	repo, _ := RepositoryKey(cwd)
 	for _, g := range guards {
 		r := s.activeRule(g.RuleID)
 		if r == nil {

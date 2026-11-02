@@ -1,7 +1,7 @@
 // hunkyard-yard.js — the Preference Yard: what hunkyard-preferences loads,
 // learns and blocks. Rendered into the settings overlay's Preferences tab.
 //
-// Reads: /api/preferences/{rules,persona,pipeline,loads,activity,health}; writes (same-origin
+// Reads: /api/preferences/{rules,persona,pipeline,loads,activity,health,insights}; writes (same-origin
 // POST): /api/preferences/rules, /api/preferences/rules/{id}/{retire,promote}, /api/preferences/maintenance.
 // Depends on no other window.hunkyard namespace.
 (function () {
@@ -14,6 +14,7 @@
     { id: 'persona', label: 'Persona' },
     { id: 'loads', label: 'Loads' },
     { id: 'activity', label: 'Activity' },
+    { id: 'insights', label: 'Insights' },
     { id: 'health', label: 'Health' },
   ];
 
@@ -90,6 +91,7 @@
         : '<span class="yard-label yard-label--repo">' + esc(repoName(rule.repo_key)) + '</span>';
       var surfaces = (rule.surfaces || []).map(function (s) { return '<span class="yard-label">' + esc(s) + '</span>'; }).join('');
       var violations = rule.violations ? '<span class="yard-label yard-label--violated">' + rule.violations + ' violation' + (rule.violations === 1 ? '' : 's') + '</span>' : '';
+      var dismissals = rule.dismissals ? '<span class="yard-label" title="Rule findings a reviewer dismissed">' + rule.dismissals + ' dismissed</span>' : '';
       var actions = '';
       if (isActive(rule)) {
         if (rule.scope_kind === 'repository') actions += '<button type="button" class="btn btn-sm yard-btn" data-yard-action="promote" data-rule-id="' + esc(rule.id) + '">Make global</button>';
@@ -101,7 +103,7 @@
       var meta = [observations, ORIGIN_LABELS[rule.origin] || rule.origin, rule.updated_at ? 'updated ' + shortTime(rule.updated_at) : ''].filter(Boolean).join(' · ');
       html += '<li class="yard-row' + (confirmRetire === rule.id ? ' is-confirming' : '') + '">' + statusDot(rule.status, STATUS_LABELS[rule.status] || rule.status) +
         '<div class="yard-row-main"><div class="yard-row-title">' + esc(rule.directive) + '</div>' +
-        '<div class="yard-row-labels">' + scope + surfaces + violations + '</div>' +
+        '<div class="yard-row-labels">' + scope + surfaces + violations + dismissals + '</div>' +
         (meta ? '<div class="yard-row-meta">' + esc(meta) + '</div>' : '') + '</div>' +
         '<div class="yard-row-actions">' + actions + '</div></li>';
     });
@@ -230,6 +232,49 @@
     }).join('') + '</ol>';
   }
 
+  var INSIGHT_WINDOWS = [[7, '7 days'], [30, '30 days'], [90, '90 days'], [0, 'All time']];
+
+  function duration(seconds) {
+    var minutes = Math.round((seconds || 0) / 60);
+    if (minutes < 60) return minutes + 'm';
+    var hours = Math.floor(minutes / 60);
+    return hours + 'h' + (minutes % 60 ? ' ' + (minutes % 60) + 'm' : '');
+  }
+
+  function insightsToolbarHTML(days) {
+    return '<div class="yard-filter" role="group" aria-label="Window">' + INSIGHT_WINDOWS.map(function (w) {
+      var on = w[0] === days;
+      return '<button type="button" class="toggle-btn' + (on ? ' active' : '') + '" data-yard-days="' + w[0] + '" aria-pressed="' + on + '">' + w[1] + '</button>';
+    }).join('') + '</div>';
+  }
+
+  // How the reviews of the window went, from hunkyard stats.
+  function insightsHTML(ri) {
+    var window = ri.window_days ? 'the last ' + ri.window_days + ' days' : 'all time';
+    if (!ri.reviews) return empty('No reviews ended in ' + window + '.');
+    var stat = function (value, label) { return '<div class="yard-stat"><strong>' + esc(value) + '</strong> ' + esc(label) + '</div>'; };
+    var round1 = function (n) { return Math.round((n || 0) * 10) / 10; };
+    var stats = '<div class="yard-stats">' +
+      stat(ri.reviews, ri.reviews === 1 ? 'review' : 'reviews') + stat(ri.approved, 'approved') +
+      stat(round1(ri.rounds_per_review.median), 'median rounds (max ' + round1(ri.rounds_per_review.max) + ')') +
+      stat(round1(ri.comments_per_round), 'comments per round') +
+      (ri.approved ? stat(duration(ri.approve_seconds.median), 'median time to approve') : '') + '</div>';
+    var labels = Object.keys(ri.by_label || {}).sort().map(function (k) {
+      return '<span class="yard-label">' + esc(k) + ' ' + ri.by_label[k] + '</span>';
+    }).join('');
+    var r = ri.by_resolution || {};
+    var comments = labels ? '<h4 class="yard-subhead">Comments</h4><div class="yard-row-labels">' + labels + '</div>' +
+      '<p class="yard-row-meta">' + (r.resolved || 0) + ' resolved · ' + (r.unresolved || 0) + ' open · ' + (r.claim_unchanged || 0) + ' claimed fixed but unchanged</p>' : '';
+    var repos = (ri.by_repository || []).length ? '<h4 class="yard-subhead">Repositories</h4><ul class="yard-list">' + ri.by_repository.map(function (x) {
+      return '<li class="yard-row"><span class="yard-row-title">' + esc(x.repository) + '</span><span class="yard-row-meta">' + x.reviews + ' review' + (x.reviews === 1 ? '' : 's') + ' · ' + x.comments + ' comments</span></li>';
+    }).join('') + '</ul>' : '';
+    var rules = (ri.rules || []).length ? '<h4 class="yard-subhead">Rules behind comments</h4><ul class="yard-list">' + ri.rules.map(function (x) {
+      return '<li class="yard-row"><span class="yard-row-title">' + esc(x.directive || x.rule_id) + '</span><span class="yard-row-meta">' +
+        x.comments + ' comments · ' + x.confirmed + ' confirmed · ' + x.dismissed + ' dismissed</span></li>';
+    }).join('') + '</ul>' : '';
+    return '<div class="yard-insights">' + stats + comments + repos + rules + '</div>';
+  }
+
   // Recent sessions and the rules each received, with why each was loaded.
   function loadsHTML(sessions) {
     if (!sessions || !sessions.length) return empty('No session has loaded a rule yet.');
@@ -338,7 +383,7 @@
     opts = opts || {};
     var fetchJSON = opts.fetchJSON || defaultFetch;
     var postJSON = opts.postJSON || defaultPost;
-    var state = { view: VIEWS[0].id, filter: { status: 'active' }, persona: '', limit: RULES_BATCH, confirmRetire: '', rules: [] };
+    var state = { view: VIEWS[0].id, filter: { status: 'active' }, persona: '', limit: RULES_BATCH, confirmRetire: '', rules: [], insightsDays: 30 };
     // Responses are kept until something changes them, so switching back to
     // a view is instant; every write clears them.
     var cache = {};
@@ -407,6 +452,11 @@
       persona: function () { return load('/api/preferences/persona').then(function (f) { return { body: personaHTML(f, state.persona, markdownRenderer()) }; }); },
       loads: function () { return load('/api/preferences/loads').then(function (l) { return { body: loadsHTML(l) }; }); },
       activity: function () { return load('/api/preferences/activity?limit=200').then(function (e) { return { body: activityHTML(e) }; }); },
+      insights: function () {
+        return load('/api/preferences/insights?days=' + state.insightsDays).then(function (ri) {
+          return { tools: insightsToolbarHTML(state.insightsDays), body: insightsHTML(ri) };
+        });
+      },
       health: function () {
         return load('/api/preferences/health').then(function (h) {
           noteAttention(attentionCount(h));
@@ -509,8 +559,9 @@
     }
 
     root.addEventListener('click', function (event) {
-      var target = event.target.closest('[data-yard-view],[data-yard-action],[data-persona-file]');
+      var target = event.target.closest('[data-yard-view],[data-yard-action],[data-persona-file],[data-yard-days]');
       if (!target) return;
+      if (target.hasAttribute('data-yard-days')) { state.insightsDays = Number(target.getAttribute('data-yard-days')); show('insights'); return; }
       if (target.hasAttribute('data-yard-view')) { show(target.getAttribute('data-yard-view')); return; }
       if (target.hasAttribute('data-persona-file')) { showPersonaFile(target); return; }
       var action = target.getAttribute('data-yard-action');
@@ -594,7 +645,7 @@
   var api = {
     render: render, tabsHTML: tabsHTML, rulesHTML: rulesHTML, rulesToolbarHTML: rulesToolbarHTML, filterRules: filterRules,
     pipelineHTML: pipelineHTML, pipelineToolbarHTML: pipelineToolbarHTML, personaHTML: personaHTML, activityHTML: activityHTML,
-    loadsHTML: loadsHTML, healthHTML: healthHTML, reviewHTML: reviewHTML, attentionCount: attentionCount, errorHTML: errorHTML,
+    loadsHTML: loadsHTML, healthHTML: healthHTML, insightsHTML: insightsHTML, insightsToolbarHTML: insightsToolbarHTML, reviewHTML: reviewHTML, attentionCount: attentionCount, errorHTML: errorHTML,
   };
   if (typeof window !== 'undefined') {
     window.hunkyard = window.hunkyard || {};

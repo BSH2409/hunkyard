@@ -135,3 +135,36 @@ func TestYardRepositoryRuleUsesTheReviewedRepository(t *testing.T) {
 		t.Errorf("repository rule not keyed to the reviewed repository: %s", rules.Body)
 	}
 }
+
+func TestYardInsights(t *testing.T) {
+	if !preferences.SupportedPlatform {
+		t.Skip(preferences.ErrUnsupportedPlatform.Error())
+	}
+	srv, _ := yardServer(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	cases := []struct {
+		name, method, path string
+		want               int
+	}{
+		{"default window", http.MethodGet, "/api/preferences/insights", http.StatusOK},
+		{"all time", http.MethodGet, "/api/preferences/insights?days=0", http.StatusOK},
+		{"bad days", http.MethodGet, "/api/preferences/insights?days=-3", http.StatusBadRequest},
+		{"not a number", http.MethodGet, "/api/preferences/insights?days=week", http.StatusBadRequest},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := yardRequest(srv, tc.method, tc.path, "same-origin")
+			if rec.Code != tc.want {
+				t.Fatalf("%s = %d %s", tc.name, rec.Code, rec.Body)
+			}
+			if tc.want == http.StatusOK && !strings.Contains(rec.Body.String(), `"window_days"`) {
+				t.Fatalf("body = %s", rec.Body)
+			}
+		})
+	}
+	if rec := yardRequest(srv, http.MethodPost, "/api/preferences/insights", "same-origin"); rec.Code != http.StatusNotFound && rec.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("POST insights = %d", rec.Code)
+	}
+}

@@ -39,7 +39,7 @@ func (v *proposalValidator) validateAction(action map[string]any) error {
 		}
 		return v.personalProposed(proposed, evidence, true)
 	case "confirm_rule":
-		if len(evidence) == 0 || len(targets) > 0 || existing == nil || proposed != nil || existing["origin"] == "source_pack" || !slices.Contains([]string{"candidate", "active", "core"}, textField(existing["status"])) {
+		if len(evidence) == 0 || len(targets) > 0 || existing == nil || proposed != nil || importedDefault(existing) || !slices.Contains([]string{"candidate", "active", "core"}, textField(existing["status"])) {
 			return proposalError("confirmation needs a live personal rule and evidence")
 		}
 		return validateScopeEvidence(record(existing["scope"]), evidence)
@@ -98,7 +98,7 @@ func (v *proposalValidator) validateAction(action map[string]any) error {
 			return proposalError("merge must preserve merged identities without adding conflicts")
 		}
 	case "refine_rule", "change_scope":
-		if existing == nil || len(targets) != 1 || targets[0] != id || proposed == nil || existing["origin"] == "source_pack" || !sameProvenance(existing, proposed) {
+		if existing == nil || len(targets) != 1 || targets[0] != id || proposed == nil || importedDefault(existing) || !sameProvenance(existing, proposed) {
 			return proposalError("rewrite needs one matching personal target and preserved provenance")
 		}
 		if !preservedRelationships(existing, proposed) {
@@ -142,7 +142,7 @@ func (v *proposalValidator) validateAction(action map[string]any) error {
 			return v.personalOrSource(proposed, v.mergedObservations([]rule{existing}, action), existing)
 		}
 	case "supersede_rule":
-		if len(targets) != 1 || v.rules[targets[0]] == nil || id == "" || id == targets[0] || existing != nil && existing["origin"] == "source_pack" {
+		if len(targets) != 1 || v.rules[targets[0]] == nil || id == "" || id == targets[0] || existing != nil && importedDefault(existing) {
 			return proposalError("supersession needs a distinct personal successor and one predecessor")
 		}
 		if proposed != nil {

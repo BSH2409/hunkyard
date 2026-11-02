@@ -3,6 +3,7 @@ package session
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/BSH2409/hunkyard/internal/feedback"
 	"os"
 	"path/filepath"
 	"time"
@@ -67,6 +68,8 @@ type writeFilesSnapshot struct {
 	// daemon-side mutators (set via s.SetStory) are actually persisted —
 	// buildHunkyardJSON otherwise only preserves whatever was already on disk.
 	story                   *Story
+	toolMarks               map[string]ToolMarks
+	decisions               []feedback.DecisionRequest
 	pendingRemoteDeletes    []RemoteRef
 	lastLoadedRemoteDeletes map[RemoteRef]struct{}
 	deletedCommentIDs       map[string]map[string]struct{}
@@ -157,6 +160,8 @@ func buildHunkyardJSON(snap writeFilesSnapshot) HunkyardJSON {
 		cj.CWD = snap.cwd
 	}
 	cj.Story = snap.story
+	cj.ToolMarks = snap.toolMarks
+	cj.Decisions = snap.decisions
 	cj.PendingRemoteDeletes = reconcilePendingRemoteDeletes(
 		snap.pendingRemoteDeletes, cj.PendingRemoteDeletes, snap.lastLoadedRemoteDeletes,
 	)
@@ -255,7 +260,7 @@ func mergeFileSnapshotIntoHunkyardJSON(cj *HunkyardJSON, fs writeFileSnapshot) {
 
 func hunkyardJSONIsEmpty(cj HunkyardJSON) bool {
 	return len(cj.Files) == 0 && len(cj.ReviewComments) == 0 &&
-		cj.Story == nil && len(cj.PendingRemoteDeletes) == 0
+		cj.Story == nil && len(cj.PendingRemoteDeletes) == 0 && len(cj.ToolMarks) == 0 && len(cj.Decisions) == 0
 }
 
 // WriteFiles writes the review file to disk.
@@ -418,6 +423,8 @@ func (s *Session) snapshotForWrite(hunkyardPath string) writeFilesSnapshot {
 		cliArgs:                 s.CLIArgs,
 		cwd:                     s.CWD,
 		story:                   s.story,
+		toolMarks:               cloneToolMarks(s.toolMarks),
+		decisions:               cloneDecisions(s.decisions),
 		pendingRemoteDeletes:    pendDeletes,
 		lastLoadedRemoteDeletes: lastLoaded,
 		deletedCommentIDs:       deletedByPath,

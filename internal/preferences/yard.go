@@ -20,6 +20,7 @@ type YardRule struct {
 	Surfaces     []string `json:"surfaces"`
 	Observations int      `json:"observations"`
 	Violations   int      `json:"violations"`
+	Dismissals   int      `json:"dismissals"`
 	UpdatedAt    string   `json:"updated_at"`
 }
 
@@ -30,11 +31,14 @@ func (s *Store) YardRules() ([]YardRule, error) {
 	if err != nil || current == nil {
 		return []YardRule{}, err
 	}
-	violations := map[string]int{}
+	violations, dismissals := map[string]int{}, map[string]int{}
 	events, _ := s.readActivity()
 	for _, e := range events {
-		if e.Kind == activityViolated || e.Kind == activityBlocked {
+		switch e.Kind {
+		case activityViolated, activityBlocked, activityRuleConfirmed:
 			violations[e.RuleID]++
+		case activityRuleDismissed:
+			dismissals[e.RuleID]++
 		}
 	}
 	rules := []YardRule{}
@@ -42,7 +46,7 @@ func (s *Store) YardRules() ([]YardRule, error) {
 		scope := record(r["scope"])
 		observations, _ := r["observations"].([]any)
 		id := textField(r["id"])
-		rules = append(rules, YardRule{ID: id, Directive: textField(r["directive"]), Status: textField(r["status"]), Origin: textField(r["origin"]), ScopeKind: textField(scope["kind"]), RepoKey: textField(scope["repo_key"]), Surfaces: stringValues(r["surfaces"]), Observations: len(observations), Violations: violations[id], UpdatedAt: textField(r["updated_at"])})
+		rules = append(rules, YardRule{ID: id, Directive: textField(r["directive"]), Status: textField(r["status"]), Origin: textField(r["origin"]), ScopeKind: textField(scope["kind"]), RepoKey: textField(scope["repo_key"]), Surfaces: stringValues(r["surfaces"]), Observations: len(observations), Violations: violations[id], Dismissals: dismissals[id], UpdatedAt: textField(r["updated_at"])})
 	}
 	sort.SliceStable(rules, func(i, j int) bool { return rules[i].UpdatedAt > rules[j].UpdatedAt })
 	return rules, nil

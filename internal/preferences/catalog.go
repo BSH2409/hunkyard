@@ -193,6 +193,9 @@ func (c *catalog) retire(id string) (rule, error) {
 	if next["origin"] == "source_pack" {
 		return nil, fmt.Errorf("source-pack rules cannot be retired directly")
 	}
+	if next["origin"] == "team_pack" {
+		return nil, fmt.Errorf("team pack rules are removed with their pack (preferences pack remove)")
+	}
 	if next["status"] == "superseded" {
 		return next, nil
 	}
@@ -222,11 +225,16 @@ func rulePrecedence(r rule) []string {
 	if scope["kind"] == "repository" {
 		kind = "0"
 	}
-	origin := "2"
-	if r["origin"] == "feedback" || r["origin"] == "inferred" {
+	var origin string
+	switch r["origin"] {
+	case "feedback", "inferred":
 		origin = "0"
-	} else if r["origin"] == "source_pack" {
+	case "team_pack":
 		origin = "1"
+	case "source_pack":
+		origin = "2"
+	default:
+		origin = "3"
 	}
 	tier := "1"
 	if r["load_tier"] == "core" {

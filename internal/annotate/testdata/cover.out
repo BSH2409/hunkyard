@@ -1,0 +1,4 @@
+mode: set
+example.com/demo/server.go:3.14,5.2 1 1
+example.com/demo/server.go:7.20,9.3 2 0
+example.com/demo/util/util.go:1.1,2.2 1 0

@@ -19,8 +19,8 @@ type Selection struct {
 
 const precedenceSentence = "Current user instructions and repository standards win. Repository preferences override global preferences; personal preferences override source-pack defaults."
 
-var selectionGroups = []string{"Repository surface preferences", "Repository core preferences", "Global surface preferences", "Global core preferences", "Source-pack surface defaults", "Source-pack core defaults"}
-var omissionOrder = []int{4, 5, 2, 3, 0, 1}
+var selectionGroups = []string{"Repository surface preferences", "Repository core preferences", "Global surface preferences", "Global core preferences", "Team pack defaults", "Source-pack surface defaults", "Source-pack core defaults"}
+var omissionOrder = []int{5, 6, 4, 2, 3, 0, 1}
 var personaSurfacePatterns = map[string]*regexp.Regexp{
 	"api":           regexp.MustCompile(`(?i)\b(?:apis?|controllers?|endpoints?|serializers?|request contracts?|response shapes?)\b`),
 	"architecture":  regexp.MustCompile(`(?i)\b(?:architecture|architectural|mcp|tool contracts?)\b`),
@@ -51,11 +51,14 @@ func routedSurfaces(prompt string) []string {
 }
 func selectionGroup(r rule) int {
 	core := isCoreRule(r)
+	if r["origin"] == "team_pack" {
+		return 4
+	}
 	if r["origin"] == "source_pack" {
 		if core {
-			return 5
+			return 6
 		}
-		return 4
+		return 5
 	}
 	if record(r["scope"])["kind"] == "repository" {
 		if core {
@@ -123,11 +126,11 @@ func selectPersona(rules []rule, prompt, repoKey string) Selection {
 		active = append(active, r)
 		if isCoreRule(r) || overlapCount(stringValues(r["surfaces"]), surfaces) > 0 {
 			relevant = append(relevant, r)
-			if r["origin"] != "source_pack" {
+			if !importedDefault(r) {
 				personalDirectives[directiveKey(r)] = true
 			}
 		}
-		if r["origin"] != "source_pack" {
+		if !importedDefault(r) {
 			personalIDs[textField(r["id"])] = true
 			for _, field := range []string{"conflicts_with", "supersedes"} {
 				for _, id := range stringValues(r[field]) {
@@ -137,7 +140,7 @@ func selectPersona(rules []rule, prompt, repoKey string) Selection {
 		}
 	}
 	for _, r := range active {
-		if r["origin"] != "source_pack" {
+		if !importedDefault(r) {
 			continue
 		}
 		id := textField(r["id"])
@@ -156,7 +159,7 @@ func selectPersona(rules []rule, prompt, repoKey string) Selection {
 	}
 	selected := []rule{}
 	for _, r := range relevant {
-		if r["origin"] != "source_pack" || !blocked[textField(r["id"])] {
+		if !importedDefault(r) || !blocked[textField(r["id"])] {
 			selected = append(selected, r)
 		}
 	}
@@ -174,7 +177,7 @@ func selectPersona(rules []rule, prompt, repoKey string) Selection {
 	for estimatedTokens(selectionText(selected)) > 1500 && len(selected) > 0 {
 		removable := []int{}
 		for i, r := range selected {
-			if r["origin"] == "source_pack" || !slices.Contains(stringValues(r["surfaces"]), "naming") {
+			if importedDefault(r) || !slices.Contains(stringValues(r["surfaces"]), "naming") {
 				removable = append(removable, i)
 			}
 		}
@@ -226,7 +229,7 @@ func (s *Store) SelectPersona(prompt, cwd, repoKey string) (Selection, error) {
 		return Selection{}, err
 	}
 	if repoKey == "" {
-		repoKey, err = repositoryKey(cwd)
+		repoKey, err = RepositoryKey(cwd)
 		if err != nil {
 			return Selection{}, err
 		}

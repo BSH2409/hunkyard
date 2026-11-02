@@ -555,3 +555,19 @@ func TestAuditReviewDefaultMarkdownViewInvalidProjectKeepsGlobal(t *testing.T) {
 		t.Errorf("DefaultMarkdownView = %q, want empty (invalid value ignored)", got)
 	}
 }
+
+func TestAuditReviewRiskPatternsEndToEnd(t *testing.T) {
+	homeDir := t.TempDir()
+	testutil.SetHome(t, homeDir)
+	writeAuditReviewConfig(t, homeDir, `{"risk_patterns": ["**/crypto/**"]}`)
+	projectDir := t.TempDir()
+	writeAuditReviewConfig(t, projectDir, `{"risk_patterns": ["billing/**"]}`)
+	got := LoadConfig(projectDir).RiskPatterns
+	want := []string{"**/crypto/**", "billing/**"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("RiskPatterns = %v, want union %v (global first)", got, want)
+	}
+	if cfg := LoadConfig(t.TempDir()); len(cfg.RiskPatterns) != 1 {
+		t.Errorf("unset project kept only the global patterns: %v", cfg.RiskPatterns)
+	}
+}
