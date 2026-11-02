@@ -1,5 +1,48 @@
 # Changelog
 
+## v1.0.4 — 2026-11-02
+
+### Agent decisions
+
+- `hunkyard ask --session ID --option A --option B "Which one?"` puts a question to the reviewer. It appears in a **Questions from the agent** dock at the bottom right of the review, one question per page, with your options or a written answer, a review page that lists every question and answer, and **Submit answers**. The answers come back in the next feedback batch as `decisions`; a blocking question keeps Approve disabled until it is answered.
+
+### Tool results in the review
+
+- `hunkyard annotate --format coverprofile|lcov|sarif|go-test-json <file|->` imports test, coverage and static-analysis output into the open review. Failures and findings appear as comments marked as tool output (filter: **Tools**), uncovered lines are tinted in the gutter, and a file header shows its coverage. Running it again replaces that tool's earlier results. Tool output is never counted as your preference evidence.
+- Preference rules bound to a diff check (for example "no `console.log`", "every TODO has an owner") run over the diff when a review opens. Each hit is a finding you can **Confirm** or **Dismiss**; the verdicts become evidence for the rule.
+
+### Reading a change
+
+- **Impact.** Each changed file shows the callers and tests of the symbols its diff defines or removes (Git reviews; a textual search of tracked files, capped).
+- **Overview and risk order.** A Git review opens with an overview (branch, base to head, commits, file and line totals), and the file list can be ordered by an explainable risk score (auth, secrets, migrations and your own `risk_patterns`).
+- **Image diff.** A changed PNG, JPEG, GIF or WebP shows its base and head side by side, with a slider and an onion-skin mode.
+
+### Across reviews
+
+- `hunkyard inbox` and the `/inbox` page list every running and paused review on the machine with its round, open comments and agent state, and resume a paused one.
+- `hunkyard stats` and the Preferences tab show how your reviews went over a window: rounds and time to approve, comments per round, how comments ended (resolved, open, claimed fixed but unchanged), and which rules you confirmed or dismissed.
+- **Preference packs.** A repository commits conventions in `.hunkyard/preferences-pack/` and every session in it loads them. `hunkyard preferences pack export`, `import`, `list` and `remove` share a pack with a teammate; repository rules can be exported to seed one. A pack installs once per name: importing it for another repository or scope is refused until you remove the first.
+
+### Security
+
+- Live mode no longer trusts the menu options a reviewed page sends. A page could include markup in them and run script in the review page, which could read or wipe the review.
+- The live proxy checks the `Host` header like the review server (DNS rebinding). A request another site sends through it reaches your app as the browser sent it, without the configured session cookies, so your app's own CSRF check decides.
+- **A preview page now has its own port** (the review port plus one, as a live proxy already does) and cannot reach the review page's API. Docker users must publish that port. Files beside the previewed page are served only if they stay inside its folder, including through symlinks. HTML and SVG served from the repository by the review server are sandboxed.
+- A project's prompt files must stay inside the project; before, a repository could name any file.
+
+### Fixes
+
+- **Feedback the agent missed.** After the first round, a comment that was reopened because the agent's reply did not change the code, or whose label or blocking flag you changed, was not sent again. It is now.
+- **Comments and replies.** `hunkyard comment --selector`, bulk replies, renames, scope changes and `hunkyard story` no longer overwrite a comment added at the same moment. A comment added during a focus change, or in the last moments before the agent finishes a round, is kept.
+- **Rounds.** In files mode, comments follow their lines when the agent edits a file and finishes before the next poll, and a round with no edits no longer moves them.
+- **Resume.** The stale-review sweep that runs when you start a review can no longer delete the review you are resuming. Live, preview and range reviews resume as what they were (a range keeps its pinned commits), and live reviews keep their questions and overall comments.
+- **Sessions.** Live and preview reviews belong to the Claude, Codex or terminal session that started them, as other reviews do. `feedback await --follow` finds paused plan and `--output` reviews and waits out a resumed daemon's start-up; `hunkyard stop` clears paused reviews.
+- **Publishing** works for a file outside the repository and on a plain-HTTP LAN address, a pin screenshot that a published batch points to is kept when the pin moves, and replies you write under a tool finding count as your feedback.
+- **Preferences.** A rule you restate replaces an imported or retired copy; maintenance retries on the current batch; a guard no longer lets `git add . && git commit` through, applies by the repository the command runs in, and spends your one-time override only when the command passes; "open a PR and merge" counts as asking to commit, "do not create a PR" does not.
+- **Git and diffs.** A file replaced by a symlink, a rename when `diff.renames=false`, copy detection, merge and root commits, and renamed or non-ASCII paths in line counts all show correctly. `go test -json`, coverage and lcov imports no longer mix packages or mark covered lines uncovered.
+- **Review page.** A selection that crosses removed and added lines gives the line you end on; Ctrl+Enter cannot post twice or save an unfinished image upload; edits and open replies survive a refresh or scope change; open reply and edit boxes survive a live-mode reload; drafts are kept per review; pins on elements with unusual ids and on SVG resolve; the story view scrolls on phones.
+- Smaller: IPv6 addresses in review URLs, disabling two shortcuts, a folder named `constructor` in the file tree, a stuck daemon no longer hangs `hunkyard story`, `hunkyard annotate` works from a subdirectory.
+
 ## v1.0.3 — 2026-11-01
 
 ### Speed on large repositories
