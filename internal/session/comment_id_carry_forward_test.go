@@ -99,8 +99,8 @@ func TestRoundBumpSaveLoadHasNoDuplicate(t *testing.T) {
 	}
 
 	resumed := &Session{
-		RepoRoot:       s.RepoRoot,
-		ReviewFilePath: identity,
+		RepoRoot:  s.RepoRoot,
+		ReviewDir: identity,
 		Files: []*FileEntry{{
 			Path:     "plan.md",
 			AbsPath:  s.Files[0].AbsPath,
@@ -174,10 +174,10 @@ func newCarryForwardRoundSession(t *testing.T) (*Session, string) {
 		t.Fatal(err)
 	}
 	s := &Session{
-		Mode:           "files",
-		RepoRoot:       dir,
-		ReviewFilePath: identity,
-		ReviewRound:    1,
+		Mode:        "files",
+		RepoRoot:    dir,
+		ReviewDir:   identity,
+		ReviewRound: 1,
 		Files: []*FileEntry{{
 			Path:            "plan.md",
 			AbsPath:         path,

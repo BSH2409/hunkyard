@@ -253,7 +253,7 @@ func TestLoadPushReview(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		identity, err := daemon.ReviewFilePath(daemon.SessionKey(cwd, "", nil))
+		identity, err := daemon.ReviewDir(daemon.SessionKey(cwd, "", nil))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -286,7 +286,7 @@ func TestLoadPushReview(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		identity, err := daemon.ReviewFilePath(daemon.SessionKey(cwd, "", nil))
+		identity, err := daemon.ReviewDir(daemon.SessionKey(cwd, "", nil))
 		if err != nil {
 			t.Fatal(err)
 		}

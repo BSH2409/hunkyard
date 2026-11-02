@@ -997,30 +997,30 @@ test('waitForSession: AbortSignal aborts mid-poll', async () => {
 // lock — live-mode used to flicker without it), persistence on pointerup,
 // and min clamping. All four are pinned below.
 //
-// Pure math via computeResizeDelta first, then DOM-level behaviour through
+// Pure math via resizedWidth first, then DOM-level behaviour through
 // a minimal element/event stub (jsdom-free for speed and parity with the
 // other tests in this file).
-test('computeResizeDelta: right-edge handle, drag right grows the panel', () => {
+test('resizedWidth: right-edge handle, drag right grows the panel', () => {
   // edge=right, dir=+1; dx=+100 -> w = 400 + 100 = 500
-  assert.equal(shared.computeResizeDelta(400, 1000, 1100, 'right', 200), 500);
+  assert.equal(shared.resizedWidth(400, 1000, 1100, 'right', 200), 500);
 });
 
-test('computeResizeDelta: left-edge handle, drag left grows the panel', () => {
+test('resizedWidth: left-edge handle, drag left grows the panel', () => {
   // edge=left, dir=-1; dx=-100 -> delta=+100 -> w=500
-  assert.equal(shared.computeResizeDelta(400, 1000, 900, 'left', 200), 500);
+  assert.equal(shared.resizedWidth(400, 1000, 900, 'left', 200), 500);
 });
 
-test('computeResizeDelta: clamps to min', () => {
+test('resizedWidth: clamps to min', () => {
   // left edge, dragging right shrinks; w would be -600, clamps at 200
-  assert.equal(shared.computeResizeDelta(400, 1000, 2000, 'left', 200), 200);
+  assert.equal(shared.resizedWidth(400, 1000, 2000, 'left', 200), 200);
 });
 
-test('computeResizeDelta: NO upper clamp', () => {
-  assert.equal(shared.computeResizeDelta(400, 1000, -1000, 'left', 200), 2400);
+test('resizedWidth: NO upper clamp', () => {
+  assert.equal(shared.resizedWidth(400, 1000, -1000, 'left', 200), 2400);
 });
 
-test('computeResizeDelta: default min is 200', () => {
-  assert.equal(shared.computeResizeDelta(100, 0, 1000, 'left'), 200);
+test('resizedWidth: default min is 200', () => {
+  assert.equal(shared.resizedWidth(100, 0, 1000, 'left'), 200);
 });
 
 // ----- DOM-level behaviour -----

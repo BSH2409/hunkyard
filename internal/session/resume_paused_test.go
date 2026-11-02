@@ -83,7 +83,7 @@ func TestStopClearsPausedMarker(t *testing.T) {
 	home := t.TempDir()
 	setHome(t, home)
 	key := "abcdef012345"
-	dir, err := daemon.ReviewFilePath(key)
+	dir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}

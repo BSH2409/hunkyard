@@ -134,12 +134,12 @@ func TestGitVCS_Methods(t *testing.T) {
 		t.Errorf("UntrackedFiles(clean) = %+v, want none", untracked)
 	}
 
-	tracked, err := g.AllTrackedFiles(dir)
+	tracked, err := g.ListRepoFiles(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if want := []string{"README.md", "a.txt"}; !reflect.DeepEqual(tracked, want) {
-		t.Errorf("AllTrackedFiles = %v, want %v", tracked, want)
+		t.Errorf("ListRepoFiles = %v, want %v", tracked, want)
 	}
 
 	remotes, err := g.RemoteBranches(dir)
@@ -248,13 +248,13 @@ func TestResolveDefaultBranchSHA_NilVCS(t *testing.T) {
 }
 
 func TestIsCommitish(t *testing.T) {
-	if !IsCommitish("abc1234") {
+	if !isHexSHA("abc1234") {
 		t.Error("expected true for hex sha")
 	}
-	if IsCommitish("not-a-sha") {
+	if isHexSHA("not-a-sha") {
 		t.Error("expected false for non-hex")
 	}
-	if IsCommitish("-bad") {
+	if isHexSHA("-bad") {
 		t.Error("expected false for option injection")
 	}
 }

@@ -21,7 +21,7 @@ func (s *Server) validatePinScreenshot(shot *session.PinScreenshot, status, reas
 	if shot == nil {
 		return nil
 	}
-	path, mime, err := attachmentPathFor(s.reviewPath, shot.File)
+	path, mime, err := session.AttachmentPathFor(s.reviewPath, shot.File)
 	if err != nil || mime != "image/png" {
 		return errors.New("pin_screenshot.file must be a PNG attachment of this review")
 	}
@@ -41,7 +41,7 @@ func (s *Server) removeAttachment(filename string) {
 	} else if published, err := store.ReferencesAttachment(filename); err != nil || published {
 		return
 	}
-	if path, _, err := attachmentPathFor(s.reviewPath, filename); err == nil {
+	if path, _, err := session.AttachmentPathFor(s.reviewPath, filename); err == nil {
 		_ = os.Remove(path)
 	}
 }

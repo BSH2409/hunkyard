@@ -38,7 +38,7 @@ func TestHandleRoundCompleteFiles_DiscoversNewFiles(t *testing.T) {
 		t.Fatalf("NewSessionFromFiles: %v", err)
 	}
 	sess.CLIArgs = []string{watched}
-	sess.ReviewFilePath = filepath.Join(tmp, ".hunkyard-review")
+	sess.ReviewDir = filepath.Join(tmp, ".hunkyard-review")
 	sess.InitTestChannels()
 
 	srv, err := server.NewServer(sess, server.FrontendFS, "tester", "test", 0, "")

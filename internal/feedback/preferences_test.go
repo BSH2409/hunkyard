@@ -20,7 +20,7 @@ func TestReviewCandidateHonorsHostClassificationWithoutPromotion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decisions := []PreferenceDecision{{CommentID: batch.Comments[0].ID, Revision: batch.Comments[0].Revision, Kind: "candidate"}}
+	decisions := []PreferenceClassification{{CommentID: batch.Comments[0].ID, Revision: batch.Comments[0].Revision, Kind: "candidate"}}
 	report, err := store.Learn(prefs, batch.ID, decisions, "owner", repo)
 	if err != nil || report.Outcomes[0].Status != "captured" {
 		t.Fatalf("host classification was discarded: %#v %v", report, err)
@@ -84,19 +84,19 @@ func TestReviewPreferenceDecisionsRequireEveryRevision(t *testing.T) {
 	if _, err := store.Learn(prefs, batch.ID, nil, "owner", repo); err == nil {
 		t.Fatal("missing decision accepted")
 	}
-	decision := PreferenceDecision{CommentID: batch.Comments[0].ID, Revision: 1, Kind: "ignore"}
-	if _, err := store.Learn(prefs, batch.ID, []PreferenceDecision{decision, decision}, "owner", repo); err == nil {
+	decision := PreferenceClassification{CommentID: batch.Comments[0].ID, Revision: 1, Kind: "ignore"}
+	if _, err := store.Learn(prefs, batch.ID, []PreferenceClassification{decision, decision}, "owner", repo); err == nil {
 		t.Fatal("duplicate decision accepted")
 	}
 	decision.CommentID = "unknown"
-	if _, err := store.Learn(prefs, batch.ID, []PreferenceDecision{decision}, "owner", repo); err == nil {
+	if _, err := store.Learn(prefs, batch.ID, []PreferenceClassification{decision}, "owner", repo); err == nil {
 		t.Fatal("unknown decision accepted")
 	}
 	if err := store.Ack(batch.ID); err == nil {
 		t.Fatal("unclassified review acknowledged")
 	}
 	decision.CommentID = batch.Comments[0].ID
-	report, err := store.Learn(prefs, batch.ID, []PreferenceDecision{decision}, "owner", repo)
+	report, err := store.Learn(prefs, batch.ID, []PreferenceClassification{decision}, "owner", repo)
 	if err != nil || report.Outcomes[0].Status != "ignored" {
 		t.Fatalf("ignore: %#v %v", report, err)
 	}
@@ -107,7 +107,7 @@ func TestReviewPreferenceDecisionsRequireEveryRevision(t *testing.T) {
 
 func TestReviewPreferenceReplayAndRepositoryScope(t *testing.T) {
 	store, prefs, batch, repo, root := preferenceFixture(t)
-	decisions := []PreferenceDecision{{CommentID: batch.Comments[0].ID, Revision: 1, Kind: "directive", Directive: "Prefer clear Go names", Scope: "repository", Surfaces: []string{"naming"}}}
+	decisions := []PreferenceClassification{{CommentID: batch.Comments[0].ID, Revision: 1, Kind: "directive", Directive: "Prefer clear Go names", Scope: "repository", Surfaces: []string{"naming"}}}
 	store.beforePreferenceCheckpoint = func() error { return errors.New("simulated crash after capture") }
 	if _, err := store.Learn(prefs, batch.ID, decisions, "owner", repo); err == nil {
 		t.Fatal("checkpoint interruption ignored")
@@ -141,7 +141,7 @@ func TestReviewPreferencePrivacy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	report, err := store.Learn(prefs, batch.ID, []PreferenceDecision{{CommentID: batch.Comments[0].ID, Revision: 2, Kind: "candidate"}}, "owner", repo)
+	report, err := store.Learn(prefs, batch.ID, []PreferenceClassification{{CommentID: batch.Comments[0].ID, Revision: 2, Kind: "candidate"}}, "owner", repo)
 	if err != nil || report.Outcomes[0].Status != "rejected" {
 		t.Fatalf("privacy: %#v %v", report, err)
 	}
@@ -159,7 +159,7 @@ func TestReviewPreferencePartialFailureResumes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decisions := []PreferenceDecision{{CommentID: "human-1", Revision: 2, Kind: "ignore"}, {CommentID: "second", Revision: 1, Kind: "candidate"}}
+	decisions := []PreferenceClassification{{CommentID: "human-1", Revision: 2, Kind: "ignore"}, {CommentID: "second", Revision: 1, Kind: "candidate"}}
 	pending := filepath.Join(root, "hunkyard-preferences", "observations", "pending.jsonl")
 	if err := os.MkdirAll(pending, 0700); err != nil {
 		t.Fatal(err)
@@ -187,7 +187,7 @@ func TestLearnReportsFailedWhenCaptureErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decisions := []PreferenceDecision{{CommentID: batch.Comments[0].ID, Revision: 1, Kind: "candidate"}}
+	decisions := []PreferenceClassification{{CommentID: batch.Comments[0].ID, Revision: 1, Kind: "candidate"}}
 	report, _ := store.Learn(prefs, batch.ID, decisions, "owner", repo)
 	if len(report.Outcomes) != 1 || report.Outcomes[0].Status != "failed" {
 		t.Fatalf("unwritable store must report failed, not captured: %#v", report)
@@ -204,7 +204,7 @@ func TestLearnPassesCodeContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decisions := []PreferenceDecision{{CommentID: batch.Comments[0].ID, Revision: batch.Comments[0].Revision, Kind: "candidate"}}
+	decisions := []PreferenceClassification{{CommentID: batch.Comments[0].ID, Revision: batch.Comments[0].Revision, Kind: "candidate"}}
 	if _, err := store.Learn(prefs, batch.ID, decisions, "owner", repo); err != nil {
 		t.Fatal(err)
 	}
@@ -227,7 +227,7 @@ func TestLearnWithoutPreferenceSupportCompletesBatch(t *testing.T) {
 	previous := preferences.SupportedPlatform
 	preferences.SupportedPlatform = false
 	t.Cleanup(func() { preferences.SupportedPlatform = previous })
-	decisions := []PreferenceDecision{{CommentID: batch.Comments[0].ID, Revision: batch.Comments[0].Revision, Kind: "directive", Directive: "Prefer clear Go names.", Scope: "global", Surfaces: []string{"naming"}}}
+	decisions := []PreferenceClassification{{CommentID: batch.Comments[0].ID, Revision: batch.Comments[0].Revision, Kind: "directive", Directive: "Prefer clear Go names.", Scope: "global", Surfaces: []string{"naming"}}}
 	report, err := store.Learn(nil, batch.ID, decisions, "owner", repo)
 	if err != nil || len(report.Outcomes) != 1 || report.Outcomes[0].Status != "unsupported" {
 		t.Fatalf("unsupported learning: %#v %v", report, err)
@@ -247,7 +247,7 @@ func TestLearnIgnoresMachineComments(t *testing.T) {
 		t.Fatal(err)
 	}
 	human := batch.Comments[0]
-	decisions := []PreferenceDecision{{CommentID: human.ID, Revision: human.Revision, Kind: "ignore"}}
+	decisions := []PreferenceClassification{{CommentID: human.ID, Revision: human.Revision, Kind: "ignore"}}
 	report, err := store.Learn(prefs, batch.ID, decisions, "owner", repo)
 	if err != nil || len(report.Outcomes) != 1 {
 		t.Fatalf("machine comment required a decision: %#v %v", report, err)
@@ -270,9 +270,9 @@ func TestLearnIgnoresDecisionsForMachineComments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decisions := []PreferenceDecision{}
+	decisions := []PreferenceClassification{}
 	for _, c := range batch.Comments {
-		decisions = append(decisions, PreferenceDecision{CommentID: c.ID, Revision: c.Revision, Kind: "ignore"})
+		decisions = append(decisions, PreferenceClassification{CommentID: c.ID, Revision: c.Revision, Kind: "ignore"})
 	}
 	report, err := store.Learn(prefs, batch.ID, decisions, "owner", repo)
 	if err != nil || len(report.Outcomes) != 1 {

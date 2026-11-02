@@ -157,8 +157,8 @@ func recordSessionStats(sess *Session, author string, startedAt time.Time, appro
 		rec.ApprovedAt = rec.EndedAt
 	}
 
-	if sess.ReviewFilePath != "" {
-		rec.ReviewKey = filepath.Base(sess.ReviewFilePath)
+	if sess.ReviewDir != "" {
+		rec.ReviewKey = filepath.Base(sess.ReviewDir)
 	}
 
 	if err := appendSession(rec); err != nil {

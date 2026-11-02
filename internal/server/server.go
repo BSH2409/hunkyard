@@ -269,12 +269,12 @@ func isLoopbackHost(host string) bool {
 	return config.IsLoopbackHost(host)
 }
 
-// checkHost returns true if the request is allowed to proceed: the DNS-
+// hostAllowed returns true if the request is allowed to proceed: the DNS-
 // rebinding defense. A loopback bind accepts only loopback Host headers. Any
 // other bind (the default 0.0.0.0, for Docker) also accepts IP literals and
 // its own listen host, since a rebinding page always arrives under a DNS name
 // of its own; other names need --public-url.
-func (s *Server) checkHost(r *http.Request) bool {
+func (s *Server) hostAllowed(r *http.Request) bool {
 	return config.HostAllowed(s.listenHost, s.publicURLHost, r.Host)
 }
 
@@ -298,7 +298,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if !s.checkHost(r) {
+	if !s.hostAllowed(r) {
 		http.Error(w, s.hostForbiddenMessage(r), http.StatusForbidden)
 		return
 	}
@@ -306,8 +306,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Sec-Fetch-Site on requests they initiate. Cross-site values mean the
 	// request came from another origin (e.g. evil.com → 127.0.0.1). Missing
 	// header = non-browser client (CLI, curl, agent) — allow. same-origin =
-	// Hunkyard UI on this port — allow. DNS-rebinding is handled by checkHost.
-	if !checkSecFetchSite(r) {
+	// Hunkyard UI on this port — allow. DNS-rebinding is handled by hostAllowed.
+	if !secFetchSiteAllowed(r) {
 		http.Error(w, secFetchSiteForbiddenMessage(r), http.StatusForbidden)
 		return
 	}
@@ -349,7 +349,7 @@ func (s *Server) markRequestActivity(r *http.Request) {
 	}
 }
 
-// hostForbiddenMessage explains a checkHost rejection so a reverse-proxy /
+// hostForbiddenMessage explains a hostAllowed rejection so a reverse-proxy /
 // --public-url misconfig is diagnosable from the 403 body.
 func (s *Server) hostForbiddenMessage(r *http.Request) string {
 	host := requestHost(r.Host)
@@ -365,7 +365,7 @@ func (s *Server) hostForbiddenMessage(r *http.Request) string {
 	)
 }
 
-// secFetchSiteForbiddenMessage explains a checkSecFetchSite rejection.
+// secFetchSiteForbiddenMessage explains a secFetchSiteAllowed rejection.
 func secFetchSiteForbiddenMessage(r *http.Request) string {
 	return fmt.Sprintf(
 		"Forbidden: cross-origin browser request rejected (Sec-Fetch-Site: %q)",
@@ -373,11 +373,11 @@ func secFetchSiteForbiddenMessage(r *http.Request) string {
 	)
 }
 
-// checkSecFetchSite reports whether a request is allowed under the CSRF policy.
+// secFetchSiteAllowed reports whether a request is allowed under the CSRF policy.
 // Safe methods (GET/HEAD/OPTIONS) always pass. For state-changing methods:
 // absent Sec-Fetch-Site is allowed (CLI/curl); "same-origin" is allowed (UI);
 // any other value (notably "cross-site") is rejected.
-func checkSecFetchSite(r *http.Request) bool {
+func secFetchSiteAllowed(r *http.Request) bool {
 	switch r.Method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions:
 		return true
@@ -589,7 +589,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) { //nolint
 		resp["pr_additions"] = prInfo.Additions
 		resp["pr_deletions"] = prInfo.Deletions
 		resp["pr_changed_files"] = prInfo.ChangedFiles
-		resp["pr_author"] = prInfo.AuthorLogin
+		resp["pr_author"] = prInfo.AuthorName
 		resp["pr_created_at"] = prInfo.CreatedAt
 	}
 	writeJSON(w, resp)
@@ -1125,7 +1125,7 @@ func (s *Server) handleAllFileComments(w http.ResponseWriter, r *http.Request) {
 	byPath := sess.GetVisibleComments()
 	if hasRound && sess.Mode == "files" {
 		for path, comments := range byPath {
-			if atRound := commentsAtOrBeforeRound(comments, round); len(atRound) > 0 {
+			if atRound := session.CommentsAtOrBeforeRound(comments, round); len(atRound) > 0 {
 				byPath[path] = atRound
 			} else {
 				delete(byPath, path)
@@ -1159,7 +1159,7 @@ func (s *Server) handleFileComments(w http.ResponseWriter, r *http.Request) {
 		}
 		comments := s.session.Load().GetComments(path)
 		if hasRound && s.session.Load().Mode == "files" {
-			comments = commentsAtOrBeforeRound(comments, round)
+			comments = session.CommentsAtOrBeforeRound(comments, round)
 		}
 		writeJSON(w, comments)
 
@@ -1681,7 +1681,7 @@ func (s *Server) handleReviewComments(w http.ResponseWriter, r *http.Request) {
 		}
 		comments := s.session.Load().GetReviewComments()
 		if hasRound && s.session.Load().Mode == "files" {
-			comments = commentsAtOrBeforeRound(comments, round)
+			comments = session.CommentsAtOrBeforeRound(comments, round)
 		}
 		writeJSON(w, comments)
 
@@ -1948,7 +1948,7 @@ func (s *Server) handleFinish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if approved && !s.statsRecorded && !s.sessionStartedAt.IsZero() && !s.cfg.DisableStats {
-		recordSessionStats(sess, s.author, s.sessionStartedAt, true)
+		session.RecordSessionStats(sess, s.author, s.sessionStartedAt, true)
 		s.statsRecorded = true
 	}
 
@@ -2305,7 +2305,7 @@ func (s *Server) handleAttachmentUpload(w http.ResponseWriter, r *http.Request) 
 	}
 	data := buf[:n]
 
-	filename, err := saveAttachment(s.reviewPath, data)
+	filename, err := session.SaveAttachment(s.reviewPath, data)
 	if err != nil {
 		// MIME rejections deserve 415; everything else is 400.
 		if strings.HasPrefix(err.Error(), "unsupported image type") {
@@ -2319,7 +2319,7 @@ func (s *Server) handleAttachmentUpload(w http.ResponseWriter, r *http.Request) 
 	// header may be nil if FormFile is called creatively in tests; guard.
 	originalFilename := ""
 	if header != nil {
-		originalFilename = sanitizeAttachmentAltText(header.Filename)
+		originalFilename = session.SanitizeAttachmentAltText(header.Filename)
 	}
 
 	writeJSONStatus(w, http.StatusCreated, map[string]string{
@@ -2339,7 +2339,7 @@ func (s *Server) handleAttachmentGet(w http.ResponseWriter, r *http.Request, fil
 		http.Error(w, "Attachments are not served to other sites", http.StatusForbidden)
 		return
 	}
-	path, mime, err := attachmentPathFor(s.reviewPath, filename)
+	path, mime, err := session.AttachmentPathFor(s.reviewPath, filename)
 	if err != nil {
 		http.Error(w, "Invalid attachment filename", http.StatusBadRequest)
 		return
@@ -2411,7 +2411,7 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 	// Try VCS first (works in both "git" and "files" mode when inside a repo),
 	// fall back to filesystem walk for non-VCS directories.
 	if sess.VCS != nil {
-		paths, err = sess.VCS.AllTrackedFiles(sess.RepoRoot)
+		paths, err = sess.VCS.ListRepoFiles(sess.RepoRoot)
 	} else {
 		err = fmt.Errorf("no VCS")
 	}
@@ -2423,7 +2423,7 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	paths = filterPathsIgnored(paths, sess.IgnorePatterns)
+	paths = config.FilterPathsIgnored(paths, sess.IgnorePatterns)
 
 	query := r.URL.Query().Get("q")
 	const maxResults = 10

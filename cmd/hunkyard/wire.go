@@ -43,7 +43,7 @@ var (
 	writeSessionFile   = daemon.WriteSessionFile
 	writeDaemonFailure = daemon.WriteDaemonFailure
 	removeSessionFile  = daemon.RemoveSessionFile
-	reviewFilePath     = daemon.ReviewFilePath
+	reviewFilePath     = daemon.ReviewDir
 	openReadyPipe      = daemon.OpenReadyPipe
 	daemonFatal        = daemon.DaemonFatal
 	signalReadiness    = daemon.SignalReadiness

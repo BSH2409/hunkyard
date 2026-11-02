@@ -81,8 +81,8 @@ type VCS interface {
 	// UntrackedFiles returns untracked files, running from the specified directory.
 	UntrackedFiles(dir string) ([]FileChange, error)
 
-	// AllTrackedFiles returns all tracked files plus untracked non-ignored files.
-	AllTrackedFiles(dir string) ([]string, error)
+	// ListRepoFiles returns all tracked files plus untracked non-ignored files.
+	ListRepoFiles(dir string) ([]string, error)
 
 	// RemoteBranches returns the names of all remote branches.
 	RemoteBranches(dir string) ([]string, error)

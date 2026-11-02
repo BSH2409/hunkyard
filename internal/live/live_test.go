@@ -943,12 +943,12 @@ func TestHandleRoundCompleteFiles_LivePinsSurvive(t *testing.T) {
 	}
 
 	s := &Session{
-		Mode:           "files",
-		RepoRoot:       dir,
-		ReviewRound:    1,
-		ReviewType:     "live",
-		Origin:         "http://localhost:3000",
-		ReviewFilePath: reviewPath,
+		Mode:        "files",
+		RepoRoot:    dir,
+		ReviewRound: 1,
+		ReviewType:  "live",
+		Origin:      "http://localhost:3000",
+		ReviewDir:   reviewPath,
 		Files: []*FileEntry{
 			{Path: "/", FileType: "live-route", Status: "added", Comments: cj.Files["/"].Comments},
 		},
@@ -1124,12 +1124,12 @@ func TestLiveSession_ExternalReplyEmitsCommentsChanged(t *testing.T) {
 	// to the seed's mtime so mergeExternalHunkyardJSON will only fire when the
 	// file changes again (mirrors a daemon that has just (re)loaded).
 	s := &Session{
-		Mode:           "files",
-		RepoRoot:       dir,
-		ReviewType:     "live",
-		Origin:         "http://localhost:3000",
-		ReviewRound:    1,
-		ReviewFilePath: identity,
+		Mode:        "files",
+		RepoRoot:    dir,
+		ReviewType:  "live",
+		Origin:      "http://localhost:3000",
+		ReviewRound: 1,
+		ReviewDir:   identity,
 		Files: []*FileEntry{
 			{Path: "/dashboard", FileType: "live-route", Status: "added", Comments: cj.Files["/dashboard"].Comments},
 		},
@@ -1200,12 +1200,12 @@ func TestHandleFileComments_LivePinFansOutSSE(t *testing.T) {
 	}
 
 	sess := &Session{
-		Mode:           "files",
-		RepoRoot:       dir,
-		ReviewType:     "live",
-		Origin:         "http://localhost:3000",
-		ReviewRound:    1,
-		ReviewFilePath: identity,
+		Mode:        "files",
+		RepoRoot:    dir,
+		ReviewType:  "live",
+		Origin:      "http://localhost:3000",
+		ReviewRound: 1,
+		ReviewDir:   identity,
 	}
 	sess.InitTestChannels()
 
@@ -1371,12 +1371,12 @@ func TestLive_PostFileCommentsDropsScreenshot(t *testing.T) {
 	}
 
 	sess := &Session{
-		Mode:           "files",
-		RepoRoot:       dir,
-		ReviewType:     "live",
-		Origin:         "http://localhost:3000",
-		ReviewRound:    1,
-		ReviewFilePath: identity,
+		Mode:        "files",
+		RepoRoot:    dir,
+		ReviewType:  "live",
+		Origin:      "http://localhost:3000",
+		ReviewRound: 1,
+		ReviewDir:   identity,
 	}
 
 	srv, err := NewServer(nil, frontendFS, "tester", "test", 0, "")

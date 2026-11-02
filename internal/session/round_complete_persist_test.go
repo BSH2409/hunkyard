@@ -61,14 +61,14 @@ func TestHandleRoundCompleteGit_PersistsCarriedComments(t *testing.T) {
 		diffs:         map[string][]vcs.DiffHunk{"main.go": {{OldStart: 1, NewStart: 1}}},
 	}
 	s := &Session{
-		Mode:           "git",
-		VCS:            v,
-		RepoRoot:       dir,
-		BaseRef:        "main",
-		Branch:         "feature",
-		ReviewFilePath: identity,
-		ReviewRound:    1,
-		subscribers:    make(map[chan SSEEvent]struct{}),
+		Mode:        "git",
+		VCS:         v,
+		RepoRoot:    dir,
+		BaseRef:     "main",
+		Branch:      "feature",
+		ReviewDir:   identity,
+		ReviewRound: 1,
+		subscribers: make(map[chan SSEEvent]struct{}),
 		Files: []*FileEntry{{
 			Path:     "main.go",
 			AbsPath:  abs,
@@ -151,10 +151,10 @@ func TestMergeExternalHunkyardJSON_SkipsWhenMemoryRoundAhead(t *testing.T) {
 		UpdatedAt:      "2026-04-13T10:05:00Z",
 	}
 	s := &Session{
-		RepoRoot:       dir,
-		ReviewFilePath: identity,
-		ReviewRound:    2,
-		Branch:         "feature",
+		RepoRoot:    dir,
+		ReviewDir:   identity,
+		ReviewRound: 2,
+		Branch:      "feature",
 		Files: []*FileEntry{{
 			Path:     "main.go",
 			Status:   "modified",
@@ -214,10 +214,10 @@ func TestMergeExternalHunkyardJSON_AppliesWhenDiskRoundMatches(t *testing.T) {
 	}
 
 	s := &Session{
-		RepoRoot:       dir,
-		ReviewFilePath: identity,
-		ReviewRound:    2,
-		Branch:         "feature",
+		RepoRoot:    dir,
+		ReviewDir:   identity,
+		ReviewRound: 2,
+		Branch:      "feature",
 		Files: []*FileEntry{{
 			Path:     "main.go",
 			Status:   "modified",
@@ -279,10 +279,10 @@ func TestMergeExternalHunkyardJSON_AppliesWhenDiskRoundUnset(t *testing.T) {
 	}
 
 	s := &Session{
-		RepoRoot:       dir,
-		ReviewFilePath: identity,
-		ReviewRound:    1,
-		Branch:         "feature",
+		RepoRoot:    dir,
+		ReviewDir:   identity,
+		ReviewRound: 1,
+		Branch:      "feature",
 		Files: []*FileEntry{{
 			Path:     "main.go",
 			Status:   "modified",

@@ -305,9 +305,9 @@ func TestRecordSessionStats_WritesForActivity(t *testing.T) {
 
 	start := time.Now().Add(-10 * time.Minute)
 	sess := &Session{
-		Mode:           "git",
-		Branch:         "feat/stats",
-		ReviewFilePath: filepath.Join(home, ".hunkyard", "reviews", "abc123"),
+		Mode:      "git",
+		Branch:    "feat/stats",
+		ReviewDir: filepath.Join(home, ".hunkyard", "reviews", "abc123"),
 		Files: []*FileEntry{
 			{Path: "main.go"},
 			{Path: "stats.go"},

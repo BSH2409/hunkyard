@@ -181,7 +181,7 @@ func TestHostRoundLoopProtocol(t *testing.T) {
 				t.Fatal("selected host skill lost provenance")
 			}
 			decisions := filepath.Join(home, "decisions.json")
-			data, _ = json.Marshal([]feedback.PreferenceDecision{{CommentID: comment.ID, Revision: 1, Kind: "directive", Directive: "Prefer names describing domain behavior.", Scope: "repository", Surfaces: []string{"naming"}}})
+			data, _ = json.Marshal([]feedback.PreferenceClassification{{CommentID: comment.ID, Revision: 1, Kind: "directive", Directive: "Prefer names describing domain behavior.", Scope: "repository", Surfaces: []string{"naming"}}})
 			writeFile(t, decisions, string(data))
 			command("feedback", "learn", "--session", key, "--batch", batch.ID, "--decisions", decisions, "--json")
 			if _, err := os.Stat(filepath.Join(home, "agents", "hunkyard-preferences", "current", "rules.yml")); err != nil {

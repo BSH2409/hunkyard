@@ -25,7 +25,7 @@ func pinServer(t *testing.T) (*Server, *Session) {
 
 func savedShot(t *testing.T, s *Server) string {
 	t.Helper()
-	name, err := saveAttachment(s.reviewPath, pngBytes)
+	name, err := session.SaveAttachment(s.reviewPath, pngBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +65,7 @@ func TestLivePinStoresScreenshot(t *testing.T) {
 
 func TestLivePinRejectsForeignScreenshot(t *testing.T) {
 	s, _ := pinServer(t)
-	jpg, err := saveAttachment(s.reviewPath, []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00"))
+	jpg, err := session.SaveAttachment(s.reviewPath, []byte("\xff\xd8\xff\xe0\x00\x10JFIF\x00"))
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -1,7 +1,6 @@
 package review
 
 var (
-	findStaleReviewsForTest      = findStaleReviews
-	deleteStaleReviewsForTest    = deleteStaleReviews
-	removeStaleReviewPathForTest = removeStaleReviewPath
+	findStaleReviewsForTest   = findStaleReviews
+	deleteStaleReviewsForTest = deleteStaleReviews
 )

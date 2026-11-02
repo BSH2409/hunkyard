@@ -63,7 +63,7 @@ func TestIngest_InvalidPrologueReject(t *testing.T) {
 	if !errors.Is(err, ErrInvalidPrologue) {
 		t.Fatalf("expected invalid prologue rejection, got %v", err)
 	}
-	if res.Saved {
+	if res.ShouldSave {
 		t.Fatal("invalid prologue must not save")
 	}
 }
@@ -102,7 +102,7 @@ func TestIngest_DriftReject(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected drift rejection, got nil error")
 	}
-	if res.Saved {
+	if res.ShouldSave {
 		t.Fatal("drift must not save")
 	}
 	if res.Coverage == nil {
@@ -126,7 +126,7 @@ func TestIngest_DuplicateReject(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected duplicate rejection")
 	}
-	if res.Saved {
+	if res.ShouldSave {
 		t.Fatal("duplicate must not save")
 	}
 	if len(res.Coverage.Duplicated) == 0 {
@@ -147,7 +147,7 @@ func TestIngest_FloorReject(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected floor rejection")
 	}
-	if res.Saved {
+	if res.ShouldSave {
 		t.Fatal("below-floor story must not save")
 	}
 	if res.Coverage.Placed != 1 || res.Coverage.Indexed != 4 {
@@ -168,7 +168,7 @@ func TestIngest_AutoRepairAtFloor(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected save-with-repair, got error: %v", err)
 	}
-	if !res.Saved {
+	if !res.ShouldSave {
 		t.Fatal("at-floor story must save")
 	}
 	if !res.Coverage.AutoRepaired {
@@ -207,7 +207,7 @@ func TestIngest_IgnoredPrePlacement(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected clean save, got error: %v", err)
 	}
-	if !res.Saved {
+	if !res.ShouldSave {
 		t.Fatal("must save")
 	}
 	if !res.Coverage.OK {
@@ -239,7 +239,7 @@ func TestIngest_CleanPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected clean save, got error: %v", err)
 	}
-	if !res.Saved {
+	if !res.ShouldSave {
 		t.Fatal("clean story must save")
 	}
 	if !res.Coverage.OK {
@@ -272,7 +272,7 @@ func TestIngest_CapsStoryTitles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected clean save, got error: %v", err)
 	}
-	if !res.Saved {
+	if !res.ShouldSave {
 		t.Fatal("story must save")
 	}
 	if got := len([]rune(story.Chapters[0].Title)); got != MaxChapterTitleRunes {
@@ -326,7 +326,7 @@ func TestIngest_DuplicateAcrossChapterAndSupport(t *testing.T) {
 	if err == nil {
 		t.Fatal("a hunk in both a chapter and support is a duplicate: reject")
 	}
-	if res.Saved {
+	if res.ShouldSave {
 		t.Fatal("must not save on duplicate")
 	}
 }

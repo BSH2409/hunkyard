@@ -103,7 +103,7 @@ func TestAllTrackedFilesHonoursSelection(t *testing.T) {
 	gitT(t, dir, "add", "-A")
 	gitT(t, dir, "commit", "-qm", "base")
 	writeFile(t, filepath.Join(dir, "src", "untracked.go"), "package a\n")
-	files, err := (&GitVCS{}).ForPaths([]string{"src"}).AllTrackedFiles(dir)
+	files, err := (&GitVCS{}).ForPaths([]string{"src"}).ListRepoFiles(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -28,10 +28,10 @@ func TestRoundSnapshots_Integration(t *testing.T) {
 		t.Fatalf("NewSessionFromFiles: %v", err)
 	}
 	identity := filepath.Join(dir, ".hunkyard")
-	s.ReviewFilePath = identity
+	s.ReviewDir = identity
 
 	// captureBaselineAndPersist already ran in NewSessionFromFiles, but with
-	// an empty ReviewFilePath. Re-run now that the identity is pinned so the
+	// an empty ReviewDir. Re-run now that the identity is pinned so the
 	// sidecar lands in the test tempdir instead of the dev repo root.
 	s.captureBaselineAndPersist()
 
@@ -109,7 +109,7 @@ func TestHandleRoundCompleteFiles_CapturesAfterReread(t *testing.T) {
 		t.Fatal(err)
 	}
 	identity := filepath.Join(dir, ".hunkyard")
-	s.ReviewFilePath = identity
+	s.ReviewDir = identity
 	s.captureBaselineAndPersist()
 
 	r2OnDisk := "# Plan\n\nstep one\nstep two\n"
@@ -157,7 +157,7 @@ func TestLoadHunkyardJSON_ResumedSession_DoesNotRewriteSidecar(t *testing.T) {
 		t.Fatalf("NewSessionFromFiles: %v", err)
 	}
 	identity := filepath.Join(dir, ".hunkyard")
-	s1.ReviewFilePath = identity
+	s1.ReviewDir = identity
 	s1.captureBaselineAndPersist()
 	s1.mu.Lock()
 	s1.Files[0].Content = "# Plan\n\nstep one\nstep two\n"
@@ -183,14 +183,14 @@ func TestLoadHunkyardJSON_ResumedSession_DoesNotRewriteSidecar(t *testing.T) {
 		t.Fatalf("re-stat: %v", err)
 	}
 
-	// Second "boot": construct a fresh session, set ReviewFilePath BEFORE
+	// Second "boot": construct a fresh session, set ReviewDir BEFORE
 	// loadHunkyardJSON (matching the cli_serve resumed-session path), then
 	// trigger the load path.
 	s2, err := NewSessionFromFiles([]string{planPath}, nil)
 	if err != nil {
 		t.Fatalf("second NewSessionFromFiles: %v", err)
 	}
-	s2.ReviewFilePath = identity
+	s2.ReviewDir = identity
 	s2.LoadHunkyardJSON()
 
 	afterStat, err := os.Stat(paths.Snapshots)

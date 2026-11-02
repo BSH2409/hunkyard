@@ -60,7 +60,7 @@ func TestReconnectDeadSession_InvalidJSON(t *testing.T) {
 	testutil.SetHome(t, home)
 	key := "839f3b4cd5d6"
 
-	revDir, err := daemon.ReviewFilePath(key)
+	revDir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +84,7 @@ func TestReconnectDeadSession_RestartsDaemon(t *testing.T) {
 	testutil.SetHome(t, home)
 	key := "839f3b4cd5d6"
 
-	revDir, err := daemon.ReviewFilePath(key)
+	revDir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -130,7 +130,7 @@ func TestRunReview_SessionByID_ReconnectsDeadDaemon(t *testing.T) {
 	testutil.SetHome(t, home)
 	key := "839f3b4cd5d6"
 
-	revDir, err := daemon.ReviewFilePath(key)
+	revDir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestAppendReconnectPathFlags_DefaultLayout(t *testing.T) {
 	home := t.TempDir()
 	testutil.SetHome(t, home)
 	key := "839f3b4cd5d6"
-	defaultDir, err := daemon.ReviewFilePath(key)
+	defaultDir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -447,7 +447,7 @@ func TestDaemonArgsForReconnect_Host(t *testing.T) {
 	home := t.TempDir()
 	testutil.SetHome(t, home)
 	key := "839f3b4cd5d6"
-	defaultDir, err := daemon.ReviewFilePath(key)
+	defaultDir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -527,7 +527,7 @@ func TestReconnectDeadSession_StartsDaemonInRecordedDirectory(t *testing.T) {
 	key := "839f3b4cd5d6"
 	workdir := t.TempDir()
 
-	revDir, err := daemon.ReviewFilePath(key)
+	revDir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -557,7 +557,7 @@ func TestReconnectDeadSession_MissingDirectoryFails(t *testing.T) {
 	testutil.SetHome(t, t.TempDir())
 	key := "839f3b4cd5d6"
 
-	revDir, err := daemon.ReviewFilePath(key)
+	revDir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}

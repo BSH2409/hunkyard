@@ -193,7 +193,7 @@ func (s *Store) stopHook(input io.Reader, output io.Writer) {
 	if payload == nil || payload["stop_hook_active"] == true || os.Getenv("LEARN_PREFERENCES_MAINTENANCE") == "1" {
 		return
 	}
-	if reason := s.unseenPublication(textField(payload["session_id"])); reason != "" {
+	if reason := s.claimUnseenPublication(textField(payload["session_id"])); reason != "" {
 		response["decision"] = "block"
 		response["reason"] = reason
 		return
@@ -251,10 +251,10 @@ func (s *Store) stopHook(input io.Reader, output io.Writer) {
 	response["reason"] = "Before finishing, fix these preference violations:\n- " + strings.Join(findings, "\n- ")
 }
 
-// unseenPublication returns a stop reason when a review this session owns
+// claimUnseenPublication returns a stop reason when a review this session owns
 // has a published batch the agent has not been told about yet, so feedback
 // published mid-turn is never left unread.
-func (s *Store) unseenPublication(session string) string {
+func (s *Store) claimUnseenPublication(session string) string {
 	notices := s.ownedReviewNotices(session)
 	if len(notices) == 0 {
 		return ""

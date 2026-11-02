@@ -205,7 +205,7 @@ func resolveUnqualifiedCommentReviewPath(f *commentFlags) error {
 		f.reviewPath, err = reviewpath.Identity(f.configuredOutput, key)
 		return err
 	}
-	f.reviewPath, err = daemon.ReviewFilePath(key)
+	f.reviewPath, err = daemon.ReviewDir(key)
 	return err
 }
 

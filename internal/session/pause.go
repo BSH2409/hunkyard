@@ -96,7 +96,7 @@ func PausedReviewDir(key string) (string, bool) {
 			}
 		}
 	}
-	dir, err := daemon.ReviewFilePath(key)
+	dir, err := daemon.ReviewDir(key)
 	if err != nil {
 		return "", false
 	}

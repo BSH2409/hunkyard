@@ -302,7 +302,7 @@ func (s *Store) preToolUseHook(input io.Reader, output io.Writer) {
 		return
 	}
 	if editTools[textField(payload["tool_name"])] {
-		if output := s.editRulesResponse(payload); output != nil {
+		if output := s.injectEditRules(payload); output != nil {
 			response["hookSpecificOutput"] = output
 		}
 		return

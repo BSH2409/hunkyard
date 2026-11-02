@@ -65,7 +65,7 @@ func TestRenameRewriteWaitsForTheReviewLock(t *testing.T) {
 
 func TestPersistActiveDiffScopeWaitsForTheReviewLock(t *testing.T) {
 	hunkyardPath := seedLockedReview(t)
-	s := &Session{ReviewFilePath: hunkyardPath}
+	s := &Session{ReviewDir: hunkyardPath}
 	holdReviewLockWhileWriting(t, hunkyardPath, func() {
 		if err := s.persistActiveDiffScope("layer"); err != nil {
 			t.Error(err)
@@ -114,12 +114,12 @@ func TestCommitDiffOfAnAddedFileShowsThatCommitsContent(t *testing.T) {
 
 func TestSignalRoundCompleteKeepsTheLastDebouncedChange(t *testing.T) {
 	s := newTestSession(t)
-	s.ReviewFilePath = t.TempDir() + "/review-key"
+	s.ReviewDir = t.TempDir() + "/review-key"
 	if _, ok := s.AddComment(s.Files[0].Path, 1, 1, "", "last-second comment", "", "reviewer"); !ok {
 		t.Fatal("comment not added")
 	}
 	s.SignalRoundComplete()
-	cj, err := readHunkyardJSONFromDisk(s.ReviewFilePath)
+	cj, err := readHunkyardJSONFromDisk(s.ReviewDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,32 +132,32 @@ func TestSignalRoundCompleteKeepsTheLastDebouncedChange(t *testing.T) {
 // example hunkyard pull stamping a github_id) survives round complete.
 func TestSignalRoundCompleteLeavesAnExternallyEditedReviewFile(t *testing.T) {
 	s := newTestSession(t)
-	s.ReviewFilePath = t.TempDir() + "/review-key"
+	s.ReviewDir = t.TempDir() + "/review-key"
 	path := s.Files[0].Path
 	if _, ok := s.AddComment(path, 1, 1, "", "first", "", "reviewer"); !ok {
 		t.Fatal("comment not added")
 	}
 	s.WriteFiles()
-	cj, err := readHunkyardJSONFromDisk(s.ReviewFilePath)
+	cj, err := readHunkyardJSONFromDisk(s.ReviewDir)
 	if err != nil {
 		t.Fatal(err)
 	}
 	file := cj.Files[path]
 	file.Comments[0].GitHubID = 12345
 	cj.Files[path] = file
-	if err := saveHunkyardJSONToDisk(s.ReviewFilePath, cj); err != nil {
+	if err := saveHunkyardJSONToDisk(s.ReviewDir, cj); err != nil {
 		t.Fatal(err)
 	}
 	// File timestamps are coarse; make the other writer's change visibly newer.
 	later := time.Now().Add(2 * time.Second)
-	if err := os.Chtimes(ReviewPathsFor(s.ReviewFilePath).Review, later, later); err != nil {
+	if err := os.Chtimes(ReviewPathsFor(s.ReviewDir).Review, later, later); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := s.AddComment(path, 1, 1, "", "second", "", "reviewer"); !ok {
 		t.Fatal("second comment not added")
 	}
 	s.SignalRoundComplete()
-	after, err := readHunkyardJSONFromDisk(s.ReviewFilePath)
+	after, err := readHunkyardJSONFromDisk(s.ReviewDir)
 	if err != nil {
 		t.Fatal(err)
 	}

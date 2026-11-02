@@ -101,7 +101,7 @@ func resolveReconnectReviewDir(key string, stale daemon.SessionEntry) (string, e
 	if dir, paused := PausedReviewDir(key); paused {
 		return dir, nil
 	}
-	return daemon.ReviewFilePath(key)
+	return daemon.ReviewDir(key)
 }
 
 // daemonArgsForReconnect rebuilds _serve argv including flags not stored in cli_args.
@@ -119,7 +119,7 @@ func daemonArgsForReconnect(sessionKey string, cliArgs []string, stale daemon.Se
 // appendReconnectPathFlags adds --output or --plan-dir/--name when the review
 // folder is outside the default ~/.hunkyard/reviews/<key> layout.
 func appendReconnectPathFlags(sessionKey string, args []string, reviewDir string) []string {
-	defaultDir, err := daemon.ReviewFilePath(sessionKey)
+	defaultDir, err := daemon.ReviewDir(sessionKey)
 	if err == nil && filepath.Clean(reviewDir) == filepath.Clean(defaultDir) {
 		return args
 	}

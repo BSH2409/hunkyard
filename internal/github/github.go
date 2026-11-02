@@ -147,7 +147,7 @@ type PRInfo struct {
 	Additions    int    `json:"additions"`
 	Deletions    int    `json:"deletions"`
 	ChangedFiles int    `json:"changedFiles"`
-	AuthorLogin  string `json:"authorLogin"`
+	AuthorName   string `json:"authorLogin"`
 	CreatedAt    string `json:"createdAt"`
 
 	// SHA pins from `gh pr view`. Populated by C5 fetchPRByNumber.
@@ -294,7 +294,7 @@ func parsePRViewJSON(b []byte) (*PRInfo, error) {
 		Additions:         raw.Additions,
 		Deletions:         raw.Deletions,
 		ChangedFiles:      raw.ChangedFiles,
-		AuthorLogin:       displayName(raw.Author.Login, raw.Author.Name),
+		AuthorName:        displayName(raw.Author.Login, raw.Author.Name),
 		CreatedAt:         raw.CreatedAt,
 	}, nil
 }

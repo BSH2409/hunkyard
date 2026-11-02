@@ -22,7 +22,7 @@ func pausedReview(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
-	dir, err := daemon.ReviewFilePath(pausedKey)
+	dir, err := daemon.ReviewDir(pausedKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestFollowWaiterWaitsThroughPause(t *testing.T) {
 	var alive atomic.Bool
 	fakeLiveness(t, &alive)
 	go func() { time.Sleep(60 * time.Millisecond); alive.Store(true) }()
-	entry, err := resumedSession(context.Background(), pausedKey, true)
+	entry, err := liveDaemonOrWaitForResume(context.Background(), pausedKey, true)
 	if err != nil || entry.Port != 4321 {
 		t.Fatalf("waiter did not reconnect after the resume: %+v %v", entry, err)
 	}
@@ -64,7 +64,7 @@ func TestWaiterErrorsWithoutPausedMarker(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	var alive atomic.Bool
 	fakeLiveness(t, &alive)
-	_, err := resumedSession(context.Background(), pausedKey, true)
+	_, err := liveDaemonOrWaitForResume(context.Background(), pausedKey, true)
 	if err == nil || !strings.Contains(err.Error(), "is not running") {
 		t.Fatalf("err = %v, want the review reported as not running", err)
 	}

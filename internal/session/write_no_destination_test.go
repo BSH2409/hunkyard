@@ -7,7 +7,7 @@ import (
 	"time"
 )
 
-// A session with no RepoRoot, OutputDir or ReviewFilePath has no review
+// A session with no RepoRoot, OutputDir or ReviewDir has no review
 // destination. Before the hunkyardJSONPath guard it fell back to the relative
 // path ".hunkyard", so the 200ms debounced write landed in whatever directory
 // the process happened to be in — which other tests change with os.Chdir.

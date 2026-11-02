@@ -724,9 +724,9 @@
   //
   // Returns a teardown function that removes the listeners and clears state.
   //
-  // Pure helper exposed alongside (computeResizeDelta) so tests can exercise
+  // Pure helper exposed alongside (resizedWidth) so tests can exercise
   // the math without a DOM.
-  function computeResizeDelta(startWidth, startX, currentX, edge, min) {
+  function resizedWidth(startWidth, startX, currentX, edge, min) {
     if (typeof min !== 'number' || min < 0) min = 200;
     var dir = edge === 'left' ? -1 : 1;
     var delta = (currentX - startX) * dir;
@@ -757,7 +757,7 @@
 
     function onMove(ev) {
       if (ev.pointerId !== activePointerId) return;
-      var w = computeResizeDelta(startW, startX, ev.clientX, edge, min);
+      var w = resizedWidth(startW, startX, ev.clientX, edge, min);
       panel.style.width = w + 'px';
       lastWidth = w;
     }
@@ -1223,7 +1223,7 @@
     clearAutoCloseTimers,
     waitForSession,
     installSidebarResize,
-    computeResizeDelta,
+    resizedWidth,
     attachImageUploads,
     hasPendingUpload,
     showDisconnected,

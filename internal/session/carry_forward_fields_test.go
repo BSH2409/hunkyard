@@ -67,7 +67,7 @@ func TestRoundCompleteKeepsToolAndRuleProvenance(t *testing.T) {
 	v := &fakeWatchVCS{currentBranch: "feature", defaultBranch: "main",
 		branchChanges: []vcs.FileChange{{Path: "main.go", Status: "modified"}},
 		diffs:         map[string][]vcs.DiffHunk{"main.go": hunks}}
-	s := &Session{Mode: "git", VCS: v, RepoRoot: dir, BaseRef: "main", Branch: "feature", ReviewFilePath: identity, ReviewRound: 1,
+	s := &Session{Mode: "git", VCS: v, RepoRoot: dir, BaseRef: "main", Branch: "feature", ReviewDir: identity, ReviewRound: 1,
 		subscribers: make(map[chan SSEEvent]struct{}),
 		Files:       []*FileEntry{{Path: "main.go", AbsPath: abs, Status: "modified", FileType: "code", Content: content, DiffHunks: hunks, Comments: []Comment{}}}}
 	s.ReplaceMachineComments("tool", "eslint", []MachineComment{{Path: "main.go", Line: 2, EndLine: 2, Body: "lint", Author: "eslint"}})

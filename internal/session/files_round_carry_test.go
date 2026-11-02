@@ -35,7 +35,7 @@ func TestFilesRoundCompleteRemapsCommentsEditedBeforeAPoll(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s.ReviewFilePath = filepath.Join(dir, ".hunkyard")
+	s.ReviewDir = filepath.Join(dir, ".hunkyard")
 	s.captureBaselineAndPersist()
 	for _, f := range s.Files {
 		quote := "step one"

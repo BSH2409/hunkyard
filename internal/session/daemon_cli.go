@@ -93,7 +93,7 @@ func installDaemonSignalHandler(pid int) {
 // for tests.
 var (
 	terminateDaemonProcess = daemon.TerminateProcess
-	waitForDaemonExit      = daemon.WaitForExit
+	waitForDaemonExit      = daemon.WaitOrKill
 	approvalSignalGrace    = 500 * time.Millisecond
 )
 

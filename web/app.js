@@ -1240,7 +1240,7 @@
       ? 'Hunkyard — ' + (session.branch || 'review')
       : 'Hunkyard — ' + (session.files || []).map(f => f.path).join(', '));
 
-    files = await loadAllFileData(session.files || [], currentFileDataScope());
+    files = await loadAllFileData(session.files || [], fetchScope());
     hiddenUnresolved = session.hidden_unresolved || 0;
 
     orderFiles();
@@ -2130,7 +2130,7 @@
       return loadSingleFile({
         path: file.path, old_path: file.oldPath, status: file.status, file_type: file.fileType,
         additions: file.additions, deletions: file.deletions, generated: file.generated,
-      }, currentFileDataScope(), signal).then(function(loaded) {
+      }, fetchScope(), signal).then(function(loaded) {
         // A lazy file's hash arrives now; un-view it if it changed since viewed.
         const seen = loaded && file.viewed ? storedViewedState()[file.path] : undefined;
         if (seen && viewedStateFor(seen, loaded.fileHash).changed) {
@@ -7626,13 +7626,13 @@
         clearCommitPins();
 
         // Re-fetch everything on file-changed (round complete)
-        let sessionRes = await hydrateStoryIfMissing(await fetchWhenReady('/api/session?scope=' + enc(currentSessionFetchScope())));
+        let sessionRes = await hydrateStoryIfMissing(await fetchWhenReady('/api/session?scope=' + enc(fetchScope())));
         sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
         session = sessionRes;
         reviewComments = sessionRes.review_comments || [];
 
         // Reload all files
-        files = await loadAllFileData(session.files || [], currentFileDataScope());
+        files = await loadAllFileData(session.files || [], fetchScope());
         hiddenUnresolved = session.hidden_unresolved || 0;
 
         // Restore per-file user state from previous round
@@ -8170,11 +8170,9 @@
     return !!(s && s.focus && s.focus.kind === 'range');
   }
 
-  function currentFileDataScope() {
-    return storyNeedsRawDiff() ? 'all' : effectiveDiffScope();
-  }
-
-  function currentSessionFetchScope() {
+  // fetchScope is the diff scope sent with file and session requests: the
+  // story view needs the raw diff, everything else the range-aware scope.
+  function fetchScope() {
     return storyNeedsRawDiff() ? 'all' : effectiveDiffScope();
   }
 
@@ -8856,7 +8854,7 @@
 
   function reloadForScope() {
     const diffFetchMode = ignoreWhitespace && !storyNeedsRawDiff() ? 'filtered' : 'raw';
-    const key = currentSessionFetchScope() + '\0' + currentFileDataScope() + '\0' + diffCommit + '\0' + diffFetchMode + '\0' + sinceReview;
+    const key = fetchScope() + '\0' + fetchScope() + '\0' + diffCommit + '\0' + diffFetchMode + '\0' + sinceReview;
     return scopeReloader.start(key);
   }
 
@@ -8864,7 +8862,7 @@
     const container = document.getElementById('filesContainer');
     container.setAttribute('aria-busy', 'true');
     try {
-      let sessionUrl = '/api/session?scope=' + enc(currentSessionFetchScope());
+      let sessionUrl = '/api/session?scope=' + enc(fetchScope());
       if (diffCommit) sessionUrl += '&commit=' + enc(diffCommit);
       let sessionRes = await fetchWhenReady(sessionUrl, signal);
       if (signal.aborted) return;
@@ -8903,7 +8901,7 @@
         return;
       }
 
-      const loaded = await loadAllFileData(session.files, currentFileDataScope(), signal);
+      const loaded = await loadAllFileData(session.files, fetchScope(), signal);
       if (signal.aborted) return;
       files = loaded;
       hiddenUnresolved = session.hidden_unresolved || 0;
@@ -10578,7 +10576,7 @@
       file_type: file.fileType,
       additions: file.additions,
       deletions: file.deletions,
-    }, currentFileDataScope()).then(function (loaded) {
+    }, fetchScope()).then(function (loaded) {
       file.oldPath = loaded.oldPath;
       file.content = loaded.content;
       file.previousContent = loaded.previousContent;

@@ -425,14 +425,14 @@ func CommitLog(baseRef, headRef, dir string) ([]CommitInfo, error) {
 	return commits, nil
 }
 
-// commitishRe matches a safe git ref token: a hex string 4–40 chars long.
+// hexSHARe matches a safe git ref token: a hex string 4–40 chars long.
 // Restricting to hex rejects option-injection (a token starting with "-")
 // since base+".."+head is passed to git as a single argument.
-var commitishRe = regexp.MustCompile(`^[0-9a-fA-F]{4,40}$`)
+var hexSHARe = regexp.MustCompile(`^[0-9a-fA-F]{4,40}$`)
 
-// isCommitish reports whether s is a safe ref token (hex SHA, 4–40 chars).
-func isCommitish(s string) bool {
-	return commitishRe.MatchString(s)
+// isHexSHA reports whether s is a safe ref token (hex SHA, 4–40 chars).
+func isHexSHA(s string) bool {
+	return hexSHARe.MatchString(s)
 }
 
 // ValidCommitParam reports whether a commit selection from a request is a hex
@@ -442,7 +442,7 @@ func ValidCommitParam(commit string) bool {
 	if _, _, ok := SplitCommitRange(commit); ok {
 		return true
 	}
-	return isCommitish(commit)
+	return isHexSHA(commit)
 }
 
 // splitCommitRange parses a commit query param of the form "<baseSHA>..<headSHA>".
@@ -454,7 +454,7 @@ func SplitCommitRange(commit string) (base, head string, ok bool) {
 		return "", "", false
 	}
 	base, head = commit[:i], commit[i+2:]
-	if !isCommitish(base) || !isCommitish(head) {
+	if !isHexSHA(base) || !isHexSHA(head) {
 		return "", "", false
 	}
 	return base, head, true
@@ -1033,9 +1033,9 @@ func untrackedFilesFullScanInDir(dir string) ([]FileChange, error) {
 	return changes, nil
 }
 
-// AllTrackedFiles returns all tracked files plus untracked non-ignored files.
+// ListRepoFiles returns all tracked files plus untracked non-ignored files.
 // Paths are relative to the repo root. dir should be the repo root.
-func AllTrackedFiles(dir string, paths ...string) ([]string, error) {
+func ListRepoFiles(dir string, paths ...string) ([]string, error) {
 	args := []string{"ls-files", "-z", "--cached", "--others", "--exclude-standard"}
 	if len(paths) > 0 {
 		args = append(append([]string{"--literal-pathspecs"}, args...), "--")

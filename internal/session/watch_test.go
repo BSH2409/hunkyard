@@ -236,9 +236,9 @@ func TestCarryForwardAllComments_NoDuplicateOnDisk(t *testing.T) {
 	reviewPath := filepath.Join(identity, "review.json")
 
 	s := &Session{
-		Mode:           "git",
-		RepoRoot:       dir,
-		ReviewFilePath: identity,
+		Mode:      "git",
+		RepoRoot:  dir,
+		ReviewDir: identity,
 		Files: []*FileEntry{
 			{
 				Path:     "main.go",
@@ -351,9 +351,9 @@ func TestCarryForwardComments_NoDuplicateOnDisk(t *testing.T) {
 	os.WriteFile(mdPath, []byte("# Plan\n\nStep 1\n\nStep 2\n"), 0644)
 
 	s := &Session{
-		Mode:           "files",
-		RepoRoot:       dir,
-		ReviewFilePath: identity,
+		Mode:      "files",
+		RepoRoot:  dir,
+		ReviewDir: identity,
 		Files: []*FileEntry{
 			{
 				Path:            "plan.md",
@@ -1626,12 +1626,12 @@ func TestHandleRoundCompleteGit_BaselineIsPreviousRound(t *testing.T) {
 			branchChanges: []vcs.FileChange{{Path: "main.go", Status: "modified"}},
 			diffs:         map[string][]vcs.DiffHunk{"main.go": {{OldStart: 1, NewStart: 1}}},
 		},
-		RepoRoot:       dir,
-		BaseRef:        "main",
-		Branch:         "feat",
-		ReviewFilePath: identity,
-		ReviewRound:    1,
-		subscribers:    make(map[chan SSEEvent]struct{}),
+		RepoRoot:    dir,
+		BaseRef:     "main",
+		Branch:      "feat",
+		ReviewDir:   identity,
+		ReviewRound: 1,
+		subscribers: make(map[chan SSEEvent]struct{}),
 		Files: []*FileEntry{{
 			Path:     "main.go",
 			AbsPath:  goPath,

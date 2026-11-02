@@ -19,7 +19,7 @@ import (
 // session would have left it.
 func seedReview(t *testing.T, key string, cj HunkyardJSON) string {
 	t.Helper()
-	dir, err := daemon.ReviewFilePath(key)
+	dir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}

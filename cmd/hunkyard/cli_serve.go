@@ -97,7 +97,7 @@ func bindListener(host string, port int) (net.Listener, error) {
 }
 
 // resolveServeReviewPath computes the daemon's review folder so that
-// srv.reviewPath, the session-registry entry, session.ReviewFilePath, and
+// srv.reviewPath, the session-registry entry, session.ReviewDir, and
 // session.hunkyardJSONPath() all agree on one folder.
 var serveAbsPath = filepath.Abs
 
@@ -404,8 +404,8 @@ func runServe(args []string) {
 		recordSessionStats(sess, srv.Author(), sessionStartedAt, false)
 	}
 
-	if sess.ReviewFilePath != "" {
-		fmt.Fprintf(os.Stderr, "Review file: %s\n", reviewPathsFor(sess.ReviewFilePath).Review)
+	if sess.ReviewDir != "" {
+		fmt.Fprintf(os.Stderr, "Review file: %s\n", reviewPathsFor(sess.ReviewDir).Review)
 	}
 }
 

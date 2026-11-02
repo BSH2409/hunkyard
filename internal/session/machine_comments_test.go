@@ -111,12 +111,12 @@ func TestSetToolMarksCountsOnlyAddedLines(t *testing.T) {
 
 func TestToolMarksRoundTripReviewFile(t *testing.T) {
 	s := machineFixture(t)
-	s.ReviewFilePath = filepath.Join(t.TempDir(), "review")
+	s.ReviewDir = filepath.Join(t.TempDir(), "review")
 	s.SetToolMarks("coverage", map[string][]MarkRange{"server.go": {{Start: 2, End: 3, Kind: "uncovered"}}})
 	if err := s.SyncWriteFiles(); err != nil {
 		t.Fatal(err)
 	}
-	cj, err := readHunkyardJSONFromDisk(s.ReviewFilePath)
+	cj, err := readHunkyardJSONFromDisk(s.ReviewDir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestToolMarksRoundTripReviewFile(t *testing.T) {
 		t.Fatalf("persisted coverage = %+v", got)
 	}
 	reloaded := machineFixture(t)
-	reloaded.ReviewFilePath = s.ReviewFilePath
+	reloaded.ReviewDir = s.ReviewDir
 	reloaded.loadHunkyardJSON()
 	if _, ok := reloaded.ToolMarks()["coverage"]; !ok {
 		t.Fatal("tool marks not restored on load")
@@ -133,7 +133,7 @@ func TestToolMarksRoundTripReviewFile(t *testing.T) {
 
 func TestClearAllCommentsClearsToolMarks(t *testing.T) {
 	s := machineFixture(t)
-	s.ReviewFilePath = filepath.Join(t.TempDir(), "review")
+	s.ReviewDir = filepath.Join(t.TempDir(), "review")
 	s.SetToolMarks("coverage", map[string][]MarkRange{"server.go": {{Start: 2, End: 2, Kind: "uncovered"}}})
 	s.ClearAllComments()
 	if len(s.ToolMarks()) != 0 {

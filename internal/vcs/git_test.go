@@ -1535,7 +1535,7 @@ func TestAllTrackedFiles_RealRepo(t *testing.T) {
 	testutil.Git(t, dir, "add", ".")
 	testutil.Git(t, dir, "commit", "-m", "add files")
 
-	files, err := AllTrackedFiles(dir)
+	files, err := ListRepoFiles(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1560,7 +1560,7 @@ func TestAllTrackedFiles_IncludesUntracked(t *testing.T) {
 	dir := testutil.InitTestRepo(t)
 	testutil.WriteFile(t, filepath.Join(dir, "new.txt"), "hello")
 
-	files, err := AllTrackedFiles(dir)
+	files, err := ListRepoFiles(dir)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1585,7 +1585,7 @@ func TestAllTrackedFiles_ExcludesGitignored(t *testing.T) {
 	testutil.Git(t, dir, "add", ".gitignore", "keep.txt")
 	testutil.Git(t, dir, "commit", "-m", "add files")
 
-	files, err := AllTrackedFiles(dir)
+	files, err := ListRepoFiles(dir)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -120,8 +120,8 @@ func (g *GitVCS) UntrackedFiles(dir string) ([]FileChange, error) {
 	return untrackedFilesInDir(dir)
 }
 
-func (g *GitVCS) AllTrackedFiles(dir string) ([]string, error) {
-	return AllTrackedFiles(dir, g.paths...)
+func (g *GitVCS) ListRepoFiles(dir string) ([]string, error) {
+	return ListRepoFiles(dir, g.paths...)
 }
 
 func (g *GitVCS) RemoteBranches(dir string) ([]string, error) {

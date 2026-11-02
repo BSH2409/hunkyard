@@ -79,11 +79,11 @@ var terminateProc = terminateProcess
 // killProcess force-kills a process that outlived the graceful-termination poll.
 func killProcess(proc *os.Process) error { return proc.Kill() }
 
-// killProc is the function StopDaemon and WaitForExit use to force-kill a
+// killProc is the function StopDaemon and WaitOrKill use to force-kill a
 // process that outlives the graceful-termination poll. Tests may override it.
 var killProc = killProcess
 
-// procExists is the function StopDaemon and WaitForExit use to poll for
+// procExists is the function StopDaemon and WaitOrKill use to poll for
 // process exit. Tests may override it to avoid killing real processes.
 var procExists = processExists
 
@@ -266,10 +266,10 @@ func ReviewsDir() (string, error) {
 	return filepath.Join(home, ".hunkyard", "reviews"), nil
 }
 
-// ReviewFilePath returns the v4 review identity path: a folder named <key>
+// ReviewDir returns the v4 review identity path: a folder named <key>
 // (no extension) under ~/.hunkyard/reviews/. The actual JSON files live inside as
 // <key>/review.json and <key>/snapshots.json — see reviewPathsFor.
-func ReviewFilePath(key string) (string, error) {
+func ReviewDir(key string) (string, error) {
 	dir, err := ReviewsDir()
 	if err != nil {
 		return "", err
@@ -1050,10 +1050,10 @@ func RequestShutdown(s SessionEntry) ShutdownResult {
 	return ShutdownUnavailable
 }
 
-// WaitForExit waits for the process to exit and kills it if it is still alive
+// WaitOrKill waits for the process to exit and kills it if it is still alive
 // after stopWait. It reports whether the process is gone, so callers do not
 // remove files that a surviving daemon may write again.
-func WaitForExit(pid int) bool {
+func WaitOrKill(pid int) bool {
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		// On Windows FindProcess opens a process handle and can fail when the

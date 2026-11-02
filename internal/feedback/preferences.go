@@ -7,7 +7,7 @@ import (
 	"github.com/BSH2409/hunkyard/internal/preferences"
 )
 
-type PreferenceDecision struct {
+type PreferenceClassification struct {
 	CommentID string   `json:"comment_id"`
 	Revision  int      `json:"revision"`
 	Kind      string   `json:"kind"`
@@ -55,7 +55,7 @@ func humanComments(comments []Comment) []Comment {
 
 // withoutMachineDecisions drops decisions about machine-authored comments,
 // so an agent that classifies every comment of a batch is not rejected.
-func withoutMachineDecisions(comments []Comment, decisions []PreferenceDecision) []PreferenceDecision {
+func withoutMachineDecisions(comments []Comment, decisions []PreferenceClassification) []PreferenceClassification {
 	machine := map[string]bool{}
 	for _, c := range comments {
 		if c.MachineAuthored() {
@@ -72,7 +72,7 @@ func withoutMachineDecisions(comments []Comment, decisions []PreferenceDecision)
 }
 
 //nolint:gocyclo // Each revision is captured and checkpointed in the same retryable workflow.
-func (s *Store) Learn(prefs *preferences.Store, batchID string, decisions []PreferenceDecision, owner, repoRoot string) (PreferenceReport, error) {
+func (s *Store) Learn(prefs *preferences.Store, batchID string, decisions []PreferenceClassification, owner, repoRoot string) (PreferenceReport, error) {
 	report := PreferenceReport{BatchID: batchID, Outcomes: []PreferenceOutcome{}}
 	// Without preference support (native Windows) decisions are validated and
 	// recorded as unsupported, so the batch can still be acknowledged.
@@ -101,7 +101,7 @@ func (s *Store) Learn(prefs *preferences.Store, batchID string, decisions []Pref
 	for _, c := range human {
 		known[c.ID] = c
 	}
-	classified := map[string]PreferenceDecision{}
+	classified := map[string]PreferenceClassification{}
 	for _, decision := range decisions {
 		c, exists := known[decision.CommentID]
 		if !exists || c.Revision != decision.Revision || classified[c.ID].Kind != "" {

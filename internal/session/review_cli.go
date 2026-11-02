@@ -158,7 +158,7 @@ func movedRangeHeadNote(focus *Focus, vcsOverride string) string {
 func deadSessionListener(key string, stale daemon.SessionEntry, sc *CLIReviewConfig) (daemon.SessionEntry, []string) {
 	reviewDir := stale.ReviewPath
 	if reviewDir == "" {
-		reviewDir, _ = daemon.ReviewFilePath(key)
+		reviewDir, _ = daemon.ReviewDir(key)
 	}
 	_, paused := ReadPausedMarker(reviewDir)
 	if !paused || sc.HostExplicit {

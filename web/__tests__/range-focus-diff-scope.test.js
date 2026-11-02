@@ -70,8 +70,8 @@ test('file diff loads use the story-aware file data scope helper', () => {
   );
   assert.match(
     appJs,
-    /loadAllFileData\(session\.files[^)]*currentFileDataScope\(\)/,
-    'loadAllFileData must use currentFileDataScope so story and range scopes agree'
+    /loadAllFileData\(session\.files[^)]*fetchScope\(\)/,
+    'loadAllFileData must use fetchScope so story and range scopes agree'
   );
 });
 

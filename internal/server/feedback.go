@@ -160,7 +160,7 @@ func (s *Server) handlePublish(w http.ResponseWriter, r *http.Request) {
 	}
 	sess.MarkDecisionsPublished(published.ID, published.Decisions)
 	if request.Disposition == "approve" && !s.statsRecorded && !s.sessionStartedAt.IsZero() && !s.cfg.DisableStats {
-		recordSessionStats(sess, s.author, s.sessionStartedAt, true)
+		session.RecordSessionStats(sess, s.author, s.sessionStartedAt, true)
 		s.statsRecorded = true
 	}
 	sess.SetAwaitingFirstReview(false)
@@ -352,8 +352,8 @@ func (s *Server) handleFeedbackLearn(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var request struct {
-		BatchID   string                        `json:"batch_id"`
-		Decisions []feedback.PreferenceDecision `json:"decisions"`
+		BatchID   string                              `json:"batch_id"`
+		Decisions []feedback.PreferenceClassification `json:"decisions"`
 	}
 	data, err := io.ReadAll(http.MaxBytesReader(w, r.Body, 2<<20))
 	if err != nil || strictjson.Decode(data, &request) != nil {

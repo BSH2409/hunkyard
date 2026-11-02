@@ -42,11 +42,11 @@ var (
 	resumeInitWaits = 60
 )
 
-// resumedSession finds the review's live daemon. A paused review (its marker
+// liveDaemonOrWaitForResume finds the review's live daemon. A paused review (its marker
 // is in the review folder) is not an error: a follow waiter keeps polling
 // until the review resumes; a one-shot caller gets errReviewPaused. A review
 // that is neither live nor paused stopped for good.
-func resumedSession(ctx context.Context, key string, follow bool) (daemon.SessionEntry, error) {
+func liveDaemonOrWaitForResume(ctx context.Context, key string, follow bool) (daemon.SessionEntry, error) {
 	for {
 		if entry, alive := lookupSession(key); alive {
 			return entry, nil
@@ -114,7 +114,7 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 	if *follow && action != "await" {
 		return fmt.Errorf("--follow is only supported for await")
 	}
-	entry, err := resumedSession(ctx, *key, *follow)
+	entry, err := liveDaemonOrWaitForResume(ctx, *key, *follow)
 	if errors.Is(err, errReviewPaused) {
 		if action == "await" {
 			return reportPaused(out, *key, *jsonOutput)
@@ -142,7 +142,7 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 		if err != nil {
 			return err
 		}
-		var decisions []feedback.PreferenceDecision
+		var decisions []feedback.PreferenceClassification
 		if strictjson.Decode(data, &decisions) != nil {
 			return fmt.Errorf("invalid preference decision JSON")
 		}
@@ -171,7 +171,7 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 			// reconnect to the new daemon. The same daemon failing again is a
 			// real error, not a pause.
 			if *follow && ctx.Err() == nil {
-				if next, resumeErr := resumedSession(ctx, *key, true); resumeErr == nil && !sameDaemon(next, entry) {
+				if next, resumeErr := liveDaemonOrWaitForResume(ctx, *key, true); resumeErr == nil && !sameDaemon(next, entry) {
 					entry = next
 					initWaitsLeft = resumeInitWaits
 					continue

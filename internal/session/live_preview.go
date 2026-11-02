@@ -25,7 +25,7 @@ func NewLiveSession(liveOrigin, reviewPath string) (*Session, error) {
 		Files:               []*FileEntry{},
 	}
 	if reviewPath != "" {
-		s.ReviewFilePath = reviewPath
+		s.ReviewDir = reviewPath
 		if cj, err := readHunkyardJSONFromDisk(reviewPath); err == nil {
 			hasComments := len(cj.ReviewComments) > 0
 			if !hasComments {
@@ -92,7 +92,7 @@ func NewPreviewSession(previewFile, reviewPath string) (*Session, error) {
 		},
 	}
 	if reviewPath != "" {
-		s.ReviewFilePath = reviewPath
+		s.ReviewDir = reviewPath
 		s.loadHunkyardJSON()
 		s.WriteFiles()
 	}

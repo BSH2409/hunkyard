@@ -30,7 +30,7 @@ func TestFileImpactFindsCallersAndTests(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Callers) != 1 || got.Callers[0].Path != "routes.go" || len(got.Tests) != 1 || got.Tests[0].Path != "api_test.go" {
+	if len(got.Mentions) != 1 || got.Mentions[0].Path != "routes.go" || len(got.Tests) != 1 || got.Tests[0].Path != "api_test.go" {
 		t.Fatalf("impact = %+v", got)
 	}
 }

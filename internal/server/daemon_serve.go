@@ -44,7 +44,7 @@ func CreateSession(sc *DaemonCLIConfig) (*Session, error) {
 		sess.VCS.SetDefaultBranchOverride(sc.BaseBranch)
 	}
 	if sc.ReviewPath != "" {
-		sess.ReviewFilePath = sc.ReviewPath
+		sess.ReviewDir = sc.ReviewPath
 		sess.LoadHunkyardJSON()
 	}
 	return sess, nil
@@ -53,7 +53,7 @@ func CreateSession(sc *DaemonCLIConfig) (*Session, error) {
 // ApplySessionOverrides applies plan/output/focus overrides after session creation.
 //
 // User --output / config output is resolved earlier into sc.ReviewPath
-// ({dataRoot}/reviews/<key>) and loaded via CreateSession's ReviewFilePath.
+// ({dataRoot}/reviews/<key>) and loaded via CreateSession's ReviewDir.
 // Plan mode still uses sess.OutputDir → <planDir>/.hunkyard via hunkyardJSONPath.
 // Explicit output wins over plan: skip plan OutputDir when OutputDir is set.
 func ApplySessionOverrides(sess *Session, sc *DaemonCLIConfig) {
@@ -66,7 +66,7 @@ func ApplySessionOverrides(sess *Session, sc *DaemonCLIConfig) {
 		sess.LoadHunkyardJSON()
 	}
 	// sc.OutputDir: do not set sess.OutputDir — that would rematerialize the
-	// legacy parent/.hunkyard layout and disagree with ReviewFilePath.
+	// legacy parent/.hunkyard layout and disagree with ReviewDir.
 	if sc.Focus != nil {
 		sess.RemoteFiles = sc.RemoteFiles
 		if err := sess.SetFocus(*sc.Focus); err != nil {

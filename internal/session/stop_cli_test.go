@@ -191,7 +191,7 @@ func pauseReviewForTest(t *testing.T, key, dir string) {
 
 func TestRunStopAllClearsPausedReviews(t *testing.T) {
 	testutil.SetHome(t, t.TempDir())
-	inReviews, err := daemon.ReviewFilePath("aaaaaaaaaaaa")
+	inReviews, err := daemon.ReviewDir("aaaaaaaaaaaa")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestRunStopClearsThisDirectorysPausedReview(t *testing.T) {
 	}
 	t.Chdir(dir)
 	key := daemon.SessionKey(dir, "", nil)
-	reviewDir, err := daemon.ReviewFilePath(key)
+	reviewDir, err := daemon.ReviewDir(key)
 	if err != nil {
 		t.Fatal(err)
 	}

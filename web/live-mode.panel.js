@@ -39,7 +39,7 @@
     return n;
   }
 
-  // computeResizeWidth — pure drag math for the comments-panel resize handle.
+  // resizedWidth — pure drag math for the comments-panel resize handle.
   // The panel sits on the right of the viewport; dragging the handle leftward
   // increases the panel width. NO clamping against viewport-preset width by
   // design — user gets what they ask for. We only enforce a low floor (`min`,
@@ -49,7 +49,7 @@
   //   startX: pointer.clientX at pointerdown
   //   currentX: current pointer.clientX
   //   min: minimum panel width (default 200)
-  function computeResizeWidth(startWidth, startX, currentX, min) {
+  function resizedWidth(startWidth, startX, currentX, min) {
     if (typeof min !== 'number' || min < 0) min = 200;
     var dx = currentX - startX;
     // Handle is on the LEFT edge of the panel; dragging left grows the panel.
@@ -60,6 +60,6 @@
 
   return {
     countUnresolved: countUnresolved,
-    computeResizeWidth: computeResizeWidth,
+    resizedWidth: resizedWidth,
   };
 });

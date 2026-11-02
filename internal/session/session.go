@@ -453,7 +453,7 @@ type Session struct {
 	// platforms without preferences).
 	ruleChecker         RuleChecker
 	ruleVerdictRecorder func(ruleID, verdict string) error
-	ReviewFilePath      string // centralized review file path (~/.hunkyard/reviews/<key>.json)
+	ReviewDir           string // the review folder (~/.hunkyard/reviews/<key>/) holding review.json
 	PlanDir             string // managed storage dir for plan mode (empty for git/files)
 	ReviewRound         int
 	IgnorePatterns      []string
@@ -1206,14 +1206,14 @@ func NewSessionFromFiles(paths []string, ignorePatterns []string) (*Session, err
 //
 // Skips the sidecar write when the identity would fall back to RepoRoot —
 // this path runs before applySessionOverrides has a chance to assign
-// ReviewFilePath / OutputDir. The first WriteFiles or round-complete will
+// ReviewDir / OutputDir. The first WriteFiles or round-complete will
 // re-emit the sidecar at the canonical centralized path.
 //
 // Pre-SetSession only — caller is the constructor and no concurrent readers
 // exist. See plan v4 §Lock discipline.
 func (s *Session) captureBaselineAndPersist() {
 	s.captureRoundSnapshot(s.ReviewRound)
-	if s.ReviewFilePath == "" && s.OutputDir == "" {
+	if s.ReviewDir == "" && s.OutputDir == "" {
 		return
 	}
 	if len(s.RoundSnapshots) == 0 {
@@ -2645,12 +2645,12 @@ func (s *Session) restoreFileCommentsLocked(cj *HunkyardJSON) {
 func (s *Session) loadHunkyardJSONLocked() {
 	identity := s.hunkyardJSONPath()
 
-	// Capture identity-on-entry. If ReviewFilePath / OutputDir were set
+	// Capture identity-on-entry. If ReviewDir / OutputDir were set
 	// BEFORE this call (the canonical resumed-session path in cli_serve),
 	// the on-disk sidecar is already authoritative and we don't need to
 	// rewrite it from in-memory state. Used downstream to skip a
 	// redundant O(N*M) clone+marshal+rename on every cold boot.
-	identityOnEntry := s.ReviewFilePath != "" || s.OutputDir != ""
+	identityOnEntry := s.ReviewDir != "" || s.OutputDir != ""
 
 	// MIGRATION-REMOVAL: trigger v3->v4 folder migration on read.
 	if err := ensureReviewFolder(identity); err != nil {
@@ -2663,7 +2663,7 @@ func (s *Session) loadHunkyardJSONLocked() {
 		// snapshots.json (orphan-snapshots) and we still want to surface that.
 		sidecarHadData := s.loadSnapshotsFromSidecar(identity)
 		// Persist the in-memory R1 baseline that NewSessionFromFiles captured
-		// in case ReviewFilePath / OutputDir was assigned just before this
+		// in case ReviewDir / OutputDir was assigned just before this
 		// call (the canonical constructor-time path).
 		//
 		// Resumed-session optimization (review W5): when the sidecar already
@@ -2715,7 +2715,7 @@ func (s *Session) loadHunkyardJSONLocked() {
 	// Restore round snapshots from the folder sidecar.
 	sidecarHadData := s.loadSnapshotsFromSidecar(s.hunkyardJSONPath())
 
-	// If ReviewFilePath / OutputDir was assigned just before this call (the
+	// If ReviewDir / OutputDir was assigned just before this call (the
 	// canonical constructor-time path in cli_serve), the in-memory R1 baseline
 	// captured by NewSessionFromFiles hasn't been persisted yet. Re-run the
 	// best-effort persist now that the identity is known.

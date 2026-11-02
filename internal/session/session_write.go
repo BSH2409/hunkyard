@@ -40,8 +40,8 @@ func (s *Session) hunkyardJSONPath() string {
 	if s.OutputDir != "" {
 		return filepath.Join(s.OutputDir, ".hunkyard")
 	}
-	if s.ReviewFilePath != "" {
-		return s.ReviewFilePath
+	if s.ReviewDir != "" {
+		return s.ReviewDir
 	}
 	if s.RepoRoot == "" {
 		// No review destination configured. Returning "" keeps writes out of
