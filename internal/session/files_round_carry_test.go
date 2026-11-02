@@ -70,3 +70,41 @@ func TestFilesRoundCompleteRemapsCommentsEditedBeforeAPoll(t *testing.T) {
 		t.Errorf("round 2 snapshot = %q, want the agent's new content", r2)
 	}
 }
+
+// A round in which a file did not change must not run the previous round's
+// line mapping over comments that were already moved. The repeated TODO lines
+// make a wrong destination pass anchor verification.
+func TestFilesRoundWithoutEditsLeavesCommentsWhereTheyAre(t *testing.T) {
+	dir := t.TempDir()
+	notes := filepath.Join(dir, "notes.md")
+	if err := os.WriteFile(notes, []byte("# Notes\n\na\nb\nc\nTODO\nfirst\nTODO\nsecond\nTODO\nthird\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := NewSessionFromFiles([]string{notes}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.ReviewDir = filepath.Join(dir, ".hunkyard")
+	s.captureBaselineAndPersist()
+	if _, ok := s.AddComment(s.Files[0].Path, 8, 8, "", "this one", "TODO", "reviewer"); !ok {
+		t.Fatal("comment not added")
+	}
+	s.WriteFiles()
+	// Round 1 to 2: the agent deletes three lines at the top.
+	if err := os.WriteFile(notes, []byte("# Notes\n\nTODO\nfirst\nTODO\nsecond\nTODO\nthird\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	s.SignalRoundComplete()
+	s.handleRoundCompleteFiles()
+	if got := commentLine(t, s, "notes.md"); got != 5 {
+		t.Fatalf("after the edit the comment is at line %d, want 5", got)
+	}
+	// Round 2 to 3 and 3 to 4: no edits at all.
+	for round := 3; round <= 4; round++ {
+		s.SignalRoundComplete()
+		s.handleRoundCompleteFiles()
+		if got := commentLine(t, s, "notes.md"); got != 5 {
+			t.Fatalf("an unedited round (%d) moved the comment to line %d, want it to stay at 5", round, got)
+		}
+	}
+}

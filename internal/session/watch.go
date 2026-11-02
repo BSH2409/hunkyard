@@ -899,7 +899,7 @@ func (s *Session) handleRoundCompleteFiles() {
 	s.rereadFileContents(true)
 	s.mu.Unlock()
 
-	s.carryForwardComments()
+	s.carryForwardEditedFileComments()
 
 	s.mu.Lock()
 	s.carryForwardAllComments()
@@ -1233,10 +1233,22 @@ func remapLines(lineMap map[int]int, oldStart, oldEnd, maxLine int) (int, int) {
 // positions using LCS line mapping + anchor verification. Works for all file
 // types (markdown and code) that have PreviousContent and PreviousComments.
 // Files without PreviousContent are left for carryForwardAllComments.
-func (s *Session) carryForwardComments() {
+func (s *Session) carryForwardComments() { s.carryForwardCommentsOf(false) }
+
+// carryForwardEditedFileComments is carryForwardComments for files mode: only
+// files that changed this round are remapped.
+func (s *Session) carryForwardEditedFileComments() { s.carryForwardCommentsOf(true) }
+
+func (s *Session) carryForwardCommentsOf(onlyEditedFiles bool) {
 	s.mu.RLock()
 	var toProcess []*FileEntry
 	for _, f := range s.Files {
+		// In files mode PreviousContent outlives its round: a file that did
+		// not change this round keeps its comments where they are, instead
+		// of running an earlier round's line mapping over them again.
+		if onlyEditedFiles && !f.roundBaseline {
+			continue
+		}
 		if f.PreviousContent != "" && len(f.PreviousComments) > 0 {
 			toProcess = append(toProcess, f)
 		}

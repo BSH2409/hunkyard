@@ -22,6 +22,10 @@ func TestRequestsCommit(t *testing.T) {
 		{"the last commit broke tests", false},
 		{"what does this commit change?", false},
 		{"don't open a PR", false},
+		{"do not create a PR", false},
+		{"never submit a pull request", false},
+		{"please don't raise a pull request yet", false},
+		{"no need to merge it", false},
 		{"explain the merge conflict", false},
 	}
 	for _, tt := range tests {

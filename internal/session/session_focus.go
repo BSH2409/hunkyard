@@ -269,8 +269,19 @@ func (s *Session) SetFocus(f Focus) error {
 	// The rebuild can take seconds, and the review stays writable meanwhile:
 	// flush comments added during it so the reload below brings them back.
 	s.WriteFiles()
+	if beforeFocusSwapForTest != nil {
+		beforeFocusSwapForTest()
+	}
 
 	s.mu.Lock()
+	// Comments accepted after the flush above live only on the old entries;
+	// hold them across the swap and put them back after the reload.
+	heldComments := map[string][]Comment{}
+	for _, old := range s.Files {
+		if len(old.Comments) > 0 {
+			heldComments[old.Path] = append([]Comment(nil), old.Comments...)
+		}
+	}
 	s.Focus = f
 	s.Files = newFiles
 	s.BaseRef = newBaseRef
@@ -295,6 +306,9 @@ func (s *Session) SetFocus(f Focus) error {
 	// would silently no-op this runtime reload.
 	s.mu.Lock()
 	s.loadHunkyardJSONLocked()
+	if s.restoreHeldCommentsLocked(heldComments) {
+		s.scheduleWrite()
+	}
 	s.mu.Unlock()
 
 	if err := s.persistActiveDiffScope(string(f.DiffScope)); err != nil {
@@ -428,6 +442,30 @@ func dropStaleCacheOnPRSwitch(oldFocus, newFocus Focus) {
 	if InvalidatePRCache != nil {
 		InvalidatePRCache(oldFocus.ChangeNumber, oldFocus.RemoteBaseProject, oldFocus.RemoteHost)
 	}
+}
+
+// beforeFocusSwapForTest, when set, runs in SetFocus between the last flush
+// and the swap of the file list: the window a browser comment can land in.
+var beforeFocusSwapForTest func()
+
+// restoreHeldCommentsLocked puts back comments held across a focus swap that
+// the reload from disk did not restore, and reports whether it added any.
+// Callers hold s.mu.
+func (s *Session) restoreHeldCommentsLocked(held map[string][]Comment) bool {
+	restored := false
+	for _, f := range s.Files {
+		have := map[string]bool{}
+		for _, c := range f.Comments {
+			have[c.ID] = true
+		}
+		for _, c := range held[f.Path] {
+			if !have[c.ID] {
+				f.Comments = append(f.Comments, c)
+				restored = true
+			}
+		}
+	}
+	return restored
 }
 
 // persistActiveDiffScope updates HunkyardJSON.ActiveDiffScope on disk via

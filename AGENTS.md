@@ -256,7 +256,7 @@ Static: `GET /files/<path>` — serve files from repo root (path traversal prote
 <important if="you are modifying server security, request handling, or path-validation logic">
 
 - Server binds to `0.0.0.0:5000` by default for Docker port forwarding. Use `--host 127.0.0.1` or `HUNKYARD_HOST=127.0.0.1` to restrict listening, including when resuming a stopped review. `HUNKYARD_ALLOW_UNAUTHENTICATED_NETWORK=0` refuses non-loopback binding unless the CLI allow flag overrides it. Project config cannot change the listen host or network permission. Publish Docker ports with `-p 127.0.0.1:port:port` because the browser API is unauthenticated.
-- State-changing requests (POST/PUT/PATCH/DELETE) with a `Sec-Fetch-Site` header must be `same-origin`. Missing header is allowed (CLI/curl/agent). `cross-site` is rejected — CSRF defense against malicious pages posting to loopback. Complements `checkHost` (DNS-rebinding); does not authenticate network clients.
+- State-changing requests (POST/PUT/PATCH/DELETE) with a `Sec-Fetch-Site` header must be `same-origin`. Missing header is allowed (CLI/curl/agent). `cross-site` is rejected — CSRF defense against malicious pages posting to loopback. Complements `hostAllowed` (DNS-rebinding); does not authenticate network clients.
 - `/files/` validates paths, blocks `..` traversal, verifies resolved path stays within repo root
 - Body size: 10MB for comments via `http.MaxBytesReader`
 - HTTP server: `ReadTimeout: 15s`, `IdleTimeout: 60s` (no `WriteTimeout` — SSE needs open connections)

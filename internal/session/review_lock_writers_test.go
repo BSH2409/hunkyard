@@ -161,11 +161,15 @@ func TestSignalRoundCompleteLeavesAnExternallyEditedReviewFile(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	stamped := false
+	stamped, second := false, false
 	for _, c := range after.Files[path].Comments {
 		stamped = stamped || c.GitHubID == 12345
+		second = second || c.Body == "second"
 	}
 	if !stamped {
 		t.Fatalf("the externally written github_id was overwritten: %+v", after.Files[path].Comments)
+	}
+	if !second {
+		t.Fatalf("the comment still waiting for its write was lost: %+v", after.Files[path].Comments)
 	}
 }

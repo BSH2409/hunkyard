@@ -170,7 +170,7 @@ async function dragStoryLineRange(page: Page, group: Locator, from: number, to: 
 // Ingest through the CLI (`hunkyard story --story-file`), which validates the
 // story and POSTs it to the running daemon. Only the CLI-path test uses this;
 // everything else posts straight to /api/story (postStory), which is the same
-// request the CLI makes (cmd/hunkyard/cli_handlers_story.go postStoryToDaemon)
+// request the CLI makes (cmd/hunkyard/cli_story.go postStoryToDaemon)
 // without spawning a process per test.
 async function ingestStoryCLI(hunkyardBin: string, fixtureDir: string, fakeHome: string, opts: { refresh?: boolean; story?: Record<string, unknown> } = {}) {
   const storyFile = writeStoryFixtureFile(opts.story || STORY);

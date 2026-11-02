@@ -114,6 +114,10 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 	if *follow && action != "await" {
 		return fmt.Errorf("--follow is only supported for await")
 	}
+	// A waiter that starts while the review is paused is handed the resumed
+	// daemon, which may still be initializing: it gets the same bounded wait
+	// as one that reconnects after a pause.
+	_, startedPaused := session.PausedReviewDir(*key)
 	entry, err := liveDaemonOrWaitForResume(ctx, *key, *follow)
 	if errors.Is(err, errReviewPaused) {
 		if action == "await" {
@@ -162,6 +166,9 @@ func feedbackCommand(ctx context.Context, args []string, out io.Writer) error {
 		return fmt.Errorf("unknown feedback action %q", action)
 	}
 	initWaitsLeft := 0
+	if startedPaused {
+		initWaitsLeft = resumeInitWaits
+	}
 	for {
 		requestCtx, cancel := context.WithTimeout(ctx, *timeout+5*time.Second)
 		resp, err := daemon.OwnerRequest(requestCtx, entry, *key, method, path, strings.NewReader(body))

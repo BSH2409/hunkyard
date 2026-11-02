@@ -350,6 +350,9 @@
     if (window.hunkyard.activity) activityTracker = window.hunkyard.activity.start();
     if (shared && shared.applyThemeFromCookie) shared.applyThemeFromCookie();
     state.session = await waitForSession();
+    // Drafts live in localStorage, which is per host and port; scope them to
+    // this review so another review on the same port never sees them.
+    if (window.hunkyard.draft && window.hunkyard.draft.setScope) window.hunkyard.draft.setScope(state.session.session_key);
     if (state.session.review_type !== 'live' && state.session.review_type !== 'preview') {
       console.warn('[live-mode] unexpected review_type:', state.session.review_type);
     }

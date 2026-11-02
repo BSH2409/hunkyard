@@ -2278,30 +2278,99 @@ func (s *Session) isWaitingForAgent() bool {
 // handler, which increments it only after comments have been carried forward from
 // the review file. This prevents a TOCTOU race where GetSessionInfo could observe the
 // new round number before carry-forward is complete, returning empty comments.
-// hasPendingWriteOverUnchangedFile reports an unwritten change in memory
-// while review.json is exactly as this daemon last read or wrote it.
-func (s *Session) hasPendingWriteOverUnchangedFile() bool {
+// pendingWriteState reports an unwritten change in memory, and whether
+// review.json is exactly as this daemon last read or wrote it.
+func (s *Session) pendingWriteState() (pending, fileUnchanged bool) {
 	s.mu.RLock()
 	pending, lastMtime := s.pendingWrite, s.lastHunkyardJSONMtime
 	s.mu.RUnlock()
 	if !pending {
-		return false
+		return false, false
 	}
 	info, err := os.Stat(ReviewPathsFor(s.hunkyardJSONPath()).Review)
 	if err != nil {
-		return lastMtime.IsZero()
+		return true, lastMtime.IsZero()
 	}
-	return info.ModTime().Equal(lastMtime)
+	return true, info.ModTime().Equal(lastMtime)
+}
+
+// addPendingCommentsToChangedFile saves comments still waiting for their
+// debounced write into a review.json another writer changed, leaving every
+// other edit in that file alone: only comments the file does not have yet
+// are added.
+func (s *Session) addPendingCommentsToChangedFile() {
+	hunkyardPath := s.hunkyardJSONPath()
+	if hunkyardPath == "" {
+		return
+	}
+	type pendingFile struct {
+		status   string
+		comments []Comment
+	}
+	s.mu.RLock()
+	files := map[string]pendingFile{}
+	for _, f := range s.Files {
+		if len(f.Comments) > 0 {
+			files[f.Path] = pendingFile{status: f.Status, comments: cloneCommentsWithReplies(f.Comments)}
+		}
+	}
+	reviewLevel := cloneCommentsWithReplies(s.reviewComments)
+	s.mu.RUnlock()
+	_ = WithReviewLock(hunkyardPath, func() error {
+		cj, err := readHunkyardJSONFromDisk(hunkyardPath)
+		if err != nil {
+			return err
+		}
+		if cj.Files == nil {
+			cj.Files = map[string]HunkyardJSONFile{}
+		}
+		changed := false
+		for path, pf := range files {
+			file := cj.Files[path]
+			have := map[string]bool{}
+			for _, c := range file.Comments {
+				have[c.ID] = true
+			}
+			for _, c := range pf.comments {
+				if !have[c.ID] {
+					file.Comments = append(file.Comments, c)
+					changed = true
+				}
+			}
+			if file.Status == "" {
+				file.Status = pf.status
+			}
+			cj.Files[path] = file
+		}
+		haveReview := map[string]bool{}
+		for _, c := range cj.ReviewComments {
+			haveReview[c.ID] = true
+		}
+		for _, c := range reviewLevel {
+			if !haveReview[c.ID] {
+				cj.ReviewComments = append(cj.ReviewComments, c)
+				changed = true
+			}
+		}
+		if !changed {
+			return nil
+		}
+		return saveHunkyardJSONToDisk(hunkyardPath, cj)
+	})
 }
 
 func (s *Session) SignalRoundComplete() {
-	// Write what the reviewer did in the last debounce window first: the
+	// Save what the reviewer did in the last debounce window first: the
 	// pending write is cancelled below and the comments cleared. A review
-	// file another writer changed since this daemon last touched it is left
-	// alone: the round reads that file, and a rewrite from memory would
-	// overwrite the other writer's edits.
-	if s.hasPendingWriteOverUnchangedFile() {
-		_ = s.SyncWriteFiles()
+	// file another writer changed since this daemon last touched it is not
+	// rewritten from memory, which would overwrite that writer's edits; only
+	// the comments it lacks are added.
+	if pending, unchanged := s.pendingWriteState(); pending {
+		if unchanged {
+			_ = s.SyncWriteFiles()
+		} else {
+			s.addPendingCommentsToChangedFile()
+		}
 	}
 	s.mu.Lock()
 	if s.writeTimer != nil {

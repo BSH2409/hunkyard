@@ -459,7 +459,7 @@ var commitIntent = regexp.MustCompile(`(?i)\b(?:commit|push)\b|\b(?:open|create|
 
 // Negation reaches the action word only across whitespace-separated words,
 // so "No, just commit it" is a request while "don't commit yet" is not.
-var negatedCommit = regexp.MustCompile(`(?i)\b(?:don'?t|do\s+not|never|no|not|without|stop|avoid)\b(?:\s+\w+){0,2}?\s+(?:commit|push|merge|open)\w*`)
+var negatedCommit = regexp.MustCompile(`(?i)\b(?:don'?t|do\s+not|never|no|not|without|stop|avoid)\b(?:\s+\w+){0,2}?\s+(?:commit|push|merge|open|create|raise|make|submit|send|pr|pull)\w*`)
 var commitNoun = regexp.MustCompile(`(?i)\b(?:the|a|an|this|that|last|previous|latest|each|every|my|your|its|initial|first)\s+(?:commit|push)(?:es|s)?\b`)
 
 // commitVerbPhrase is "make a commit"-style wording: the noun form of a
