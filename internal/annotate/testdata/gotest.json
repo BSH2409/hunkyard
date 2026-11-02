@@ -1,0 +1,7 @@
+{"Action":"run","Package":"example.com/demo","Test":"TestServe"}
+{"Action":"output","Package":"example.com/demo","Test":"TestServe","Output":"    server_test.go:12: want 200, got 500\n"}
+{"Action":"fail","Package":"example.com/demo","Test":"TestServe","Elapsed":0.01}
+{"Action":"run","Package":"example.com/demo","Test":"TestQuiet"}
+{"Action":"fail","Package":"example.com/demo","Test":"TestQuiet","Elapsed":0.01}
+{"Action":"pass","Package":"example.com/demo","Test":"TestOK","Elapsed":0.01}
+{"Action":"fail","Package":"example.com/demo","Elapsed":0.02}

@@ -290,7 +290,7 @@ func TestRecordSessionStats_SkipsEmptySessions(t *testing.T) {
 	setHome(t, home)
 
 	sess := &Session{Mode: "git"}
-	recordSessionStats(sess, "alice", time.Now().Add(-5*time.Minute))
+	recordSessionStats(sess, "alice", time.Now().Add(-5*time.Minute), false)
 
 	// File should not exist — session had no files and no comments.
 	path := filepath.Join(home, ".hunkyard", "stats.json")
@@ -317,7 +317,7 @@ func TestRecordSessionStats_WritesForActivity(t *testing.T) {
 		},
 	}
 
-	recordSessionStats(sess, "alice", start)
+	recordSessionStats(sess, "alice", start, false)
 
 	sf, err := loadStats()
 	if err != nil {
@@ -361,5 +361,23 @@ func TestStatsJSON_EmptyFile(t *testing.T) {
 	}
 	if parsed.Totals.Sessions != 0 {
 		t.Errorf("expected 0 sessions in JSON, got %d", parsed.Totals.Sessions)
+	}
+}
+
+func TestRecordSessionStatsApproved(t *testing.T) {
+	setHome(t, t.TempDir())
+	s := NewTestSession(t)
+	started := time.Now().Add(-90 * time.Second)
+	recordSessionStats(s, "reviewer", started, true)
+	recordSessionStats(s, "reviewer", started, false)
+	sf, err := loadStats()
+	if err != nil || len(sf.Sessions) != 2 {
+		t.Fatalf("stats = %+v %v", sf, err)
+	}
+	if !sf.Sessions[0].Approved || sf.Sessions[0].ApprovedAt == "" {
+		t.Fatalf("approved record = %+v", sf.Sessions[0])
+	}
+	if sf.Sessions[1].Approved || sf.Sessions[1].ApprovedAt != "" {
+		t.Fatalf("unapproved record = %+v", sf.Sessions[1])
 	}
 }

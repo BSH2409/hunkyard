@@ -92,3 +92,19 @@ test('git mode: tree orders a collapsed folder before a dotted sibling, like the
   ]);
   assert.deepEqual(treeOrder, listOrder);
 });
+
+test('risk order: an ordered flat node keeps the list order and shows full paths', () => {
+  const ordered = ['z/high.go', 'a/mid.go', 'm/low.go'].map(function(p) { return { path: p, status: 'modified', comments: [] }; });
+  const container = fakeElement();
+  new Function('pathCompare', 'document', 'node', 'container', `
+    const session = { mode: 'git' };
+    const treeFolderState = {};
+    const activeTreePath = null;
+    function escapeHtml(s) { return s; }
+    function fileStatusIcon() { return ''; }
+    ${extractFunction('renderTreeNode')}
+    renderTreeNode(container, node, 0, '');
+  `)(pathCompare, { createElement: fakeElement }, { children: {}, files: ordered, ordered: true }, container);
+  assert.deepEqual(treeFileOrder(container), ['z/high.go', 'a/mid.go', 'm/low.go']);
+  assert.match(container.children[0].innerHTML, /z\/high\.go/);
+});

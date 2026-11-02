@@ -12,8 +12,8 @@ var publicCommandNames = []string{
 	"preferences",
 	"feedback",
 	"install", "config", "check", "pr", "pull",
-	"push", "comment", "comments", "review", "live", "preview", "plan", "story",
-	"stop", "status", "resume", "stats", "cleanup",
+	"push", "annotate", "ask", "comment", "comments", "review", "live", "preview", "plan", "story",
+	"stop", "status", "resume", "inbox", "stats", "cleanup",
 }
 
 func TestCommandRegistry_PublicInventory(t *testing.T) {

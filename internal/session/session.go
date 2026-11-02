@@ -133,17 +133,23 @@ type Comment struct {
 	// comment but left the commented code byte-for-byte unchanged.
 	ClaimUnchangedRound int    `json:"claim_unchanged_round,omitempty"`
 	AuthorKind          string `json:"author_kind,omitempty"`
-	ID                  string `json:"id"`
-	ContentID           string `json:"content_id,omitempty"`
-	ViewID              string `json:"view_id,omitempty"`
-	StartLine           int    `json:"start_line"`
-	EndLine             int    `json:"end_line"`
-	Side                string `json:"side,omitempty"`
-	Body                string `json:"body"`
-	Quote               string `json:"quote,omitempty"`
-	QuoteOffset         *int   `json:"quote_offset,omitempty"`
-	Anchor              string `json:"anchor,omitempty"`
-	Drifted             bool   `json:"drifted,omitempty"`
+	// Source marks a machine-authored comment ("tool" or "rule") and
+	// SourceRef names the tool or rule; Verdict is the reviewer's
+	// "confirmed" or "dismissed" on a rule finding.
+	Source      string `json:"source,omitempty"`
+	SourceRef   string `json:"source_ref,omitempty"`
+	Verdict     string `json:"verdict,omitempty"`
+	ID          string `json:"id"`
+	ContentID   string `json:"content_id,omitempty"`
+	ViewID      string `json:"view_id,omitempty"`
+	StartLine   int    `json:"start_line"`
+	EndLine     int    `json:"end_line"`
+	Side        string `json:"side,omitempty"`
+	Body        string `json:"body"`
+	Quote       string `json:"quote,omitempty"`
+	QuoteOffset *int   `json:"quote_offset,omitempty"`
+	Anchor      string `json:"anchor,omitempty"`
+	Drifted     bool   `json:"drifted,omitempty"`
 	// DriftedOnRound is set to the review round that newly classified this pin
 	// as Drifted. Used to surface "Drifted on round N" in the live-mode side
 	// panel. Zero (omitempty) means "not stamped". Distinct from `Drifted bool`
@@ -433,11 +439,22 @@ type Session struct {
 	BaseBranchName string // display name of the base branch (e.g. "production", "master")
 	RepoRoot       string
 	OutputDir      string // custom output directory for the review file (empty = RepoRoot)
-	ReviewFilePath string // centralized review file path (~/.hunkyard/reviews/<key>.json)
-	PlanDir        string // managed storage dir for plan mode (empty for git/files)
-	ReviewRound    int
-	IgnorePatterns []string
-	compareBaseRef string // branch-history lower bound captured at launch
+	toolMarks      map[string]ToolMarks
+	decisions      []feedback.DecisionRequest
+	// impactCache holds FileImpact results per path; impactGrep replaces
+	// vcs.GrepTracked in tests.
+	impactCache map[string]impactEntry
+	impactGrep  func(ctx context.Context, dir string, words []string, exclude string) ([]vcs.GrepHit, error)
+	// ruleChecker and ruleVerdictRecorder connect the review to the learned
+	// preference checks (installed by the daemon; nil in tests and on
+	// platforms without preferences).
+	ruleChecker         RuleChecker
+	ruleVerdictRecorder func(ruleID, verdict string) error
+	ReviewFilePath      string // centralized review file path (~/.hunkyard/reviews/<key>.json)
+	PlanDir             string // managed storage dir for plan mode (empty for git/files)
+	ReviewRound         int
+	IgnorePatterns      []string
+	compareBaseRef      string // branch-history lower bound captured at launch
 
 	// generatedRules is the parsed top-level .gitattributes, loaded once per
 	// session. Used to flag files as linguist-generated so the frontend can
@@ -612,6 +629,13 @@ type HunkyardJSON struct {
 	// buildHunkyardJSON): as long as the field exists here, an externally-set story
 	// survives the debounced writes.
 	Story *Story `json:"story,omitempty"`
+
+	// ToolMarks holds line marks imported by `hunkyard annotate`, keyed by
+	// tool name (for example uncovered changed lines from a coverage run).
+	ToolMarks map[string]ToolMarks `json:"tool_marks,omitempty"`
+
+	// Decisions are `hunkyard ask` requests and the reviewer's answers.
+	Decisions []feedback.DecisionRequest `json:"decisions,omitempty"`
 }
 
 // remoteForgeGitHub tags pending deletes for GitHub review comments. Review
@@ -2305,6 +2329,8 @@ func (s *Session) ClearAllComments() {
 	}
 	s.Files = filtered
 	s.reviewComments = nil
+	s.toolMarks = nil
+	s.decisions = nil
 	s.ReviewRound = 1
 	s.RoundSnapshots = nil // v4 lock-discipline: reset in-lock alongside ReviewRound
 	s.lastHunkyardJSONMtime = time.Time{}
@@ -2642,6 +2668,8 @@ func (s *Session) loadHunkyardJSONLocked() {
 
 	// Restore the story (nil if none), so GetSessionInfo can surface it.
 	s.story = cj.Story
+	s.toolMarks = cloneToolMarks(cj.ToolMarks)
+	s.decisions = cloneDecisions(cj.Decisions)
 
 	// Restore pending DELETE intents so they survive across daemon restarts.
 	s.pendingRemoteDeletes = append([]RemoteRef(nil), cj.PendingRemoteDeletes...)

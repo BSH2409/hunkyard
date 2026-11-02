@@ -258,3 +258,15 @@ test('a claimed-fixed comment with unchanged code is badged until resolved', () 
   const resolved = card.buildCommentCard({ id: 'c2', body: 'fix', created_at: '2024-01-01T00:00:00Z', claim_unchanged_round: 2, resolved: true }, '', { deps: baseDeps() });
   assert.equal(findByClass(resolved.card, 'comment-label--claim').length, 0);
 });
+
+test('machine-authored comments show their source', () => {
+  const tool = card.buildCommentCard({ id: 't1', body: 'x', author: 'eslint', source: 'tool', source_ref: 'eslint', created_at: '2024-01-01T00:00:00Z' }, 'a.js', { deps: baseDeps() });
+  const badges = findByClass(tool.card, 'comment-source');
+  assert.equal(badges.length, 1);
+  assert.equal(badges[0].textContent, 'tool · eslint');
+  const rule = card.buildCommentCard({ id: 'r1', body: 'x', source: 'rule', source_ref: 'rule_1', verdict: 'confirmed', created_at: '2024-01-01T00:00:00Z' }, 'a.js', { deps: baseDeps() });
+  assert.equal(findByClass(rule.card, 'comment-source')[0].textContent, 'rule check');
+  assert.equal(findByClass(rule.card, 'comment-label--confirmed').length, 1);
+  const human = card.buildCommentCard({ id: 'h1', body: 'x', created_at: '2024-01-01T00:00:00Z' }, 'a.js', { deps: baseDeps() });
+  assert.equal(findByClass(human.card, 'comment-source').length, 0);
+});

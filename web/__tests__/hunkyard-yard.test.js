@@ -153,10 +153,10 @@ test('a slow view never overwrites the view the user switched to', async () => {
 test('the view switcher is a tablist with one selected, focusable tab', () => {
   const html = yard.tabsHTML('rules');
   assert.match(html, /role="tablist"/);
-  assert.equal((html.match(/role="tab"/g) || []).length, 7);
+  assert.equal((html.match(/role="tab"/g) || []).length, 8);
   assert.match(html, /data-yard-view="rules"[^>]*aria-selected="true"[^>]*tabindex="0"|aria-selected="true"[^>]*tabindex="0"[^>]*data-yard-view="rules"/);
   assert.equal((html.match(/aria-selected="true"/g) || []).length, 1);
-  assert.equal((html.match(/tabindex="-1"/g) || []).length, 6, 'roving tabindex: only the selected tab is in the Tab order');
+  assert.equal((html.match(/tabindex="-1"/g) || []).length, 7, 'roving tabindex: only the selected tab is in the Tab order');
   assert.match(html, /aria-controls="yard-panel"/);
 });
 
@@ -243,4 +243,38 @@ test('the attention count shows on the Health tab, and Health says what needs at
   assert.match(html, /class="yard-health-summary needs-attention">2 need attention/);
   assert.ok(html.indexOf('claude hooks') < html.indexOf('codex trust') && html.indexOf('codex trust') < html.indexOf('store'), 'failing, then warnings, then passing');
   assert.match(yard.healthHTML({ checks: [{ name: 'store', status: 'ok', detail: 'fine' }] }), /class="yard-health-summary">Everything is healthy/);
+});
+
+test('rules list shows how often reviewers dismissed a rule finding', () => {
+  const html = yard.rulesHTML([{ id: 'rule_d', directive: 'No console calls.', status: 'active', origin: 'feedback', scope_kind: 'global', surfaces: ['frontend'], observations: 1, violations: 0, dismissals: 2, updated_at: '2026-10-31T10:00:00Z' }], { status: 'active' });
+  assert.match(html, /2 dismissed/);
+  assert.doesNotMatch(yard.rulesHTML(rules, { status: 'active' }), /dismissed/);
+});
+
+test('insights view shows the window, counts and rules', () => {
+  const html = yard.insightsHTML({
+    window_days: 30, reviews: 4, approved: 3,
+    rounds_per_review: { median: 2, max: 5 }, comments_per_round: 1.75, approve_seconds: { median: 5400, max: 7200 },
+    by_label: { issue: 3, nit: 1 }, by_resolution: { resolved: 3, unresolved: 1, claim_unchanged: 1 },
+    by_repository: [{ repository: 'orion', reviews: 3, comments: 9 }],
+    rules: [{ rule_id: 'rule_a', directive: 'Name <things> well.', comments: 2, confirmed: 1, dismissed: 0 }],
+  });
+  const text = html.replace(/<[^>]+>/g, '');
+  assert.match(text, /4 reviews/);
+  assert.match(text, /3 approved/);
+  assert.match(text, /1\.8 comments per round/);
+  assert.match(html, /1h 30m/);
+  assert.match(html, /Name &lt;things&gt; well\./);
+  assert.match(html, /orion/);
+  assert.match(html, /issue/);
+});
+
+test('insights view explains an empty window', () => {
+  assert.match(yard.insightsHTML({ window_days: 7, reviews: 0, approved: 0, by_label: {}, by_resolution: {}, by_repository: [], rules: [] }), /No reviews ended in the last 7 days/);
+});
+
+test('insights toolbar marks the chosen window', () => {
+  const html = yard.insightsToolbarHTML(90);
+  assert.match(html, /data-yard-days="90"[^>]*aria-pressed="true"/);
+  assert.equal((html.match(/data-yard-days=/g) || []).length, 4);
 });

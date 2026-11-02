@@ -136,7 +136,7 @@ func TestStopIgnoresLinesPresentAtTurnStart(t *testing.T) {
 func TestGuardOnlyAppliesInItsRulesRepository(t *testing.T) {
 	s := testStore(t)
 	repo := guardRepo(t)
-	key, err := repositoryKey(repo)
+	key, err := RepositoryKey(repo)
 	if err != nil || key == "" {
 		t.Skip("repository identity unavailable")
 	}

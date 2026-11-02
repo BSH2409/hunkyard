@@ -154,6 +154,12 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 	mux.HandleFunc("/themes", s.serveHTML("themes.html"))
 	mux.HandleFunc("/api/preferences/", s.handleYard)
 
+	// Review inbox — every review on this machine; no session needed.
+	mux.HandleFunc("/inbox", s.serveHTML("inbox.html"))
+	mux.HandleFunc("/api/inbox", s.handleInbox)
+	mux.HandleFunc("/api/inbox/resume", s.handleInboxResume)
+	mux.HandleFunc("/api/inbox/state", s.withReady(s.handleInboxState))
+
 	// Live-mode routes — NOT wrapped in withReady.
 	mux.HandleFunc("/live", s.serveIndexHTML())
 	for _, f := range AgentScriptFiles {
@@ -185,6 +191,9 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 	mux.HandleFunc("/api/feedback/await", s.withReady(s.handleFeedbackAwait))
 	mux.HandleFunc("/api/feedback/ack", s.withReady(s.handleFeedbackAck))
 	mux.HandleFunc("/api/feedback/round", s.withReady(s.handleFeedbackRound))
+	mux.HandleFunc("/api/feedback/ask", s.withReady(s.handleFeedbackAsk))
+	mux.HandleFunc("/api/decisions", s.withReady(s.handleDecisions))
+	mux.HandleFunc("/api/decisions/", s.withReady(s.handleDecisions))
 	mux.HandleFunc("/api/config", s.withReady(s.handleConfig))
 	mux.HandleFunc("/api/code-fonts", s.withReady(s.handleCodeFonts))
 	mux.HandleFunc("/api/session", s.withReady(s.handleSession))
@@ -195,6 +204,7 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 	mux.HandleFunc("/api/wait-for-event", s.withReady(s.handleWaitForEvent))
 	mux.HandleFunc("/api/round-complete", s.withReady(s.handleRoundComplete))
 	mux.HandleFunc("/api/rounds", s.withReady(s.handleRounds))
+	mux.HandleFunc("/api/annotations", s.withReady(s.handleAnnotations))
 	mux.HandleFunc("/api/focus", s.withReady(s.handleFocus))
 	mux.HandleFunc("/api/picker", s.withReady(s.handlePicker))
 	mux.HandleFunc("/api/agent/request", s.withReady(s.handleAgentRequest))
@@ -212,6 +222,8 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 	// File-scoped endpoints (use ?path= query param)
 	mux.HandleFunc("/api/file", s.withReady(s.handleFile))
 	mux.HandleFunc("/api/file/diff", s.withReady(s.handleFileDiff))
+	mux.HandleFunc("/api/file/image", s.withReady(s.handleFileImage))
+	mux.HandleFunc("/api/file/impact", s.withReady(s.handleFileImpact))
 	mux.HandleFunc("/api/file/comments", s.withReady(s.handleFileComments))
 	mux.HandleFunc("/api/comment/", s.withReady(s.handleCommentByID))
 
@@ -529,6 +541,7 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) { //nolint
 
 		// Glob patterns the frontend auto-marks viewed (collapsed) once per launch
 		"auto_viewed_patterns": s.cfg.AutoViewedPatterns,
+		"risk_patterns":        s.cfg.RiskPatterns,
 
 		// Initial view for files with a Document/Diff toggle (markdown) in
 		// git mode: "document" forces document view, anything else keeps the
@@ -1331,6 +1344,9 @@ func routeCommentByID(trimmed string) (commentRoute, bool) {
 	if parts := strings.SplitN(trimmed, "/resolve", 2); len(parts) == 2 && parts[1] == "" {
 		return commentRoute{kind: "resolve", id: parts[0]}, true
 	}
+	if id, ok := strings.CutSuffix(trimmed, "/verdict"); ok && id != "" {
+		return commentRoute{kind: "verdict", id: id}, true
+	}
 	return commentRoute{kind: "comment", id: trimmed}, true
 }
 
@@ -1352,6 +1368,8 @@ func (s *Server) handleCommentByID(w http.ResponseWriter, r *http.Request) {
 		s.handleReplyRoute(w, r, path, route.id, route.sub)
 	case "resolve":
 		s.handleFileCommentResolve(w, r, path, route.id)
+	case "verdict":
+		s.handleRuleVerdict(w, r, path, route.id)
 	case "comment":
 		s.handleFileCommentUpdate(w, r, path, route.id)
 	}
@@ -1948,7 +1966,7 @@ func (s *Server) handleFinish(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if approved && !s.statsRecorded && !s.sessionStartedAt.IsZero() && !s.cfg.DisableStats {
-		recordSessionStats(sess, s.author, s.sessionStartedAt)
+		recordSessionStats(sess, s.author, s.sessionStartedAt, true)
 		s.statsRecorded = true
 	}
 

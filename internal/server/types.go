@@ -25,6 +25,7 @@ type (
 	DiffHunk         = session.DiffHunk
 	DOMAnchor        = session.DOMAnchor
 	Story            = session.Story
+	Coverage         = session.Coverage
 	PRListCache      = github.PRListCache
 	GitVCS           = vcs.GitVCS
 	CommitInfo       = vcs.CommitInfo

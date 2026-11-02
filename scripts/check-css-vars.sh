@@ -12,8 +12,11 @@ set -e
 # fenced code (web/hunkyard-code-highlight.js).
 # --hunkyard-find-* are read by the find highlights injected into Pierre
 # (web/hunkyard-find.js).
+# --hunkyard-uncovered-range-* tint lines a coverage tool marked
+# (pierreCommentRangeCSS in web/app.js).
 DEAD_VAR_ALLOWLIST="
 --hunkyard-find-bg --hunkyard-find-current-bg --hunkyard-find-current-fg
+--hunkyard-uncovered-range-bg --hunkyard-uncovered-range-edge
 --font-sans --header-height --review-chrome-height --file-tree-width --comments-panel-width --story-rail-width --p
 --hunkyard-border-strong --hunkyard-dur-base --hunkyard-dur-slow --hunkyard-ease-in --hunkyard-ease-out
 --hunkyard-fg-muted --hunkyard-fg-secondary --hunkyard-header-height

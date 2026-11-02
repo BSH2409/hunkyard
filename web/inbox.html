@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review inbox · hunkyard</title>
+<link rel="icon" type="image/png" sizes="96x96" href="favicon-96x96.png">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="theme.css">
+<link rel="stylesheet" href="hunkyard-palette.css">
+<link rel="stylesheet" href="style.css">
+<script src="pierre/palettes.js"></script>
+<script src="hunkyard-theme-palette.js"></script>
+<script>window.hunkyard.themePalette.applySaved();</script>
+</head>
+<body class="inbox-page">
+<div class="header">
+  <div class="header-left">
+    <a class="header-title" href="/" aria-label="Back to review">hunkyard<span class="header-logo-dot">.</span></a>
+    <span class="theme-preview-title">Review inbox</span>
+  </div>
+  <div class="header-right">
+    <a class="btn btn-sm" href="/">Back to review</a>
+  </div>
+</div>
+<main class="inbox" id="inbox">
+  <h1 class="inbox-title">Review inbox</h1>
+  <p class="inbox-summary" id="inboxSummary" role="status"></p>
+  <div id="inboxList"><p class="inbox-empty">Loading…</p></div>
+  <p class="inbox-note">Every review running on this machine, and every paused one. Resume restarts a paused review on its port when it is free.</p>
+</main>
+<script src="inbox.js"></script>
+<script>window.hunkyard.inbox.start(document.getElementById('inbox'), 5000);</script>
+</body>
+</html>

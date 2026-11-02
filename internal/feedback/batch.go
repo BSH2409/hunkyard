@@ -36,7 +36,17 @@ type Comment struct {
 	// Pin describes a comment pinned to an element of a live page or HTML
 	// preview; its Path is empty because the route is not a file.
 	Pin *PinContext `json:"pin,omitempty"`
+	// Source marks a machine-authored comment: "tool" for imported tool
+	// output, "rule" for a preference check. SourceRef names the tool or
+	// rule. Machine comments are never preference evidence.
+	Source    string `json:"source,omitempty"`
+	SourceRef string `json:"source_ref,omitempty"`
+	// Verdict is the reviewer's "confirmed" or "dismissed" on a rule finding.
+	Verdict string `json:"verdict,omitempty"`
 }
+
+// MachineAuthored reports whether a tool or a preference check wrote c.
+func (c Comment) MachineAuthored() bool { return c.Source != "" }
 
 // PinContext is what the agent needs to find a pinned element and see it.
 type PinContext struct {
@@ -105,6 +115,10 @@ type Batch struct {
 	Comments        []Comment  `json:"comments"`
 	SkillIDs        []string   `json:"skill_ids"`
 	PublishedSkills []SkillRef `json:"published_skills,omitempty"`
+	// Decisions are the reviewer's answers to `hunkyard ask` requests, plus
+	// requests still open. Omitted when empty so earlier batch identities
+	// (a digest of the whole batch) stay valid.
+	Decisions []DecisionRequest `json:"decisions,omitempty"`
 }
 
 func digest(value any) string {
@@ -126,7 +140,7 @@ func validateBatch(batch Batch) error {
 	default:
 		return fmt.Errorf("invalid review disposition")
 	}
-	if len(batch.Comments) > 5000 || len(batch.SkillIDs) > 100 || len(batch.Summary) > 64*1024 {
+	if len(batch.Comments) > 5000 || len(batch.SkillIDs) > 100 || len(batch.Summary) > 64*1024 || len(batch.Decisions) > 200 {
 		return fmt.Errorf("review batch exceeds limits")
 	}
 	seen := map[string]bool{}

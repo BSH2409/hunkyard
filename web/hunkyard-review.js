@@ -42,7 +42,9 @@
         dialog.addEventListener('cancel', cancel);
         document.getElementById('publishReviewCancel').addEventListener('click', cancel);
         submit.disabled = false;
-        var blocking = typeof window.hunkyardOpenBlockingComments === 'function' ? window.hunkyardOpenBlockingComments() : 0;
+        var blockingComments = typeof window.hunkyardOpenBlockingComments === 'function' ? window.hunkyardOpenBlockingComments() : 0;
+        var blockingDecisions = typeof window.hunkyardOpenBlockingDecisions === 'function' ? window.hunkyardOpenBlockingDecisions() : 0;
+        var blocking = blockingComments + blockingDecisions;
         var approve = form.querySelector('input[name="disposition"][value="approve"]');
         var approveHint = document.getElementById('publishApproveBlocked');
         if (approve) {
@@ -51,7 +53,10 @@
         }
         if (approveHint) {
           approveHint.hidden = blocking === 0;
-          approveHint.textContent = blocking === 1 ? '1 blocking comment is unresolved.' : blocking + ' blocking comments are unresolved.';
+          var reasons = [];
+          if (blockingComments) reasons.push(blockingComments === 1 ? '1 blocking comment is unresolved.' : blockingComments + ' blocking comments are unresolved.');
+          if (blockingDecisions) reasons.push(blockingDecisions === 1 ? '1 blocking decision is unanswered.' : blockingDecisions + ' blocking decisions are unanswered.');
+          approveHint.textContent = reasons.join(' ');
         }
         dialog.showModal();
         summary.focus();

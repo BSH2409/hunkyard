@@ -34,22 +34,22 @@ func TestRepositoryIdentityReferenceParity(t *testing.T) {
 	gitCommand(t, repo, "config", "extensions.worktreeConfig", "true")
 	gitCommand(t, repo, "config", "--worktree", "remote.origin.url", "git@example.invalid:fixture/one.git")
 	gitCommand(t, linked, "config", "--worktree", "remote.origin.url", "git@example.invalid:fixture/two.git")
-	a, err := repositoryKey(repo)
+	a, err := RepositoryKey(repo)
 	if err != nil {
 		t.Fatal(err)
 	}
-	b, err := repositoryKey(linked)
+	b, err := RepositoryKey(linked)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c, err := repositoryKey(other)
+	c, err := RepositoryKey(other)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if a == "" || a != b || a == c {
 		t.Fatalf("repository identity: %q %q %q", a, b, c)
 	}
-	if got, err := repositoryKey(root); err != nil || got != "" {
+	if got, err := RepositoryKey(root); err != nil || got != "" {
 		t.Fatalf("non-repo key = %q, %v", got, err)
 	}
 	want := "repo-" + digest(filepath.Join(repo, ".git"))[:12]

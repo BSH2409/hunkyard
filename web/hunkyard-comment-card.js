@@ -103,6 +103,21 @@
       authorBadge.textContent = '@' + comment.author;
       headerLeft.appendChild(authorBadge);
     }
+    if (comment.source) {
+      var sourceBadge = document.createElement('span');
+      sourceBadge.className = 'comment-source';
+      sourceBadge.textContent = comment.source === 'rule' ? 'rule check' : 'tool' + (comment.source_ref ? ' · ' + comment.source_ref : '');
+      sourceBadge.title = comment.source === 'rule'
+        ? 'Posted by a preference check. Confirm keeps it for the agent; Dismiss resolves it and weakens the rule.'
+        : 'Imported from a tool run with hunkyard annotate. A new run replaces it.';
+      headerLeft.appendChild(sourceBadge);
+    }
+    if (comment.verdict === 'confirmed') {
+      var verdictBadge = document.createElement('span');
+      verdictBadge.className = 'comment-label comment-label--confirmed';
+      verdictBadge.textContent = 'confirmed';
+      headerLeft.appendChild(verdictBadge);
+    }
     if (comment.label) {
       var labelBadge = document.createElement('span');
       labelBadge.className = 'comment-label comment-label--' + comment.label;

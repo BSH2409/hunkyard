@@ -397,6 +397,10 @@
   }
 
   let reviewComments = []; // review-level (general) comments
+  let toolMarks = {}; // /api/annotations: tool name → { round, marks, coverage }
+  let decisionRequests = []; // /api/decisions: questions the agent asked with `hunkyard ask`
+  let fileOrder = 'path'; // 'path' | 'risk' — transient view state, not persisted
+  let riskPatterns = []; // config risk_patterns, added to the built-in sensitive paths
   let reviewCommentFormActive = false; // is the review comment form open?
   let reviewCommentEditingId = null; // id of review comment being edited, or null
 
@@ -572,6 +576,37 @@
     }
     if (pa.length !== pb.length) return pb.length - pa.length;
     return pathCompare(pa[pa.length - 1], pb[pa.length - 1]);
+  }
+
+  // Order the file list: path order (fileSortComparator), or by risk score
+  // when the reviewer picked "By risk" in the overview.
+  function orderFiles() {
+    if (fileOrder !== 'risk' || !session || session.mode !== 'git') {
+      files.sort(fileSortComparator);
+      return;
+    }
+    const R = window.hunkyard.risk;
+    const patterns = R.defaultPatterns.concat(riskPatterns);
+    const changedPaths = files.map(function(f) { return f.path; });
+    const scores = new Map();
+    files.forEach(function(f) {
+      const ruleFindings = (f.comments || []).filter(function(c) { return c.source === 'rule' && !c.resolved; }).length;
+      const coverage = window.hunkyard.annotations.fileCoverage(toolMarks, f.path, session.review_round);
+      const result = R.score(f, { patterns: patterns, changedPaths: changedPaths, coverage: coverage, ruleFindings: ruleFindings });
+      f.riskReasons = result.reasons;
+      f.riskScore = result.value;
+      scores.set(f.path, result);
+    });
+    files.sort(R.compare(scores, pathCompare));
+  }
+
+  function setFileOrder(order) {
+    if (order === fileOrder) return;
+    fileOrder = order;
+    orderFiles();
+    renderFileTree();
+    renderPierreFiles();
+    renderPRPanel();
   }
 
   // Fetch and build file objects from the API for a list of file infos.
@@ -1034,6 +1069,8 @@
     sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
     session = sessionRes;
     reviewComments = sessionRes.review_comments || [];
+    loadToolMarks();
+    loadDecisions();
 
     // Fire-and-forget: verify file list endpoint is available for @-mention autocomplete
     fetch('/api/files/list')
@@ -1042,6 +1079,7 @@
 
     // Config
     autoViewedPatterns = Array.isArray(configRes.auto_viewed_patterns) ? configRes.auto_viewed_patterns : [];
+    riskPatterns = Array.isArray(configRes.risk_patterns) ? configRes.risk_patterns : [];
     defaultMarkdownView = configRes.default_markdown_view === 'document' ? 'document' : '';
     configAuthor = configRes.author || '';
     agentEnabled = configRes.agent_cmd_enabled || false;
@@ -1129,13 +1167,19 @@
       document.getElementById('branchContext').appendChild(headerCopyBtn);
     }
 
-    // PR overview panel toggle
+    // PR overview panel toggle; in git mode without a PR it opens the review
+    // overview (branch, commits, totals, file order).
     if (configRes.pr_url && configRes.pr_number) {
       prData = configRes;
       const prToggle = document.getElementById('prToggle');
       prToggle.style.display = '';
       document.getElementById('prToggleNumber').textContent = '#' + configRes.pr_number;
       if (configRes.pr_is_draft) prToggle.classList.add('pr-toggle-draft');
+    } else if (session.mode === 'git') {
+      const prToggle = document.getElementById('prToggle');
+      prToggle.style.display = '';
+      prToggle.title = 'Review overview';
+      prToggle.setAttribute('aria-label', 'Review overview');
     }
 
     // Show diff mode toggle in git mode (always has diffs)
@@ -1199,7 +1243,7 @@
     files = await loadAllFileData(session.files || [], currentFileDataScope());
     hiddenUnresolved = session.hidden_unresolved || 0;
 
-    files.sort(fileSortComparator);
+    orderFiles();
 
     restoreViewedState();
     applyAutoViewedOnce(autoViewedPatterns);
@@ -1439,8 +1483,12 @@
     // Build and render tree
     const query = document.getElementById('fileTreeFilter').value.trim().toLowerCase();
     const matchingFiles = files.filter(function(file) { return file.path.toLowerCase().includes(query); });
-    let tree = buildFileTree(matchingFiles);
-    tree = collapseCommonPrefixes(tree);
+    let tree;
+    if (fileOrder === 'risk' && session.mode === 'git') {
+      tree = { children: {}, files: matchingFiles, ordered: true };
+    } else {
+      tree = collapseCommonPrefixes(buildFileTree(matchingFiles));
+    }
     const body = document.getElementById('fileTreeBody');
     body.innerHTML = '';
 
@@ -1585,7 +1633,7 @@
     }
 
     // Render files. In files mode preserve user-provided CLI order.
-    const sortedFiles = session.mode === 'files'
+    const sortedFiles = session.mode === 'files' || node.ordered
       ? node.files.slice()
       : node.files.slice().sort(function(a, b) { return pathCompare(a.path, b.path); });
     for (let fi = 0; fi < sortedFiles.length; fi++) {
@@ -1600,7 +1648,8 @@
       const iconHtml = session.mode === 'git' ? fileStatusIcon(f.status) : fileStatusIcon('');
       let innerHtml =
         '<span class="tree-file-icon">' + iconHtml + '</span>' +
-        '<span class="tree-file-name">' + escapeHtml(fileName) + '</span>';
+        '<span class="tree-file-name">' + escapeHtml(node.ordered ? f.path : fileName) + '</span>';
+      if (node.ordered && f.riskReasons) fileEl.title = 'Risk ' + f.riskScore + (f.riskReasons.length ? ': ' + f.riskReasons.join(', ') : '');
 
       if (f.viewed) {
         innerHtml += '<span class="tree-viewed-check" title="Viewed">&#10003;</span>';
@@ -1828,7 +1877,9 @@
         if (c.scope === 'file' && !(hideResolved && c.resolved)) out.push(A.annotationForComment(c));
       }
       if (lineComments.length) out.push({ side: 'additions', lineNumber: 0, metadata: { kind: 'outdated', id: file.path } });
-      out.push({ side: 'additions', lineNumber: 0, metadata: { kind: 'placeholder', id: file.path } });
+      const fileForm = getFileComposeForm(file.path);
+      if (fileForm && !fileForm.editingId) out.push(A.annotationForForm(fileForm));
+      out.push({ side: 'additions', lineNumber: 0, metadata: { kind: pierreShowsImageDiff(file) ? 'image' : 'placeholder', id: file.path } });
       return out;
     }
     if (pierreIsDocumentView(file)) {
@@ -1863,6 +1914,7 @@
     // File-level threads and the outdated notice sit together, on the old
     // side (left of a split diff) unless the file has none.
     const fileSide = A.fileLevelSide(file.status);
+    if (file.impactOpen) out.push({ side: fileSide, lineNumber: 0, metadata: { kind: 'impact', id: file.path } });
     let outdated = false;
     for (let i = 0; i < (file.comments || []).length; i++) {
       const c = file.comments[i];
@@ -1893,6 +1945,31 @@
     el.className = 'diff-deleted-placeholder pierre-loading';
     el.textContent = 'Loading diff\u2026';
     return el;
+  }
+
+  // A changed image shows its image diff until an image fails to load; then
+  // it falls back to the binary metadata card.
+  function pierreShowsImageDiff(file) {
+    return file.fileType === 'binary' && !file.orphaned && !file.imageFallback &&
+      window.hunkyard.imageDiff.isImagePath(file.path);
+  }
+
+  function buildPierreImageDiff(filePath) {
+    const file = getFileByPath(filePath);
+    if (!file) return null;
+    const src = function(side) {
+      return '/api/file/image?path=' + enc(filePath) + '&side=' + side + '&v=' + enc(file.fileHash || file.viewID || '');
+    };
+    return window.hunkyard.imageDiff.build({
+      path: filePath,
+      status: file.status,
+      baseUrl: src('base'),
+      headUrl: src('head'),
+      onFallback: function() {
+        file.imageFallback = true;
+        refreshPierreFile(filePath);
+      },
+    });
   }
 
   function buildPierrePlaceholder(filePath) {
@@ -2167,6 +2244,8 @@
         if (kind === 'outdated') return buildPierreOutdated(filePath);
         if (kind === 'document') return buildPierreDocument(filePath);
         if (kind === 'placeholder') return buildPierrePlaceholder(filePath);
+        if (kind === 'image') return buildPierreImageDiff(filePath);
+        if (kind === 'impact') return buildPierreImpact(filePath);
         if (kind === 'loading') return buildPierreLoading();
         return buildPierreThread(filePath, id);
       },
@@ -2582,32 +2661,187 @@
   // data-hunkyard-path. Resolved comments drop out while hide-resolved is on.
   // Selectors are cached per file (only the current layout's are emitted),
   // so a refresh re-derives only files whose ranges or hunks changed.
-  const pierreRangeCache = new Map(); // path → { key, commented, forming }
+  // Tool marks imported with `hunkyard annotate`. Loads never overlap; an
+  // event during one shares a follow-up.
+  const loadToolMarks = window.hunkyard.sse.coalesced(async function() {
+    try {
+      const res = await fetch('/api/annotations');
+      if (!res.ok) return;
+      const data = await res.json();
+      toolMarks = (data && data.tools) || {};
+      syncPierreCommentRanges();
+      document.querySelectorAll('#filesContainer .pierre-file-header[data-file-path]').forEach(function(header) {
+        setCoverageBadge(header, header.dataset.filePath);
+      });
+    } catch {}
+  });
+
+  // Decision requests from `hunkyard ask`, shown in the bottom-right dock.
+  const loadDecisions = window.hunkyard.sse.coalesced(async function() {
+    try {
+      const res = await fetch('/api/decisions');
+      if (!res.ok) return;
+      decisionRequests = await res.json();
+      renderDecisions();
+    } catch {}
+  });
+
+  function renderDecisions() {
+    const dock = document.getElementById('decisionDock');
+    if (!dock) return;
+    window.hunkyard.decisions.render(dock, decisionRequests, {
+      onSubmit: submitDecisionAnswers,
+      onOpenContext: function(path, line) {
+        const file = getFileByPath(path);
+        if (!file || !pierreView) return;
+        if (file.collapsed) pierreView.setCollapsed(file, false);
+        if (line > 0) pierreView.scrollToLine(path, line, '', 'center');
+        else pierreView.scrollToFile(path);
+      },
+    });
+  }
+
+  // Sends the reviewer's answers one by one; a failure stops at that answer
+  // and the rest stay as drafts to submit again.
+  async function submitDecisionAnswers(answers) {
+    for (let i = 0; i < answers.length; i++) {
+      const res = await fetch('/api/decisions/' + encodeURIComponent(answers[i].id), {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(answers[i].answer),
+      });
+      if (!res.ok && res.status !== 409) throw new Error((await res.text()).trim() || 'server returned ' + res.status);
+      if (res.ok) {
+        const updated = await res.json();
+        decisionRequests = decisionRequests.map(function(d) { return d.id === updated.id ? updated : d; });
+      }
+    }
+    userActedThisRound = true;
+    renderDecisions();
+  }
+
+  // Impact of a changed file (callers and tests of what its diff changes),
+  // fetched once per file version; requests for the same file share one fetch.
+  const impactResults = new Map(); // path → { key, promise }
+  function impactFor(file) {
+    const key = (session && session.review_round) + ':' + (file.fileHash || '') + ':' + (file.diffHunks || []).length;
+    const hit = impactResults.get(file.path);
+    if (hit && hit.key === key) return hit.promise;
+    const promise = fetch('/api/file/impact?path=' + enc(file.path)).then(function(res) {
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      return res.json();
+    });
+    promise.catch(function() { if (impactResults.get(file.path) && impactResults.get(file.path).promise === promise) impactResults.delete(file.path); });
+    impactResults.set(file.path, { key: key, promise: promise });
+    return promise;
+  }
+
+  function impactAvailable(file) {
+    return session && session.mode === 'git' && file.fileType === 'code' && !file.lazy && !file.orphaned &&
+      (file.diffHunks || []).length > 0 && file.viewMode !== 'document';
+  }
+
+  function setImpactSummary(header, file) {
+    if (!impactAvailable(file)) return;
+    let summary = header.querySelector('.file-header-impact');
+    if (!summary) {
+      summary = document.createElement('button');
+      summary.type = 'button';
+      summary.className = 'file-header-impact';
+      summary.title = 'Other files that mention what this diff changes';
+      summary.addEventListener('click', function(e) {
+        e.stopPropagation();
+        file.impactOpen = !file.impactOpen;
+        summary.setAttribute('aria-pressed', file.impactOpen ? 'true' : 'false');
+        refreshPierreFile(file.path);
+      });
+      const anchor = header.querySelector('.file-header-coverage') || header.querySelector('.file-header-stats');
+      if (anchor) anchor.after(summary); else header.appendChild(summary);
+    }
+    summary.setAttribute('aria-pressed', file.impactOpen ? 'true' : 'false');
+    summary.textContent = 'Impact';
+    impactFor(file).then(function(result) {
+      const text = window.hunkyard.impact.pillText(result);
+      if (!summary.isConnected) return;
+      summary.textContent = text || 'Impact';
+      summary.title = 'Impact: ' + (window.hunkyard.impact.summaryLine(result) || 'no changed definitions') + '. Click to list them.';
+    }).catch(function() { return null; });
+  }
+
+  function buildPierreImpact(filePath) {
+    const file = getFileByPath(filePath);
+    if (!file) return null;
+    const el = document.createElement('div');
+    el.className = 'pierre-impact';
+    el.textContent = 'Looking up callers and tests\u2026';
+    impactFor(file).then(function(result) {
+      el.innerHTML = window.hunkyard.impact.panelHTML(result);
+    }).catch(function() {
+      el.textContent = 'Could not look up the impact of this file.';
+    });
+    el.addEventListener('click', function(e) {
+      const ref = e.target.closest('.impact-ref');
+      if (!ref) return;
+      const path = ref.dataset.impactPath;
+      const line = Number(ref.dataset.impactLine);
+      if (getFileByPath(path) && pierreView) {
+        if (line > 0) pierreView.scrollToLine(path, line, '', 'center');
+        else pierreView.scrollToFile(path);
+      } else {
+        const abs = session && session.cwd ? session.cwd + '/' + path : path;
+        navigator.clipboard.writeText(abs + (line > 0 ? ':' + line : '')).then(function() {
+          showMiniToast('Copied ' + path + (line > 0 ? ':' + line : '') + ' (not in this review)');
+        }).catch(function() { return null; });
+      }
+    });
+    return el;
+  }
+
+  function setCoverageBadge(header, filePath) {
+    let badge = header.querySelector('.file-header-coverage');
+    const coverage = window.hunkyard.annotations.fileCoverage(toolMarks, filePath, session && session.review_round);
+    const text = window.hunkyard.annotations.coverageLine(coverage);
+    if (!text) { if (badge) badge.remove(); return; }
+    if (!badge) {
+      badge = document.createElement('span');
+      const stats = header.querySelector('.file-header-stats');
+      if (stats) stats.after(badge); else header.appendChild(badge);
+    }
+    badge.className = 'file-header-coverage' + (coverage.uncovered ? ' file-header-coverage--gaps' : '');
+    badge.textContent = text;
+  }
+
+  const pierreRangeCache = new Map(); // path → { key, commented, forming, uncovered }
   function pierreCommentRangeCSS() {
     const hideResolved = isHideResolved();
     const unified = diffMode === 'unified';
     const commented = [];
     const forming = [];
+    const uncovered = [];
+    const round = session && session.review_round;
     for (let i = 0; i < files.length; i++) {
       const f = files[i];
+      const uncoveredRanges = window.hunkyard.annotations.uncoveredRanges(toolMarks, f.path, round);
       const commentRanges = (f.comments || []).filter(function(c) {
         return c.scope !== 'file' && !(hideResolved && c.resolved);
       }).map(function(c) { return { start: c.start_line, end: c.end_line, old: c.side === 'old' }; });
       const formRanges = getFormsForFile(f.path).filter(function(form) {
         return form.scope !== 'file' && form.startLine && (form.afterBlockIndex === null || form.afterBlockIndex === undefined);
       }).map(function(form) { return { start: form.startLine, end: form.endLine, old: form.side === 'old' }; });
-      if (!commentRanges.length && !formRanges.length) continue;
-      const key = (unified ? 'u' : 's') + JSON.stringify([commentRanges, formRanges]) +
+      if (!commentRanges.length && !formRanges.length && !uncoveredRanges.length) continue;
+      const key = (unified ? 'u' : 's') + JSON.stringify([commentRanges, formRanges, uncoveredRanges]) +
         (f.fileHash || '') + ':' + (f.diffHunks || []).length + ':' + f.viewMode;
       let hit = pierreRangeCache.get(f.path);
       if (!hit || hit.key !== key) {
-        hit = { key: key, commented: window.hunkyard.pierreDOM.pierreLineSelectors(f, commentRanges, unified, pierreIsFileView(f), pierrePreparedHunks(f)), forming: window.hunkyard.pierreDOM.pierreLineSelectors(f, formRanges, unified, pierreIsFileView(f), pierrePreparedHunks(f)) };
+        hit = { key: key, commented: window.hunkyard.pierreDOM.pierreLineSelectors(f, commentRanges, unified, pierreIsFileView(f), pierrePreparedHunks(f)), forming: window.hunkyard.pierreDOM.pierreLineSelectors(f, formRanges, unified, pierreIsFileView(f), pierrePreparedHunks(f)), uncovered: window.hunkyard.pierreDOM.pierreLineSelectors(f, uncoveredRanges, unified, pierreIsFileView(f), pierrePreparedHunks(f)) };
         pierreRangeCache.set(f.path, hit);
       }
       commented.push.apply(commented, hit.commented);
       forming.push.apply(forming, hit.forming);
+      uncovered.push.apply(uncovered, hit.uncovered);
     }
     let css = '';
+    if (uncovered.length) css += Array.from(new Set(uncovered)).join(',\n') + ' { box-shadow: inset 3px 0 0 var(--hunkyard-uncovered-range-edge); background-color: var(--hunkyard-uncovered-range-bg); }';
     if (commented.length) css += Array.from(new Set(commented)).join(',\n') + ' { background-color: var(--hunkyard-comment-range-bg); }';
     if (forming.length) css += Array.from(new Set(forming)).join(',\n') + ' { background-color: var(--hunkyard-brand-subtle); }';
     return css;
@@ -2795,7 +3029,7 @@
     if (!file || !pierreView) return;
     const keys = [];
     for (let i = 0; i < file.comments.length; i++) keys.push(pierreThreadKey(file.comments[i].id));
-    keys.push('outdated:' + filePath, 'placeholder:' + filePath);
+    keys.push('outdated:' + filePath, 'placeholder:' + filePath, 'image:' + filePath, 'impact:' + filePath);
     pierreView.refreshFile(file, keys);
     hunkyardFind.filesChanged();
     // The document keeps its element; its contents (line comments, forms,
@@ -3215,6 +3449,8 @@
         (file.deletions ? '<span class="del">-' + file.deletions + '</span>' : '') +
       '</span>' : '') +
       '';
+    setCoverageBadge(header, file.path);
+    setImpactSummary(header, file);
 
     (function(filePath) {
       const copyPathBtn = header.querySelector('.file-header-copy-path');
@@ -5405,11 +5641,44 @@
         .finally(function() { resolveBtn.disabled = false; });
     });
 
+    if (comment.source === 'rule' && !comment.verdict && !comment.resolved) {
+      parts.actions.appendChild(ruleVerdictButton(comment, filePath, 'confirmed', 'Confirm', 'Keep this finding open for the agent'));
+      parts.actions.appendChild(ruleVerdictButton(comment, filePath, 'dismissed', 'Dismiss', 'Not a violation: resolve it and count it against the check'));
+    }
     parts.actions.appendChild(resolveBtn);
     parts.actions.appendChild(editBtn);
     parts.actions.appendChild(deleteBtn);
 
     return parts.wrapper;
+  }
+
+  // A rule finding's Confirm / Dismiss button. The verdict is rule evidence
+  // in the preference store.
+  function ruleVerdictButton(comment, filePath, verdict, label, title) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'rule-verdict-btn rule-verdict-btn--' + verdict;
+    btn.textContent = label;
+    btn.title = title;
+    btn.addEventListener('click', async function() {
+      if (btn.disabled) return;
+      btn.disabled = true;
+      try {
+        const res = await fetch('/api/comment/' + encodeURIComponent(comment.id) + '/verdict?path=' + enc(filePath), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ verdict: verdict }),
+        });
+        if (!res.ok) throw new Error('Server returned ' + res.status);
+        userActedThisRound = true;
+        refreshFileComments(filePath);
+      } catch (err) {
+        console.error('Error recording verdict:', err);
+        showMiniToast('Failed to record the verdict');
+        btn.disabled = false;
+      }
+    });
+    return btn;
   }
 
   // Build a reply list container for a comment's replies
@@ -6595,6 +6864,7 @@
     const totalCount = allComments.length;
     const openCount = allComments.filter(function(c) { return !c.resolved; }).length;
     const resolvedCount = allComments.filter(function(c) { return c.resolved; }).length;
+    const machineCount = allComments.filter(function(c) { return !!c.source; }).length;
 
     // Update count badge
     const badge = document.getElementById('commentsPanelCountBadge');
@@ -6613,12 +6883,14 @@
       if (f === 'all') countEl.textContent = totalCount;
       else if (f === 'open') countEl.textContent = openCount;
       else if (f === 'resolved') countEl.textContent = resolvedCount;
+      else if (f === 'machine') countEl.textContent = machineCount;
     });
 
     // Filter function based on active pill
     const visibleFilter = function(c) {
       if (commentsActiveFilter === 'open') return !c.resolved;
       if (commentsActiveFilter === 'resolved') return c.resolved;
+      if (commentsActiveFilter === 'machine') return !!c.source;
       return true;
     };
 
@@ -6806,6 +7078,60 @@
   }
 
   // ===== PR Overview Panel =====
+  // Git-mode review overview: what is compared, the commits, the totals, and
+  // the order of the file list.
+  let overviewCommitsGen = 0;
+  function renderReviewOverview(body) {
+    const focus = session.focus || {};
+    const ranged = focus.kind === 'range';
+    const base = ranged ? (focus.base_ref_name || String(focus.base_sha || '').slice(0, 7)) : (session.base_branch_name || session.base_ref || 'HEAD');
+    let head = ranged ? (focus.head_ref_name || focus.label || String(focus.head_sha || '').slice(0, 7)) : (session.branch || '');
+    if (!ranged && (!head || head === base)) head = 'Working changes';
+    let add = 0, del = 0;
+    files.forEach(function(f) { add += f.additions || 0; del += f.deletions || 0; });
+    body.innerHTML =
+      '<div class="pr-panel-link-section"><span class="pr-panel-pr-title-text">Review overview</span>' +
+        '<button type="button" class="pr-panel-close" aria-label="Close overview" title="Close">&#x2715;</button></div>' +
+      '<div class="pr-panel-branches"><span class="pr-panel-branch">' + escapeHtml(head) + '</span>' +
+        '<svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" class="pr-panel-arrow" aria-hidden="true"><path d="M6.22 3.22a.75.75 0 0 1 1.06 0l4.25 4.25a.75.75 0 0 1 0 1.06l-4.25 4.25a.75.75 0 0 1-1.06-1.06L9.94 8 6.22 4.28a.75.75 0 0 1 0-1.06Z"/></svg>' +
+        '<span class="pr-panel-branch">' + escapeHtml(base) + '</span></div>' +
+      '<div class="pr-panel-stats"><span class="pr-panel-stat">' + files.length + (files.length === 1 ? ' file' : ' files') + '</span>' +
+        '<span class="pr-panel-stat"><span class="pr-panel-additions">+' + add + '</span> <span class="pr-panel-deletions">-' + del + '</span></span></div>' +
+      '<div class="overview-order"><span class="overview-label">Order files</span>' +
+        '<div class="file-header-toggle" role="group" aria-label="Order files" id="fileOrderToggle">' +
+          '<button type="button" class="toggle-btn' + (fileOrder === 'path' ? ' active' : '') + '" data-order="path" aria-pressed="' + (fileOrder === 'path') + '">By path</button>' +
+          '<button type="button" class="toggle-btn' + (fileOrder === 'risk' ? ' active' : '') + '" data-order="risk" aria-pressed="' + (fileOrder === 'risk') + '">By risk</button>' +
+        '</div></div>' +
+      (fileOrder === 'risk' ? '<ol class="overview-risk-list">' + files.slice(0, 10).map(function(f) {
+        return '<li><span class="overview-risk-score">' + (f.riskScore || 0) + '</span> <span class="overview-risk-path">' + escapeHtml(f.path) + '</span>' +
+          (f.riskReasons && f.riskReasons.length ? '<span class="overview-risk-why">' + escapeHtml(f.riskReasons.join(', ')) + '</span>' : '') + '</li>';
+      }).join('') + '</ol>' : '') +
+      '<div class="overview-commits"><h3 class="overview-label">Commits</h3><ul class="overview-commit-list"><li class="overview-muted">Loading…</li></ul></div>';
+    body.querySelector('.pr-panel-close').addEventListener('click', function() {
+      document.getElementById('prPanel').classList.add('pr-panel-hidden');
+      updateTocPosition();
+    });
+    body.querySelectorAll('#fileOrderToggle .toggle-btn').forEach(function(btn) {
+      btn.addEventListener('click', function() { setFileOrder(btn.dataset.order); });
+    });
+    const gen = ++overviewCommitsGen;
+    fetch('/api/commits').then(function(res) {
+      if (!res.ok) throw new Error('Server returned ' + res.status);
+      return res.json();
+    }).then(function(list) {
+      if (gen !== overviewCommitsGen) return;
+      const target = body.querySelector('.overview-commit-list');
+      if (!target) return;
+      const real = (list || []).filter(function(c) { return !c.virtual; });
+      target.innerHTML = real.length ? real.map(function(c) {
+        return '<li><code>' + escapeHtml(c.short_sha) + '</code> ' + escapeHtml(c.message) + ' <span class="overview-muted">' + escapeHtml(c.author || '') + '</span></li>';
+      }).join('') : '<li class="overview-muted">No commits beyond the base; only working changes.</li>';
+    }).catch(function() {
+      const target = body.querySelector('.overview-commit-list');
+      if (target && gen === overviewCommitsGen) target.innerHTML = '<li class="overview-muted">Could not load commits.</li>';
+    });
+  }
+
   function togglePRPanel() {
     const panel = document.getElementById('prPanel');
     const isHidden = panel.classList.contains('pr-panel-hidden');
@@ -6822,7 +7148,10 @@
     const panel = document.getElementById('prPanel');
     if (panel.classList.contains('pr-panel-hidden')) return;
     const pr = prData;
-    if (!pr) return;
+    if (!pr) {
+      if (session && session.mode === 'git') renderReviewOverview(document.getElementById('prPanelBody'));
+      return;
+    }
 
     const body = document.getElementById('prPanelBody');
     body.innerHTML = '';
@@ -7302,7 +7631,7 @@
           return f.viewMode === 'rendered-diff' && !f.lazy ? ensurePreviousLineBlocks(f) : null;
         }));
 
-        files.sort(fileSortComparator);
+        orderFiles();
 
         activeForms = [];
         activeReplyForms.clear();
@@ -7355,6 +7684,8 @@
       } catch {}
       },
       'comments-changed': refreshCommentsOnce,
+      'annotations-changed': loadToolMarks,
+      'decisions-changed': loadDecisions,
       'base-changed': function() {
       reloadForScope();
       fetchCommits();
@@ -8537,7 +8868,7 @@
       if (signal.aborted) return;
       files = loaded;
       hiddenUnresolved = session.hidden_unresolved || 0;
-      files.sort(fileSortComparator);
+      orderFiles();
       restoreViewedState();
       renderFileTree();
       renderAllFiles();
@@ -9019,6 +9350,7 @@
     return open;
   }
   window.hunkyardOpenBlockingComments = countOpenBlockingComments;
+  window.hunkyardOpenBlockingDecisions = function() { return window.hunkyard.decisions.openBlockingCount(decisionRequests); };
 
   // The Preferences tab (the Yard) shows hunkyard-preferences activity since this page opened.
   const yardSince = new Date().toISOString();

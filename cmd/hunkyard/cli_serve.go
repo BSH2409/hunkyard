@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/BSH2409/hunkyard/internal/localonly"
+	"github.com/BSH2409/hunkyard/internal/preferences"
 	"log"
 	"net"
 	"net/http"
@@ -334,13 +335,25 @@ func runServe(args []string) {
 	}
 	// Desktop notify is independent of Quiet: the daemon always sets Quiet so
 	// status goes through the client pipe, but AFK notifications should still fire.
+	ruleChecks := installRuleChecks(sess)
+	var notifyURL string
 	if sc.NotifyOnRoundReady {
-		reviewURL := advertisedURL(sc.PublicURL, sc.Host, addr.Port, "")
+		notifyURL = advertisedURL(sc.PublicURL, sc.Host, addr.Port, "")
+	}
+	if ruleChecks || notifyURL != "" {
 		sess.SetOnRoundReady(func(round int) {
-			go notifyRoundReady(round, reviewURL)
+			if ruleChecks {
+				sess.RunRuleChecks()
+			}
+			if notifyURL != "" {
+				go notifyRoundReady(round, notifyURL)
+			}
 		})
 	}
 	srv.SetSession(sess)
+	if ruleChecks {
+		go sess.RunRuleChecks()
+	}
 
 	// Idle reviews pause (free the port and exit) and resume later through
 	// `hunkyard --session`. Starting counts as activity; a stale marker from
@@ -394,7 +407,7 @@ func runServe(args []string) {
 	}
 
 	if srv.ShouldRecordStatsOnShutdown() {
-		recordSessionStats(sess, srv.Author(), sessionStartedAt)
+		recordSessionStats(sess, srv.Author(), sessionStartedAt, false)
 	}
 
 	if sess.ReviewFilePath != "" {
@@ -413,4 +426,26 @@ func idlePauseTiming(minutes int) (idle, every time.Duration) {
 		}
 	}
 	return idle, every
+}
+
+// installRuleChecks connects the review to the learned-preference diff
+// checks: findings on added lines become rule comments, and the reviewer's
+// verdicts become rule evidence. It reports whether checks are active.
+func installRuleChecks(sess *session.Session) bool {
+	if !preferences.SupportedPlatform || sess.Mode != "git" {
+		return false
+	}
+	store, err := preferences.Open(preferences.Config{})
+	if err != nil {
+		log.Printf("Warning: preference checks are off: %v", err)
+		return false
+	}
+	repoKey, _ := preferences.RepositoryKey(sess.RepoRoot)
+	sess.SetRuleChecker(func(lines []preferences.AddedLine) []preferences.DiffFinding {
+		return store.DiffFindings(repoKey, lines)
+	})
+	sess.SetRuleVerdictRecorder(func(ruleID, verdict string) error {
+		return store.RecordRuleVerdict(ruleID, repoKey, verdict)
+	})
+	return true
 }

@@ -66,10 +66,17 @@ test.describe('Interactive accessibility', () => {
     await expect(all).toHaveAttribute('tabindex', '-1');
     await expect(page.locator('.panel-comment-block .comment-body')).toHaveText('Open filter comment');
 
-    await page.keyboard.press('End');
+    await page.keyboard.press('ArrowRight');
     await expect(resolvedFilter).toBeFocused();
     await expect(resolvedFilter).toHaveAttribute('aria-checked', 'true');
     await expect(page.locator('.panel-comment-block .comment-body')).toHaveText('Resolved filter comment');
+
+    // End jumps to the last filter: comments from tools and rule checks.
+    const tools = page.locator('#commentsFilterPill [data-filter="machine"]');
+    await page.keyboard.press('End');
+    await expect(tools).toBeFocused();
+    await expect(tools).toHaveAttribute('aria-checked', 'true');
+    await expect(page.locator('.panel-comment-block')).toHaveCount(0);
   });
 
   test('file header collapse is a keyboard button with aria-expanded', async ({ page }) => {

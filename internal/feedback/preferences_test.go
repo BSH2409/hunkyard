@@ -236,3 +236,46 @@ func TestLearnWithoutPreferenceSupportCompletesBatch(t *testing.T) {
 		t.Fatalf("batch could not be acknowledged: %v", err)
 	}
 }
+
+func TestLearnIgnoresMachineComments(t *testing.T) {
+	store, prefs, _, repo, _ := preferenceFixture(t)
+	input := sampleBatch()
+	input.Comments[0].ID = "human-machine-test"
+	input.Comments = append(input.Comments, Comment{ID: "tool-1", Body: "unused variable", Path: "main.go", StartLine: 2, EndLine: 2, Source: "tool", SourceRef: "golangci-lint"})
+	batch, err := store.Publish("machine-comments", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	human := batch.Comments[0]
+	decisions := []PreferenceDecision{{CommentID: human.ID, Revision: human.Revision, Kind: "ignore"}}
+	report, err := store.Learn(prefs, batch.ID, decisions, "owner", repo)
+	if err != nil || len(report.Outcomes) != 1 {
+		t.Fatalf("machine comment required a decision: %#v %v", report, err)
+	}
+	if err := store.Ack(batch.ID); err != nil {
+		t.Fatalf("ack waited for a machine comment: %v", err)
+	}
+	machine := Comment{Source: "rule"}
+	if !machine.MachineAuthored() || (Comment{}).MachineAuthored() {
+		t.Fatal("MachineAuthored misreports provenance")
+	}
+}
+
+func TestLearnIgnoresDecisionsForMachineComments(t *testing.T) {
+	store, prefs, _, repo, _ := preferenceFixture(t)
+	input := sampleBatch()
+	input.Comments[0].ID = "human-with-machine-decision"
+	input.Comments = append(input.Comments, Comment{ID: "rule-1", Body: "Likely violates", Path: "main.go", StartLine: 2, EndLine: 2, Source: "rule", SourceRef: "rule_x"})
+	batch, err := store.Publish("machine-decisions", input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decisions := []PreferenceDecision{}
+	for _, c := range batch.Comments {
+		decisions = append(decisions, PreferenceDecision{CommentID: c.ID, Revision: c.Revision, Kind: "ignore"})
+	}
+	report, err := store.Learn(prefs, batch.ID, decisions, "owner", repo)
+	if err != nil || len(report.Outcomes) != 1 {
+		t.Fatalf("a decision for a machine comment was rejected: %#v %v", report, err)
+	}
+}

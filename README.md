@@ -65,11 +65,29 @@ Keep the same owner on every command. `--follow` waits until publication, cancel
 - **Changed since you viewed.** A file you marked Viewed comes back un-viewed with a badge when its content changes.
 - **Claimed fixed, code unchanged.** When the agent replies to a comment but leaves the commented lines identical, the next round reopens the comment and badges it, and the published batch sets `claim_unchanged`.
 - **Your own edits.** Lines you edit on disk during a review are published as `edit` comments (your version against the agent's), so the agent keeps them and can learn from them.
+- **Tool results in the diff.** `hunkyard annotate` imports output from tools you already run: SARIF (golangci-lint, ESLint, Semgrep and others), `go test -json`, Go cover profiles and lcov. Findings become comments by the tool, and changed lines no test covered get a red edge, with a "2 of 9 changed lines uncovered" note in the file header. Running it again for the same tool replaces that tool's earlier findings and keeps any thread you replied to. Hunkyard only reads the file you pass; it never runs the tool. The **Tools** filter in the comments panel lists these comments.
+
+  ```sh
+  go test -coverprofile=cover.out ./... && hunkyard annotate --format coverprofile cover.out
+  golangci-lint run --output.sarif.path=lint.sarif && hunkyard annotate --format sarif lint.sarif
+  go test -json ./... | hunkyard annotate --format go-test-json -
+  ```
+
+- **Rule checks.** A learned preference bound to a `diff_check` guard is checked against the lines the review adds when it opens and at every new round. A match is posted as a **rule check** comment. **Confirm** keeps it open for the agent and counts as a violation of the rule; **Dismiss** resolves it and counts against the check in the Preferences tab. Checks: `ruby_single_line_def`, `ruby_semicolon_statement`, `js_console_log`, `todo_without_owner`, `skipped_test_added`.
+
+Tool and rule comments carry `source` and `source_ref` in the published batch and are never preference evidence.
+
+- **Impact.** In Git mode each code file's header has an impact pill such as "2 callers · 1 test". It counts other tracked files that mention the functions, types and constants the diff adds or removes (Go, JavaScript and TypeScript, Ruby, Python), split into callers and tests. Click it to list them; a click on a reference jumps there when the file is part of the review. These are text matches, not a call graph.
+- **Overview and risk order.** The overview button in the header shows what is compared, the commits and the totals. **By risk** orders the file list and tree by a score you can read in the overview: sensitive paths (auth, secrets, migrations, payments and your `risk_patterns`), size of the change, no test changed next to it, uncovered lines and open rule findings.
+- **Decisions from the agent.** When the agent needs you to choose, it runs `hunkyard ask --session ID --option A --option B 'Question?'`. Its questions open in a panel in the bottom-right corner, one at a time: pick an option (or press its number), or write your own answer, then move to the next. A last page lists every question with your answer, with **Change** links, and **Submit answers** sends them together. They reach the agent with the next published review as `decisions`. A `--blocking` question keeps Approve disabled until you answer it.
 
 ### Idle pause and updates
 
 - **Idle pause.** A review with no activity for 30 minutes pauses: the daemon exits and frees its port, and the open tab shows **Review paused**. Clicking, typing or scrolling in the page counts as activity, and so does an agent turn while the preference hooks are installed. Ask your agent to resume (it runs `hunkyard --session REVIEW_ID`); the review comes back on the same port and the tab reconnects by itself. Comments survive the pause. Set the global config `idle_pause_minutes` (or `HUNKYARD_IDLE_PAUSE_MINUTES`) to change the time; `0` turns pausing off.
 - **Refresh.** The page does not redraw when files change underneath it. When the working tree, index, HEAD or refs move, a **This review has updates** banner offers **Refresh**. Changing the base or picking a commit always loads the latest state. Agent review rounds still update automatically.
+
+- **Inbox.** The inbox button in the header opens `/inbox`, a list of every review on this machine: which ones wait for you, where the agent is working, and which paused. A paused review has a **Resume** button. `hunkyard inbox` prints the same list.
+- **Insights.** `hunkyard stats --days 30` (and the **Insights** view in the Preferences tab) shows how your reviews went: rounds per review, comments per round, time to approve, comments by label and resolution, repositories, and the learned rules most often behind your comments. Everything is computed from local files; `disable_stats` turns recording off.
 
 ### Large repositories
 
@@ -129,6 +147,20 @@ hunkyard preferences allow RULE_ID --once    # run it yourself, e.g. with ! in t
 hunkyard preferences doctor --json          # hooks, trust, store, maintenance and cron
 ```
 
+### Team packs
+
+Share conventions with your team as a **team pack**: a folder of markdown with one rule per bullet, grouped by surface, and a `pack.json` that pins its digest. Export yours, hand the folder to a teammate (or commit it), and import theirs:
+
+```sh
+hunkyard preferences pack export --name backend --version 1.0.0 --out ./backend-pack --json
+hunkyard preferences pack import ./backend-pack --dry-run --json
+hunkyard preferences pack import ./backend-pack --json
+hunkyard preferences pack list --json
+hunkyard preferences pack remove shared-backend --json
+```
+
+A repository can commit its own pack under `.hunkyard/preferences-pack/`; every developer's session start imports it for that repository only, and removing the folder removes its rules. To decline a repository's pack, run `hunkyard preferences pack remove repo-…`: it stays out until the pack's content changes. `hunkyard preferences export --scope repository --to conventions.md` writes your repository rules as one markdown file to start from. Personal rules always win over pack rules, which win over source defaults. A pack only adds directives: it cannot change guards, hooks or configuration.
+
 ### Preferences tab
 
 A review's Settings has a **Preferences** tab (the Preference Yard). It shows:
@@ -172,7 +204,7 @@ Each pin takes a screenshot of the whole page inside the frame, with the element
 
 ## Local-only behavior
 
-Hunkyard performs no telemetry, analytics, update checks, remote sharing, forge requests, or automatic downloads. It makes no provider requests itself; the one exception you opt into is automatic preference maintenance, which runs your configured `claude` or `codex` CLI. Browser libraries and fonts ship inside the binary. Git is the only supported version control system. The process HTTP transport rejects external destinations before DNS/proxy use, and the review page's CSP restricts it to local assets. A page under review (live mode or HTML preview) loads its own fonts, scripts and images as it does when opened directly; set `HUNKYARD_BLOCK_EXTERNAL=1` to keep it to local resources. Git runs without remote lazy fetching, external diff/textconv/filter helpers, or filesystem monitor hooks. Dirty comparisons involving Git clean/process filters (including LFS) are rejected with an explanation; use committed `--range` comparisons for those paths. Binary changes stay in the file list as metadata, with raw bytes preserved in private review snapshots; SVG is reviewed as source. Live mode and HTML preview run pages only from this machine (loopback origins and local files); remote review commands are disabled.
+Hunkyard performs no telemetry, analytics, update checks, remote sharing, forge requests, or automatic downloads. It makes no provider requests itself; the one exception you opt into is automatic preference maintenance, which runs your configured `claude` or `codex` CLI. Browser libraries and fonts ship inside the binary. Git is the only supported version control system. The process HTTP transport rejects external destinations before DNS/proxy use, and the review page's CSP restricts it to local assets. A page under review (live mode or HTML preview) loads its own fonts, scripts and images as it does when opened directly; set `HUNKYARD_BLOCK_EXTERNAL=1` to keep it to local resources. Git runs without remote lazy fetching, external diff/textconv/filter helpers, or filesystem monitor hooks. Dirty comparisons involving Git clean/process filters (including LFS) are rejected with an explanation; use committed `--range` comparisons for those paths. Binary changes stay in the file list as metadata, with raw bytes preserved in private review snapshots. Changed PNG, JPEG, GIF and WebP files show the before and after images side by side, with **Slider** and **Onion skin** comparisons; the images are served only to the review page (10 MB per image). SVG is reviewed as source. Live mode and HTML preview run pages only from this machine (loopback origins and local files); remote review commands are disabled.
 
 The launching Codex/Claude session still communicates with its model provider as usual. Its tools and permissions remain under the host's control. Hunkyard itself only exchanges local HTTP and private files. This is an application-level boundary, not an operating-system network sandbox.
 

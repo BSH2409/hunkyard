@@ -78,9 +78,13 @@ hunkyard stop [--all]             # Stop daemon for current directory; --all sto
 hunkyard status [--json]          # Show review file path, daemon status, comment stats
 hunkyard resume [--list | <id>]   # Pick a stored review to reopen (interactive list of ~/.hunkyard/reviews)
 hunkyard cleanup [--days N] [--force]  # Delete stale review files from ~/.hunkyard/reviews/
+hunkyard inbox [--json]           # Every running and paused review on this machine (also served at /inbox by every daemon)
+hunkyard stats [--days N] [--json]  # Lifetime stats plus insights for the last N days (default 30; 0 = all time)
 hunkyard pull [pr-number]         # Fetch GitHub PR comments into the review file (disabled in the local-only build)
 hunkyard push [--dry-run] [--event <type>] [-m <msg>] [pr]  # Post review comments as a GitHub PR review (disabled in the local-only build)
 hunkyard pr <num|url>             # Thin shim — forwards to `hunkyard review --pr <n>` (disabled in the local-only build)
+hunkyard annotate --format <coverprofile|lcov|sarif|go-test-json> <file|->  # Import tool findings/coverage into the running review (replaces that tool's earlier findings)
+hunkyard ask --session <id> --option A --option B [--allow-other] [--blocking] [--context path:line] <question>  # Ask the reviewer a decision; the answer comes back in the batch's "decisions"
 hunkyard comment <path>:<line[-end]> <body>         # Add a comment (no server needed)
 hunkyard comment --selector <css> [--route <path>] <body>  # Pin a DOM element (live or HTML preview)
 hunkyard comment --reply-to <id> [--resolve] <body> # Reply to a comment
@@ -103,7 +107,7 @@ Two-level JSON config files, merged (project overrides global):
 - **Global**: `~/.hunkyard.config.json` — user-wide defaults
 - **Project**: `.hunkyard.config.json` in repo root — per-project overrides
 
-Config keys: `port`, `host`, `no_open`, `quiet`, `output`, `author`, `base_branch`, `ignore_patterns`, `auto_viewed_patterns`, `default_markdown_view`, `agent_cmd`, `plan_approve_mode`, `cleanup_on_approve`, `notify_on_round_ready`, `disable_stats`, `no_integration_check`, `vcs`, `live_cookie`, `live_cookie_file`, `live_cdp_url`, `close_on_approve_after_ms`, `stale_review_days`, `idle_pause_minutes`.
+Config keys: `port`, `host`, `no_open`, `quiet`, `output`, `author`, `base_branch`, `ignore_patterns`, `auto_viewed_patterns`, `risk_patterns`, `default_markdown_view`, `agent_cmd`, `plan_approve_mode`, `cleanup_on_approve`, `notify_on_round_ready`, `disable_stats`, `no_integration_check`, `vcs`, `live_cookie`, `live_cookie_file`, `live_cdp_url`, `close_on_approve_after_ms`, `stale_review_days`, `idle_pause_minutes`.
 
 - `base_branch` overrides auto-detected default branch (used as diff base in git mode, and by `hunkyard pull`/`hunkyard push`/`hunkyard comment`)
 - `author` falls back to the configured VCS user name if not set
@@ -117,6 +121,7 @@ Config keys: `port`, `host`, `no_open`, `quiet`, `output`, `author`, `base_branc
 - `disable_stats` (default: `false`) — disable session stats recording to `~/.hunkyard/stats.json`
 - `ignore_patterns` are unioned (global + project both apply); types: `*.ext`, `dir/`, `exact.file`, `path/*.ext`
 - `auto_viewed_patterns` are unioned (global + project both apply); matched client-side against file paths and applied once per launch to auto-mark matching files viewed (collapsed). No runtime default (empty). Plumbed through `/api/config` only — Go does no glob matching.
+- `risk_patterns` are unioned (global + project both apply); extra path globs (`**` spans directories) that the overview's **By risk** file order treats as sensitive, added to built-in ones (`**/auth/**`, `**/*secret*`, `**/migrations/**`, …). Plumbed through `/api/config` only.
 - `default_markdown_view` (`"diff"` | `"document"`, default unset = diff in git mode) — initial view for markdown files (Document/Diff toggle) in git mode. Project **overrides** global (scalar, not unioned). Invalid values are ignored with a stderr warning. No CLI flag. Plumbed through `/api/config` only.
 - `vcs` selects the backend; `"git"` is the only value (Sapling and Jujutsu were removed in v1.0.3). Any other value is ignored with a stderr warning and git is used
 - `live_cookie` / `live_cookie_file` forward session cookies to the upstream app in live mode (global or project; prefer gitignored `live_cookie_file` e.g. `.hunkyard/live-cookies.txt`). CLI: `hunkyard live --cookie`, `--cookie-file`
@@ -225,6 +230,10 @@ Session-scoped:
 - `GET|POST /api/base-branch` — read/update active base branch
 - `GET  /api/commits` — list commits between base ref and HEAD (git mode only)
 - `GET  /api/files/list` — list session files (lighter than `/api/session`)
+- `POST /api/feedback/ask` — owner-only: add a decision request (`hunkyard ask`)
+- `GET /api/decisions`, `PUT /api/decisions/{id}` — list decision requests; answer one (`{chosen}`, `{text}` or `{dismiss:true}`, same-origin page only)
+- `GET /inbox`, `GET /api/inbox` — review inbox page and its list (no session needed); `POST /api/inbox/resume {key}` restarts a paused review (same-origin page only); `GET /api/inbox/state` — this daemon's round, open comments and agent state
+- `GET|POST /api/annotations` — tool marks per tool (GET); replace one tool's findings and marks (POST `{tool, findings, marks}`, 10MB limit), used by `hunkyard annotate`
 - `GET  /api/files/comments` — every file's visible comments keyed by path (`?round=N` in files mode); one request instead of one per file
 - `GET|POST /api/comments` — list/add review-level comments
 - `PUT|DELETE /api/review-comment/{id}` (and `/replies[/{rid}]`, `/resolve`) — review-comment CRUD
@@ -233,10 +242,13 @@ File-scoped (require `?path=X`):
 
 - `GET  /api/file?path=X` — file content + metadata
 - `GET  /api/file/diff?path=X` — diff hunks (git diff for code; inter-round diff for markdown)
+- `GET  /api/file/impact?path=X` — callers and tests of the symbols the file's diff defines or removes (git mode; `git grep` text matches, capped, cached per file version; 404 outside git mode)
+- `GET  /api/file/image?path=X&side=base|head` — one side of a changed image (png/jpg/gif/webp, 10MB cap; 404 for a side the file lacks, 415 for non-image bytes, 403 to other sites)
 - `GET|POST /api/file/comments?path=X` — list/add comments (10MB body limit on POST)
 - `PUT|DELETE /api/comment/{id}?path=X` — update or delete (10MB body limit on PUT)
 - `POST|PUT|DELETE /api/comment/{id}/replies[/{rid}]?path=X` — reply CRUD
 - `PUT /api/comment/{id}/resolve?path=X` — set resolved state
+- `PUT /api/comment/{id}/verdict?path=X` — `{"verdict":"confirmed"|"dismissed"}` on a rule-check comment (409 for other comments); records rule evidence
 
 Static: `GET /files/<path>` — serve files from repo root (path traversal protected). `GET /` — embedded frontend assets.
 </important>

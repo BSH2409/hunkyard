@@ -54,15 +54,15 @@
     },
     {
       "path": "web/style.css",
-      "gzipBytes": 41000,
-      "note": "review page styles; homepage/legal pages use Tailwind, not this file"
+      "gzipBytes": 42000,
+      "note": "review page styles; homepage/legal pages use Tailwind, not this file; raised for the agent-questions chat dock"
     }
   ],
   "globs": [
     {
       "pattern": "web/hunkyard-*.js",
-      "gzipBytes": 125000,
-      "note": "shared renderer/comment/diff modules; recalibrated after moving Mermaid and fullscreen controls out of app.js into the renderer registry (~108 KB gzip); catches module sprawl"
+      "gzipBytes": 133500,
+      "note": "shared renderer/comment/diff modules; recalibrated after moving Mermaid and fullscreen controls out of app.js into the renderer registry (~108 KB gzip), then +4.2 KB for tool annotations, decision requests, the image diff, the impact panel, risk ordering and the paginated agent-questions dock; catches module sprawl"
     }
   ],
   "totalJsGzipBytes": 2300000,

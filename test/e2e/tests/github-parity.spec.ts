@@ -93,3 +93,48 @@ test('binary changes remain reviewable as metadata and SVG remains source', asyn
   await expect(publication).toBeOK();
   expect((await publication.json()).batch.snapshot_id).toMatch(/^snapshot_/);
 });
+
+// A 2×1 PNG whose first pixel is the given RGB colour.
+function pngPixel(r: number, g: number, b: number): Buffer {
+  const zlib = require('node:zlib') as typeof import('node:zlib');
+  const crcTable = Array.from({ length: 256 }, (_, n) => { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1; return c >>> 0; });
+  const crc = (buf: Buffer) => { let c = 0xffffffff; for (const byte of buf) c = crcTable[(c ^ byte) & 0xff] ^ (c >>> 8); return (c ^ 0xffffffff) >>> 0; };
+  const chunk = (type: string, data: Buffer) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type, 'ascii'), data]);
+    const sum = Buffer.alloc(4); sum.writeUInt32BE(crc(body));
+    return Buffer.concat([len, body, sum]);
+  };
+  const header = Buffer.alloc(13); header.writeUInt32BE(2, 0); header.writeUInt32BE(1, 4); header[8] = 8; header[9] = 2;
+  const pixels = zlib.deflateSync(Buffer.from([0, r, g, b, 255, 255, 255]));
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', pixels), chunk('IEND', Buffer.alloc(0))]);
+}
+
+test('image changes show base and head with a comparison toggle', async ({ page }) => {
+  const repo = path.join(root, 'repo');
+  const git = (...args: string[]) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'core.fsmonitor=false', ...args], { cwd: repo, encoding: 'utf8' }).trim();
+  writeFileSync(path.join(repo, 'logo.png'), pngPixel(255, 0, 0));
+  git('add', 'logo.png'); git('commit', '-qm', 'Red logo');
+  const base = git('rev-parse', 'HEAD');
+  writeFileSync(path.join(repo, 'logo.png'), pngPixel(0, 0, 255));
+  writeFileSync(path.join(repo, 'data.bin'), Buffer.from([0, 9, 9]));
+  git('add', 'logo.png', 'data.bin'); git('commit', '-qm', 'Blue logo');
+  await expect(await page.request.post(url + '/api/focus', { data: { kind: 'range', base_sha: base, head_sha: git('rev-parse', 'HEAD') } })).toBeOK();
+  await page.goto(url);
+  await expect(page.locator('.loading')).toBeHidden();
+  const item = await revealFile(page, 'logo.png');
+  const diff = item.locator('.image-diff');
+  await expect(diff).toBeVisible();
+  await expect(diff.locator('img')).toHaveCount(2);
+  await expect.poll(() => diff.locator('img').evaluateAll(imgs => imgs.map(img => (img as HTMLImageElement).naturalWidth))).toEqual([2, 2]);
+  await expect(diff.locator('.image-diff-caption').first()).toHaveText('Before · 2×1');
+  await diff.getByRole('button', { name: 'Slider' }).click();
+  await expect(diff).toHaveAttribute('data-mode', 'slider');
+  await expect(diff.getByRole('slider', { name: 'Compare' })).toBeVisible();
+
+  // A binary file that is not an image keeps its metadata card and takes a file comment.
+  const binary = await revealFile(page, 'data.bin');
+  await expect(binary).toContainText('Binary file changed.');
+  await binary.locator('.file-comment-btn').click();
+  await expect(binary.locator('.comment-form textarea')).toBeVisible();
+});

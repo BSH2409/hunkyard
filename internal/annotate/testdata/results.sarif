@@ -1,0 +1,4 @@
+{"version":"2.1.0","runs":[{"tool":{"driver":{"name":"golangci-lint"}},"results":[
+ {"ruleId":"unused","level":"warning","message":{"text":"x is unused"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"server.go"},"region":{"startLine":7,"endLine":8}}}]},
+ {"ruleId":"license","level":"note","message":{"text":"missing header"},"locations":[{"physicalLocation":{"artifactLocation":{"uri":"file:///repo/util/util.go"}}}]}
+]}]}

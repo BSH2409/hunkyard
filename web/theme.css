@@ -91,6 +91,7 @@
 
   /* ---- Shadow ---- */
   --hunkyard-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  --hunkyard-dock-shadow: 0 18px 40px -12px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.25);
 
   /* ---- Motion ---- */
   --hunkyard-dur-fast:   120ms;
@@ -122,6 +123,9 @@
 
   /* ---- Editor-specific: comment range ---- */
   --hunkyard-comment-range-bg: rgba(210, 153, 34, 0.13);
+  --hunkyard-uncovered-range-bg: rgba(248, 81, 73, 0.07);
+  --hunkyard-uncovered-range-edge: rgba(248, 81, 73, 0.55);
+  --hunkyard-image-checker: rgba(128, 128, 128, 0.18);
 
   /* ---- Editor-specific: table ---- */
   --hunkyard-table-stripe: rgba(133, 170, 248, 0.04);
@@ -325,6 +329,7 @@
     --hunkyard-border-comment: #0969da;
 
     --hunkyard-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    --hunkyard-dock-shadow: 0 18px 40px -14px rgba(31,35,40,0.28), 0 2px 6px rgba(31,35,40,0.08);
 
     /* ---- Diff highlights (light) ---- */
     --hunkyard-diff-add-bg:       #dafbe1;
@@ -335,6 +340,9 @@
     --hunkyard-diff-word-del-bg:  #ffcecb;
 
     --hunkyard-comment-range-bg: rgba(210, 153, 34, 0.15);
+    --hunkyard-uncovered-range-bg: rgba(248, 81, 73, 0.07);
+    --hunkyard-uncovered-range-edge: rgba(248, 81, 73, 0.55);
+    --hunkyard-image-checker: rgba(128, 128, 128, 0.18);
     --hunkyard-table-stripe: rgba(0, 0, 0, 0.02);
     --hunkyard-blockquote-border: #0969da;
     --hunkyard-alert-note: #0550ae;
@@ -533,6 +541,7 @@
   --hunkyard-border-comment: #3d59a1;
 
   --hunkyard-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  --hunkyard-dock-shadow: 0 18px 40px -12px rgba(0,0,0,0.55), 0 2px 8px rgba(0,0,0,0.25);
 
   /* ---- Diff highlights ---- */
   --hunkyard-diff-add-bg:       rgba(86, 211, 100, 0.08);
@@ -543,6 +552,9 @@
   --hunkyard-diff-word-del-bg:  rgba(248, 81, 73, 0.18);
 
   --hunkyard-comment-range-bg: rgba(210, 153, 34, 0.13);
+  --hunkyard-uncovered-range-bg: rgba(248, 81, 73, 0.07);
+  --hunkyard-uncovered-range-edge: rgba(248, 81, 73, 0.55);
+  --hunkyard-image-checker: rgba(128, 128, 128, 0.18);
   --hunkyard-table-stripe: rgba(133, 170, 248, 0.04);
   --hunkyard-blockquote-border: #3d59a1;
   --hunkyard-alert-note: #58a6ff;
@@ -740,6 +752,7 @@
   --hunkyard-border-comment: #0969da;
 
   --hunkyard-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  --hunkyard-dock-shadow: 0 18px 40px -14px rgba(31,35,40,0.28), 0 2px 6px rgba(31,35,40,0.08);
 
   /* ---- Diff highlights (light) ---- */
   --hunkyard-diff-add-bg:       #dafbe1;
@@ -750,6 +763,9 @@
   --hunkyard-diff-word-del-bg:  #ffcecb;
 
   --hunkyard-comment-range-bg: rgba(210, 153, 34, 0.15);
+  --hunkyard-uncovered-range-bg: rgba(248, 81, 73, 0.07);
+  --hunkyard-uncovered-range-edge: rgba(248, 81, 73, 0.55);
+  --hunkyard-image-checker: rgba(128, 128, 128, 0.18);
   --hunkyard-table-stripe: rgba(0, 0, 0, 0.02);
   --hunkyard-blockquote-border: #0969da;
   --hunkyard-alert-note: #0550ae;

@@ -6,8 +6,10 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/BSH2409/hunkyard/internal/preferences"
+	"github.com/BSH2409/hunkyard/internal/session"
 )
 
 // handleYard serves the Preference Yard API behind the Settings Preferences
@@ -44,6 +46,17 @@ func (s *Server) handleYard(w http.ResponseWriter, r *http.Request) {
 		result, err = store.YardLoads()
 	case r.Method == http.MethodGet && path == "health":
 		result = store.YardHealth()
+	case r.Method == http.MethodGet && path == "insights":
+		days := 30
+		if raw := r.URL.Query().Get("days"); raw != "" {
+			n, convErr := strconv.Atoi(raw)
+			if convErr != nil || n < 0 {
+				http.Error(w, "days must be 0 (all time) or a positive number", http.StatusBadRequest)
+				return
+			}
+			days = n
+		}
+		result, err = session.ComputeReviewInsights(days, time.Now(), session.InsightSources{RulesForObservations: store.RulesForObservations, RuleVerdicts: store.RuleVerdictCounts})
 	case r.Method == http.MethodGet && path == "activity":
 		limit, convErr := strconv.Atoi(r.URL.Query().Get("limit"))
 		if convErr != nil || limit <= 0 || limit > 500 {

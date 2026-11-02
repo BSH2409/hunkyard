@@ -110,7 +110,7 @@ func (s *Store) editRulesResponse(payload map[string]any) map[string]any {
 		return nil
 	}
 	session := textField(payload["session_id"])
-	repo, _ := repositoryKey(textField(payload["cwd"]))
+	repo, _ := RepositoryKey(textField(payload["cwd"]))
 	seen := map[string]bool{}
 	for _, id := range s.loadSession(session).InjectedRuleIDs {
 		seen[id] = true

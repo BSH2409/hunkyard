@@ -26,9 +26,55 @@ var rubySingleLineDef = []*regexp.Regexp{
 
 var rubyQuoted = regexp.MustCompile(`"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'`)
 
+var (
+	jsConsoleCall   = regexp.MustCompile(`\bconsole\.(?:log|debug|info|trace|dir)\s*\(`)
+	todoMarker      = regexp.MustCompile(`\b(?:TODO|FIXME|XXX)\b(\([^)]+\))?`)
+	skippedTestCall = regexp.MustCompile(`\bt\.Skip(?:f|Now)?\s*\(|\b(?:it|test|describe)\.skip\s*\(|^\s*x(?:it|describe|test)\b|\bpytest\.mark\.skip|@unittest\.skip|\bskip\s*\(?\s*["']`)
+	jsExtensions    = map[string]bool{".js": true, ".mjs": true, ".cjs": true, ".jsx": true, ".ts": true, ".tsx": true}
+)
+
+// lineFindings applies one predicate to every added line.
+func lineFindings(added []string, message string, match func(string) bool) []string {
+	var findings []string
+	for i, line := range added {
+		if match(line) {
+			findings = append(findings, fmt.Sprintf("%d: %s", i, message))
+		}
+	}
+	return findings
+}
+
+func isTestPath(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasSuffix(base, "_test.go") || strings.Contains(base, ".spec.") || strings.Contains(base, ".test.") ||
+		strings.HasSuffix(base, "_spec.rb") || strings.HasPrefix(base, "test_") || strings.HasSuffix(base, "_test.py")
+}
+
 // diffChecks are mechanical checks a diff_check guard can run on lines the
 // agent added. Each returns one message per offending line ("line N: …").
 var diffChecks = map[string]diffCheck{
+	"js_console_log": func(path string, added []string) []string {
+		if !jsExtensions[filepath.Ext(path)] {
+			return nil
+		}
+		return lineFindings(added, "console call left in code", jsConsoleCall.MatchString)
+	},
+	"todo_without_owner": func(path string, added []string) []string {
+		return lineFindings(added, "TODO without an owner", func(line string) bool {
+			for _, m := range todoMarker.FindAllStringSubmatch(line, -1) {
+				if m[1] == "" {
+					return true
+				}
+			}
+			return false
+		})
+	},
+	"skipped_test_added": func(path string, added []string) []string {
+		if !isTestPath(path) {
+			return nil
+		}
+		return lineFindings(added, "test skipped", skippedTestCall.MatchString)
+	},
 	"ruby_single_line_def": func(path string, added []string) []string {
 		if filepath.Ext(path) != ".rb" {
 			return nil
@@ -196,7 +242,7 @@ func (s *Store) stopHook(input io.Reader, output io.Writer) {
 		return
 	}
 	_ = s.updateSession(session, func(stored *sessionState) { stored.StopBlockedTurn = current })
-	repo, _ := repositoryKey(cwd)
+	repo, _ := RepositoryKey(cwd)
 	_ = s.recordActivity(ActivityEvent{Kind: activityBlocked, RepoKey: repo, SessionKey: digest(session), Detail: strings.Join(findings, "; ")})
 	response["decision"] = "block"
 	response["reason"] = "Before finishing, fix these preference violations:\n- " + strings.Join(findings, "\n- ")

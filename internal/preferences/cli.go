@@ -33,6 +33,12 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "guard" || args[0] == "allow") {
 		return runGuardCLI(args, stdout)
 	}
+	if len(args) > 0 && args[0] == "pack" {
+		return runPackCLI(args, stdout)
+	}
+	if len(args) > 0 && args[0] == "export" {
+		return runExportCLI(args, stdout)
+	}
 	if len(args) > 0 && args[0] == "check" {
 		return runGuardCheck(args[1:], stdout)
 	}
@@ -193,7 +199,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			cwd, _ = os.Getwd()
 		}
 		if explicit && scope == "repository" && repo == "" {
-			repo, err = repositoryKey(cwd)
+			repo, err = RepositoryKey(cwd)
 			if err != nil || repo == "" {
 				return usage("LearnPreferences::CLIUsageError")
 			}
@@ -266,7 +272,7 @@ func Run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 			projectRoot = filepath.Join(cwd, ".codex")
 		}
 		if repo == "" {
-			repo, err = repositoryKey(cwd)
+			repo, err = RepositoryKey(cwd)
 		}
 		if err != nil || repo == "" {
 			return usage("LearnPreferences::CLIUsageError")

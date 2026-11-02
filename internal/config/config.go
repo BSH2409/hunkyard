@@ -26,6 +26,10 @@ type Config struct {
 	BaseBranch         string   `json:"base_branch,omitempty"`
 	IgnorePatterns     []string `json:"ignore_patterns,omitempty"`
 	AutoViewedPatterns []string `json:"auto_viewed_patterns,omitempty"`
+	// RiskPatterns adds path globs that the review's "By risk" file order
+	// treats as sensitive (on top of built-in ones such as **/auth/**).
+	// Unioned across global and project config.
+	RiskPatterns []string `json:"risk_patterns,omitempty"`
 	// DefaultMarkdownView selects the initial view for files that support
 	// document view (markdown with the Document/Diff toggle) in git mode.
 	// Allowed values: "diff" | "document". Empty (unset) keeps today's
@@ -375,6 +379,7 @@ func mergeConfigs(global, project Config, projectPresence ConfigPresence) Config
 	merged.IgnorePatterns = append(merged.IgnorePatterns, project.IgnorePatterns...)
 	// Union auto-viewed patterns (global + project both apply)
 	merged.AutoViewedPatterns = append(merged.AutoViewedPatterns, project.AutoViewedPatterns...)
+	merged.RiskPatterns = append(merged.RiskPatterns, project.RiskPatterns...)
 	// Scalar override (not unioned): a non-empty project value wins via
 	// preferProjectString. Empty keeps today's behavior (diff in git mode).
 	merged.DefaultMarkdownView = preferProjectString(project.DefaultMarkdownView, merged.DefaultMarkdownView)

@@ -41,6 +41,36 @@ func completedPreference(status string) bool {
 	return status == "ignored" || status == "captured" || status == "rejected" || status == "unsupported"
 }
 
+// humanComments drops machine-authored comments, which are never
+// preference evidence and need no classification.
+func humanComments(comments []Comment) []Comment {
+	human := make([]Comment, 0, len(comments))
+	for _, c := range comments {
+		if !c.MachineAuthored() {
+			human = append(human, c)
+		}
+	}
+	return human
+}
+
+// withoutMachineDecisions drops decisions about machine-authored comments,
+// so an agent that classifies every comment of a batch is not rejected.
+func withoutMachineDecisions(comments []Comment, decisions []PreferenceDecision) []PreferenceDecision {
+	machine := map[string]bool{}
+	for _, c := range comments {
+		if c.MachineAuthored() {
+			machine[c.ID] = true
+		}
+	}
+	kept := decisions[:0:0]
+	for _, d := range decisions {
+		if !machine[d.CommentID] {
+			kept = append(kept, d)
+		}
+	}
+	return kept
+}
+
 //nolint:gocyclo // Each revision is captured and checkpointed in the same retryable workflow.
 func (s *Store) Learn(prefs *preferences.Store, batchID string, decisions []PreferenceDecision, owner, repoRoot string) (PreferenceReport, error) {
 	report := PreferenceReport{BatchID: batchID, Outcomes: []PreferenceOutcome{}}
@@ -62,11 +92,13 @@ func (s *Store) Learn(prefs *preferences.Store, batchID string, decisions []Pref
 	if err != nil {
 		return report, err
 	}
-	if len(decisions) != len(batch.Comments) {
+	human := humanComments(batch.Comments)
+	decisions = withoutMachineDecisions(batch.Comments, decisions)
+	if len(decisions) != len(human) {
 		return report, fmt.Errorf("classify every published human comment revision exactly once")
 	}
 	known := map[string]Comment{}
-	for _, c := range batch.Comments {
+	for _, c := range human {
 		known[c.ID] = c
 	}
 	classified := map[string]PreferenceDecision{}
@@ -90,7 +122,7 @@ func (s *Store) Learn(prefs *preferences.Store, batchID string, decisions []Pref
 		classified[c.ID] = decision
 	}
 	failed := 0
-	for _, c := range batch.Comments {
+	for _, c := range human {
 		decision := classified[c.ID]
 		var outcome PreferenceOutcome
 		err := s.transaction(func(state *journal) error {
