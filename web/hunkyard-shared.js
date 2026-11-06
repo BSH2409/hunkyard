@@ -510,7 +510,10 @@
       var resp = await fetch('/api/finish', publication ? {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(publication),
       } : { method: 'POST' });
-      if (!resp.ok) throw new Error(resp.status === 409 ? 'Review changed; reload before publishing.' : 'Finish review failed: HTTP ' + resp.status);
+      if (!resp.ok) {
+        var errorMessage = (await resp.text()).trim();
+        throw new Error(errorMessage || 'Finish review failed: HTTP ' + resp.status);
+      }
       var data = await resp.json();
       if (publication) {
         window.hunkyardReview.published();
