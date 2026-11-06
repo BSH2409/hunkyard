@@ -98,5 +98,5 @@ func workingTreeListing(dir string, paths []string) ([]FileChange, error) {
 	if err := checkFilterAttributes(dir, input); err != nil {
 		return nil, err
 	}
-	return untracked, nil
+	return excludeUntrackedDirectories(dir, untracked), nil
 }

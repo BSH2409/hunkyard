@@ -536,7 +536,7 @@ test('runFinishReview dedup blocks the second concurrent call', async () => {
 });
 
 test('runFinishReview onError catches and returns null', async () => {
-  const fetch = async () => ({ ok: false, status: 500, json: async () => ({}) });
+  const fetch = async () => ({ ok: false, status: 500, text: async () => '' });
   const { shared: s } = makeFinishSandbox(fetch, { writeText: async () => {} });
   let captured = null;
   const result = await s.runFinishReview({ onError: (e) => { captured = e; } });
@@ -1286,7 +1286,7 @@ test('runFinishReview does not POST /api/finish when the server stops during the
 });
 
 test('stale review publication asks the reviewer to reload', async () => {
-  const { shared: s } = makeFinishSandbox(async () => ({ ok: false, status: 409 }), { writeText: async () => {} });
+  const { shared: s } = makeFinishSandbox(async () => ({ ok: false, status: 409, text: async () => 'review changed; reload before publishing\n' }), { writeText: async () => {} });
   let message = '';
   const result = await s.runFinishReview({ onError: error => { message = error.message; } });
   assert.equal(result, null);
@@ -1327,3 +1327,19 @@ test('hasPendingUpload spots an image paste still uploading', () => {
   assert.equal(shared.hasPendingUpload('see ![shot.png](/api/attachments/a.png)'), false);
   assert.equal(shared.hasPendingUpload(''), false);
 });
+
+for (const [status, body, expected] of [
+  [409, 'resolve blocking comments before approving\n', 'resolve blocking comments before approving'],
+  [409, 'answer blocking decisions before approving\n', 'answer blocking decisions before approving'],
+  [409, 'cannot capture review: reading node_modules: is a directory\n', 'cannot capture review: reading node_modules: is a directory'],
+  [409, '', 'Finish review failed: HTTP 409'],
+  [500, 'cannot persist review snapshot\n', 'cannot persist review snapshot'],
+  [500, '  \n', 'Finish review failed: HTTP 500'],
+]) {
+  test(`runFinishReview surfaces HTTP ${status}: ${expected}`, async () => {
+    const { shared } = makeFinishSandbox(async () => ({ ok: false, status, text: async () => body }), {});
+    let message;
+    assert.equal(await shared.runFinishReview({ onError: error => { message = error.message; } }), null);
+    assert.equal(message, expected);
+  });
+}

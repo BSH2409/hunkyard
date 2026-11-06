@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -657,7 +658,9 @@ func gitStatusSnapshotInDir(dir string) (gitStatusSnapshot, error) {
 	if err != nil {
 		return gitStatusSnapshot{}, err
 	}
-	return parseGitStatusSnapshot(out), nil
+	snapshot := parseGitStatusSnapshot(out)
+	snapshot.untracked = excludeUntrackedDirectories(dir, snapshot.untracked)
+	return snapshot, nil
 }
 
 func parseGitStatusSnapshot(out []byte) gitStatusSnapshot {
@@ -994,7 +997,7 @@ func untrackedFilesInDir(dir string) ([]FileChange, error) {
 	if err == nil {
 		changes, needsFullScan := parseNormalUntrackedStatus(out)
 		if !needsFullScan {
-			return changes, nil
+			return excludeUntrackedDirectories(dir, changes), nil
 		}
 	}
 	return untrackedFilesFullScanInDir(dir)
@@ -1030,7 +1033,14 @@ func untrackedFilesFullScanInDir(dir string) ([]FileChange, error) {
 			changes = append(changes, FileChange{Path: string(path), Status: "untracked"})
 		}
 	}
-	return changes, nil
+	return excludeUntrackedDirectories(dir, changes), nil
+}
+
+func excludeUntrackedDirectories(dir string, changes []FileChange) []FileChange {
+	return slices.DeleteFunc(changes, func(change FileChange) bool {
+		info, err := os.Stat(filepath.Join(dir, change.Path))
+		return err == nil && info.IsDir()
+	})
 }
 
 // ListRepoFiles returns all tracked files plus untracked non-ignored files.
