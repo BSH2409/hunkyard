@@ -2,6 +2,29 @@
 
 Start with the [README](../README.md) for a visual walkthrough and quick start. This guide covers the review workflow, CLI integrations, preferences, and local storage in more detail.
 
+## Install a release
+
+On Linux or macOS, install the latest release without cloning the repository:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BSH2409/hunkyard/main/install.sh | bash
+```
+
+The installer supports x86_64 and ARM64, including WSL. It checks for Git, curl, standard shell utilities, and a SHA-256 tool (`sha256sum` or `shasum`). It downloads the release binary and its checksums from GitHub over HTTPS, verifies the checksum, and checks that the binary runs before replacing an existing installation. A failed download or verification leaves the previous binary in place.
+
+The default destination is `~/.local/bin`. When that directory is missing from PATH, the installer adds it to `~/.zshrc` for Zsh, `~/.bashrc` for Bash on Linux, or the first existing Bash login file (`~/.bash_profile`, `~/.bash_login`, or `~/.profile`) on macOS. If no Bash login file exists, it creates `~/.bash_profile`. Open a new terminal or run the printed command to update your current shell. Other shells receive instructions to configure PATH themselves. No sudo is used, and agent integrations are installed separately.
+
+To pin a release or use another absolute install directory:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BSH2409/hunkyard/main/install.sh | HUNKYARD_VERSION=v1.0.5 bash
+curl -fsSL https://raw.githubusercontent.com/BSH2409/hunkyard/main/install.sh | HUNKYARD_INSTALL_DIR="$HOME/bin" bash
+```
+
+Run the installer again to update to the latest release. To uninstall, remove the installed `hunkyard` binary; review state and agent integrations remain in place.
+
+Native Windows users can download the matching `.exe` from [GitHub Releases](https://github.com/BSH2409/hunkyard/releases/latest).
+
 ## Build and run
 
 From this checkout, with Go 1.26 or newer:

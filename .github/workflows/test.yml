@@ -73,6 +73,8 @@ jobs:
           node-version: 22
       - name: Install dependencies
         run: npm ci --ignore-scripts
+      - name: Test release installer
+        run: bash -n install.sh && node --test test/shell/install.test.cjs
       - name: Run frontend smoke tests
         run: make test-frontend
       - name: Run frontend perf microbenchmarks
@@ -263,7 +265,7 @@ jobs:
         run: taskkill /F /IM hunkyard.exe /T 2>nul || exit /b 0
 
   e2e:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     # Normal run ~12-14 min. A hung fixture or test must not burn the 6h
     # default (run.sh also fails fast when a fixture dies or never readies).
     timeout-minutes: 30

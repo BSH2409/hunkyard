@@ -44,9 +44,22 @@ Hunkyard runs as **one Go binary**, with its browser assets embedded. The agent 
 
 ## Quick start
 
-Requires **Git and Go 1.26+** to build. Node is only needed for frontend development.
+### 1. Install Hunkyard
 
-### 1. Build and run
+On **Linux or macOS** (Intel or ARM64):
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/BSH2409/hunkyard/main/install.sh | bash
+```
+
+The installer checks prerequisites, downloads the latest release, verifies its SHA-256 checksum, and installs it to `~/.local/bin` without sudo. It adds that directory to your Bash or Zsh startup file if needed; open a new terminal or run the printed PATH command to use it immediately.
+
+You need **Bash, Git, curl**, and either **sha256sum** or **shasum**. Go and Node are not required. On native Windows, download a binary from [Releases](https://github.com/BSH2409/hunkyard/releases/latest), or run the installer in WSL.
+
+<details>
+<summary>Build from source instead</summary>
+
+With Git and Go 1.26+ installed:
 
 ```sh
 git clone https://github.com/BSH2409/hunkyard.git
@@ -55,7 +68,11 @@ mkdir -p "$HOME/.local/bin"
 go build -o "$HOME/.local/bin/hunkyard" ./cmd/hunkyard
 ```
 
-Add `~/.local/bin` to your `PATH`, then run `hunkyard` in a repository with changes. It opens the review in your browser at `http://localhost:5000` by default.
+Add `~/.local/bin` to your `PATH`. Node is only needed for frontend development.
+
+</details>
+
+Run `hunkyard` in a repository with changes. It opens the review in your browser at `http://localhost:5000` by default. [Install a specific version or choose another directory →](docs/guide.md#install-a-release)
 
 ### 2. Connect your coding agent
 

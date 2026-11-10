@@ -1,5 +1,22 @@
 # Changelog
 
+## v1.0.5 — 2026-11-10
+
+### Installation
+
+- A one-line Bash installer downloads the latest prebuilt release for Linux and macOS on Intel or ARM64. It checks prerequisites, verifies the SHA-256 checksum, and checks that the binary runs before replacing an existing installation. Go and a repository clone are no longer needed to install Hunkyard.
+- Installs to `~/.local/bin` without sudo and configures Bash or Zsh PATH when needed. Specific versions and custom install directories are supported. Failed downloads and verification preserve an existing binary.
+
+### Fixes
+
+- Untracked directory symlinks no longer block review publication, including approval. File discovery excludes them during initial loading and refreshes while keeping regular file symlinks visible.
+- The submit flow displays the server's error message, so blocking comments, unanswered decisions, and snapshot errors no longer all appear as a request to reload.
+
+### Documentation and checks
+
+- The README includes a visual review walkthrough, a workflow diagram, real screenshots, and a shorter quick start. Detailed commands and workflow documentation live in `docs/guide.md`.
+- Installer tests cover prerequisite failures, supported platforms, checksums, safe replacement, cleanup, and shell PATH setup. Linux E2E jobs use Ubuntu 24.04 for compatibility with the installed Playwright version.
+
 ## v1.0.4 — 2026-11-02
 
 ### Agent decisions
