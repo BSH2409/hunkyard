@@ -6,7 +6,7 @@ For bug fixes and small improvements, feel free to open a PR directly. For large
 
 ## Build from Source
 
-See [Other Install Methods](README.md#other-install-methods) in the README for build instructions.
+See [Build and run](docs/guide.md#build-and-run) in the guide for build instructions.
 
 ### Cross-compile
 

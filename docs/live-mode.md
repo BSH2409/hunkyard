@@ -93,7 +93,7 @@ The iframe origin is Hunkyard’s proxy, not your app’s host, so **host-scoped
 session cookies are not shared** with a tab where you already logged in.
 
 Forward cookies with `--cookie`, `--cookie-file`, or `--cdp-url` (see the
-[README live mode section](../README.md#live-mode)).
+[guide live mode section](guide.md#live-mode-and-html-preview)).
 
 ### Hydration / LiveView / HMR oddities
 
@@ -225,4 +225,4 @@ and `pathname` are accepted aliases). Replies are unchanged:
 
 ## Related
 
-- [README - Live mode](../README.md#live-mode) (cookies, config keys)
+- [Guide - Live mode](guide.md#live-mode-and-html-preview) (cookies, config keys)
