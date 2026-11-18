@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { randomUUID } from 'crypto';
-import { clearAllComments, loadPage, mdSection, fileItem, sessionCwd, signalRoundComplete, submitReview } from './helpers';
+import { clearAllComments, loadPage, mdSection, fileItem, reviewScroller, sessionCwd, signalRoundComplete, submitReview } from './helpers';
 
 // The rounds below arrive over SSE; rendering can finish before the event
 // stream connects on a busy runner, so also wait for /api/events.
@@ -171,53 +171,42 @@ test.describe('Change Navigation — File Mode', () => {
   });
 
   test('two changed areas: label counts changes; n / N move forward and back, follow manual scrolls, and wrap', async ({ page, request }) => {
+    // Start with the first change below the viewport centre and its navigation margin.
+    await page.setViewportSize({ width: 1200, height: 400 });
     await loadPageWithEvents(page);
     await doRoundWithEdit(page, request, fixtureDir, 'plan.md', makeModified(originalContent, 'multi'));
 
     const section = await mdSection(page);
     await expect(section.locator('.document-wrapper')).toBeVisible();
-    const flashed = section.locator('.line-block.change-flash').first();
-    const absY = (el: typeof flashed) => el.evaluate(node => node.getBoundingClientRect().top + document.getElementById('filesContainer')!.scrollTop);
-    const scrollTop = (y: number) => page.evaluate(top => document.getElementById('filesContainer')!.scrollTo(0, top), y);
+    const changedBlocks = section.locator('.line-block-added, .line-block-modified');
+    const firstChange = changedBlocks.filter({ hasText: `method-${modificationId} authentication` });
+    const lastChange = changedBlocks.filter({ hasText: `Method-${modificationId} middleware` });
+    const absY = (el: typeof firstChange) => el.evaluate(node => node.getBoundingClientRect().top + document.getElementById('filesContainer')!.scrollTop);
+    const scrollTo = (top: number) => reviewScroller(page).evaluate((pane, y) => pane.scrollTo({ top: y, behavior: 'instant' }), top);
 
-    // The label shows the change count.
-    await expect(section.locator('.change-nav-label')).toHaveText(/\d+\s*change/);
+    await expect(section.locator('.change-nav-label')).toHaveText('- / 2 changes');
 
     // N from the top (no change above the viewport centre) wraps to the last change.
-    await scrollTop(0);
-    await clearFlash(page);
+    await scrollTo(0);
     await page.keyboard.press('Shift+N');
-    await expect(flashed).toBeVisible();
+    await expect(lastChange).toHaveClass(/change-flash/);
 
     // From the top, n then n moves forward through two change groups, and N
     // goes back to the first.
-    await scrollTop(0);
-    await clearFlash(page);
+    await scrollTo(0);
     await page.keyboard.press('n');
-    await expect(flashed).toBeVisible();
-    const firstAbsY = await absY(flashed);
-    await clearFlash(page);
+    await expect(firstChange).toHaveClass(/change-flash/);
     await page.keyboard.press('n');
-    await expect(flashed).toBeVisible();
-    const secondAbsY = await absY(flashed);
-    expect(secondAbsY).toBeGreaterThan(firstAbsY);
+    await expect(lastChange).toHaveClass(/change-flash/);
+    await page.keyboard.press('Shift+N');
+    await expect(firstChange).toHaveClass(/change-flash/);
+
+    // After scrolling between the changes, N returns to the first. Without
+    // that manual scroll, N would wrap from the first to the last.
+    await scrollTo((await absY(firstChange) + await absY(lastChange)) / 2);
     await clearFlash(page);
     await page.keyboard.press('Shift+N');
-    await expect(flashed).toBeVisible();
-    expect(await absY(flashed)).toBeLessThan(secondAbsY);
-
-    // After the user scrolls well past the first change, n goes forward to
-    // the next change rather than back to the first.
-    await scrollTop(0);
-    await clearFlash(page);
-    await page.keyboard.press('n');
-    await expect(flashed).toBeVisible();
-    const firstChangeAbsY = await absY(section.locator('.line-block-added, .line-block-modified').first());
-    await scrollTop(firstChangeAbsY + 300);
-    await clearFlash(page);
-    await page.keyboard.press('n');
-    await expect(flashed).toBeVisible();
-    expect(await absY(flashed)).toBeGreaterThan(firstChangeAbsY);
+    await expect(firstChange).toHaveClass(/change-flash/);
   });
 
   test('a changed table stays one navigation group and keeps aligned round-diff columns', async ({ page, request }) => {

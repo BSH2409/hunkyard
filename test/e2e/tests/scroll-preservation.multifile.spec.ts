@@ -2,7 +2,8 @@ import { test, expect, type Locator } from '@playwright/test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import {
   clearAllComments, loadPage, addComment, getReviewFilePath, revealFile,
-  waitForScrollStable, waitUntilHittable, reviewScroller, signalRoundComplete, submitReview } from './helpers';
+  waitForScrollStable, waitUntilHittable, reviewScroller, signalRoundComplete,
+  submitReview, submitReviewDialog } from './helpers';
 
 // Rebuilding every file section hands back deferred (empty) bodies, so the
 // document collapses shorter than the current offset and the browser clamps the
@@ -119,44 +120,54 @@ test.describe('Scroll position across comment updates', () => {
     expect(Math.abs(after.top - before.top)).toBeLessThan(50);
   });
 
-  test('round-complete keeps a conversation reader above offscreen files', async ({ page, request }) => {
+  test('round-complete preserves the review room and file scroll positions', async ({ page, request }) => {
     await page.setViewportSize({ width: 1200, height: 400 });
-    const response = await request.post('/api/comments', {
+    await expect(await request.post('/api/comments', {
       data: { body: 'Conversation\n\n' + 'A paragraph\n\n'.repeat(30) },
-    });
-    expect(response.ok()).toBeTruthy();
+    })).toBeOK();
     const reviewPath = await getReviewFilePath(request);
     await loadPage(page);
     const pane = reviewScroller(page);
-    await pane.evaluate(el => el.scrollTo({ top: 0, behavior: 'instant' }));
+    await pane.evaluate(el => el.scrollTo({ top: 2000, behavior: 'instant' }));
     await waitForScrollStable(page);
-    await expect(page.locator('#reviewConversation .comment-card')).toHaveCount(1);
-    // Every file starts below the fold (unmounted, or mounted off-screen).
-    expect(await page.locator('#filesContainer diffs-container').evaluateAll(
-      els => els.every(el => el.getBoundingClientRect().top >= window.innerHeight),
-    )).toBe(true);
+    const fileScroll = await pane.evaluate(el => el.scrollTop);
+    expect(fileScroll).toBeGreaterThan(100);
 
-    await submitReview(page);
+    await page.getByRole('button', { name: 'Open review conversation' }).click();
+    const messages = page.getByRole('log', { name: 'Review messages' });
+    const composer = page.getByRole('textbox', { name: 'Message the review room' });
+    await expect(composer).toBeFocused();
+    await expect(messages.getByText('Conversation', { exact: true })).toBeVisible();
+    await messages.evaluate(el => el.scrollTo({ top: 120, behavior: 'instant' }));
+    expect(await messages.evaluate(el => el.scrollTop)).toBe(120);
+    expect(await pane.evaluate(el => el.scrollTop)).toBe(fileScroll);
+
+    await page.locator('#reviewChatSend').click();
+    await submitReviewDialog(page);
     const overlay = page.locator('#waitingOverlay');
     await expect(overlay).toHaveClass(/active/);
 
-    // An agent can add a review-level comment on disk immediately before
+    // An agent can reply to the conversation on disk immediately before
     // re-arming. Round-complete imports it even before the file watcher polls.
+    const reply = 'New reply during round completion';
     const review = JSON.parse(readFileSync(reviewPath, 'utf8'));
-    review.review_comments.push({
-      ...review.review_comments[0],
-      id: 'round-complete-conversation-reply',
-      body: 'New paragraph\n\n'.repeat(20),
-    });
+    review.review_comments[0].replies = [{
+      id: 'rp_round_complete',
+      author: 'Codex',
+      author_kind: 'agent',
+      body: reply,
+      created_at: new Date().toISOString(),
+    }];
     writeFileSync(reviewPath, JSON.stringify(review));
-    expect((await signalRoundComplete(request)).ok()).toBeTruthy();
+    await expect(await signalRoundComplete(request)).toBeOK();
     await expect(overlay).not.toHaveClass(/active/);
-    await expect(page.locator('#reviewConversation .comment-card')).toHaveCount(2);
+    await expect(messages.locator('.comment-reply')).toContainText(reply);
     await waitForScrollStable(page);
 
-    // A file below the viewport must not become the scroll anchor when the
-    // conversation grows: the reader is still at the top of the conversation.
-    expect(await pane.evaluate(el => el.scrollTop)).toBe(0);
+    await expect(messages).toBeVisible();
+    await expect(composer).not.toBeFocused();
+    expect(await messages.evaluate(el => el.scrollTop)).toBe(120);
+    expect(await pane.evaluate(el => el.scrollTop)).toBe(fileScroll);
   });
 
   // Hide-resolved is CSS for cards plus a highlight sync — it must not wipe
