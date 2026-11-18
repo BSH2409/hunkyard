@@ -170,10 +170,10 @@
     </div>
     </div>
     <div class="review-updates-banner" id="reviewUpdatesBanner" role="status" hidden>
-      <span>This review has updates</span>
+      <span id="reviewUpdatesMessage">This review has updates</span>
       <button type="button" class="btn btn-sm" id="reviewUpdatesRefresh">Refresh</button>
     </div>
-        <div id="reviewConversation" class="review-conversation" hidden></div>
+
     <div id="filesContainer">
       <div class="loading" style="padding: 40px; text-align: center; color: var(--hunkyard-editor-fg-muted);">Loading...</div>
     </div>
@@ -215,6 +215,19 @@
   <div class="pr-panel pr-panel-hidden" id="prPanel" aria-label="Pull request overview">
     <div class="pr-panel-body" id="prPanelBody"></div>
   </div>
+</div>
+
+<div class="review-chat-dock" id="reviewChatDock" hidden>
+  <section class="review-chat-panel" id="reviewChatPanel" role="region" aria-label="Review conversation" hidden>
+    <div id="reviewConversation" class="review-conversation" hidden></div>
+    <button type="button" class="review-chat-resize" id="reviewChatResize" aria-label="Resize conversation" title="Drag to resize; use arrow keys">
+      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M3 10V3h7M3 3l8 8"/></svg>
+    </button>
+  </section>
+  <button type="button" class="review-chat-launcher" id="reviewChatToggle" aria-label="Open review conversation" title="Review room" aria-expanded="false" aria-controls="reviewChatPanel">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 11.5a8.5 8.5 0 0 1-8.5 8.5H6l-4 2v-6.5A8.5 8.5 0 0 1 10.5 7h2a8.5 8.5 0 0 1 8.5 4.5Z"/><path d="M8 3h6a8 8 0 0 1 8 8"/></svg>
+    <span class="review-chat-unread" id="reviewChatUnread" hidden></span>
+  </button>
 </div>
 
 <div class="waiting-overlay" id="waitingOverlay" role="dialog" aria-modal="true" aria-labelledby="waitingHeading">
@@ -504,6 +517,8 @@
       // Shared settings-overlay panes (Shortcuts + About). Must load before app.js.
       var sp = document.createElement('script'); sp.src = 'hunkyard-settings-panes.js'; sp.async = false; document.body.appendChild(sp);
       var yd = document.createElement('script'); yd.src = 'hunkyard-yard.js'; yd.async = false; document.body.appendChild(yd);
+      var chat = document.createElement('script'); chat.src = 'hunkyard-review-chat.js'; chat.async = false; document.body.appendChild(chat);
+      var cr = document.createElement('script'); cr.src = 'hunkyard-code-references.js'; cr.async = false; document.body.appendChild(cr);
       var rl = document.createElement('script'); rl.src = 'hunkyard-reload.js'; rl.async = false; document.body.appendChild(rl);
       var ac = document.createElement('script'); ac.src = 'hunkyard-activity.js'; ac.async = false; document.body.appendChild(ac);
       // Optional boost for low-contrast syntax colours (window.hunkyard.themeBoost).

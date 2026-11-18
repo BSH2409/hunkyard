@@ -260,7 +260,7 @@ func (s *Store) claimUnseenPublication(session string) string {
 		return ""
 	}
 	for _, notice := range notices {
-		if notice.Pending == 0 || !s.claimBatch(session, notice.BatchID) {
+		if notice.Pending == 0 || !s.claimBatch(session, notice.BatchID, "") {
 			continue
 		}
 		return fmt.Sprintf("The reviewer published Hunkyard review %s (%s). Run: hunkyard feedback await --session %s --json and process it before finishing.", notice.ReviewID, notice.Disposition, notice.ReviewID)

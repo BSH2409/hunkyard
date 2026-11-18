@@ -28,13 +28,12 @@ test.describe('Return feedback to the launching CLI', () => {
   test('review-level feedback is included in the published host batch', async ({ page }) => {
     await loadPage(page);
     await page.keyboard.press('Shift+G');
-    const textarea = page.locator('#reviewConversation .comment-form textarea');
+    const textarea = page.locator('#reviewConversation .review-chat-composer textarea');
     await textarea.fill('Describe the problem and how we fix it');
     await expect(page.locator('#reviewConversation .btn-agent')).toHaveCount(0);
+    const publication = page.waitForResponse(r => r.url().includes('/api/finish') && r.request().method() === 'POST');
     await page.locator('#reviewConversation .btn-primary').click();
     await expect(page.locator('#reviewConversation .comment-card')).toContainText('Describe the problem and how we fix it');
-    const publication = page.waitForResponse(r => r.url().includes('/api/finish') && r.request().method() === 'POST');
-    await submitReview(page);
     const result = await (await publication).json();
     expect(result.batch.comments.some((c: {body: string; scope: string}) => c.scope === 'review' && c.body === 'Describe the problem and how we fix it')).toBe(true);
   });

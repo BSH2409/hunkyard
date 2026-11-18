@@ -1,6 +1,7 @@
 package session
 
 import (
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -72,5 +73,71 @@ func TestFilesWatcherMarksStaleOutsideAgentWork(t *testing.T) {
 	}
 	if !s.GetSessionInfo().Stale {
 		t.Fatal("files session not marked stale")
+	}
+}
+
+func TestRefreshFilesReadsDiskBeforeWatcherTick(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	path := filepath.Join(dir, "plan.md")
+	writeFile(t, path, "# Original\n")
+	sess, err := NewSessionFromFiles([]string{path}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sess.QuiesceForTest)
+	name := sess.GetSessionInfo().Files[0].Path
+	if _, ok := sess.AddComment(name, 1, 1, "", "keep this thread", "", ""); !ok {
+		t.Fatal("comment rejected")
+	}
+	writeFile(t, path, "# Updated\n")
+	events := sess.Subscribe()
+	defer sess.Unsubscribe(events)
+	if err := sess.RefreshWorkingTree(); err != nil {
+		t.Fatal(err)
+	}
+	file, ok := sess.GetFileSnapshot(name)
+	if !ok || file["content"] != "# Updated\n" {
+		t.Fatalf("content not refreshed: %+v", file)
+	}
+	if len(sess.GetComments(name)) != 1 || sess.ReviewRound != 1 {
+		t.Fatal("refresh changed comments or round")
+	}
+	select {
+	case event := <-events:
+		if event.Type != "base-changed" {
+			t.Fatalf("unexpected event: %s", event.Type)
+		}
+	default:
+		t.Fatal("other tabs were not notified")
+	}
+}
+
+func TestRefreshPinnedRangeRequiresWorkingTree(t *testing.T) {
+	sess := &Session{Mode: "git", Focus: Focus{Kind: FocusRange}, stale: true}
+	if err := sess.RefreshWorkingTree(); err == nil || !strings.Contains(err.Error(), "pinned") {
+		t.Fatalf("pinned refresh: %v", err)
+	}
+	if !sess.stale {
+		t.Fatal("pinned refresh cleared pending updates")
+	}
+}
+
+func TestRefreshFilesRecomputesCodeDiff(t *testing.T) {
+	dir := newBudgetRepo(t, 25, 0)
+	path := filepath.Join(dir, "src", "file3.go")
+	sess, err := NewSessionFromFiles([]string{path}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sess.QuiesceForTest)
+	name := sess.GetSessionInfo().Files[0].Path
+	writeFile(t, path, "package p\n\nfunc F3() int { return 333 }\n")
+	if err := sess.RefreshWorkingTree(); err != nil {
+		t.Fatal(err)
+	}
+	diff, ok := sess.GetFileDiffSnapshot(name, false)
+	if !ok || !strings.Contains(fmt.Sprint(diff), "333") {
+		t.Fatalf("code diff was not refreshed: %+v", diff)
 	}
 }

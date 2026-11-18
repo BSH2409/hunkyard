@@ -51,3 +51,5 @@ Once installed:
 - Type `$hunkyard` in Codex chat to review current git changes, a file, PR, or commit range
 - In Plan mode with the plugin, proposed plans are reviewed automatically when the agent tries to finish the turn
 - The `hunkyard-cli` skill teaches the agent about `hunkyard comment` and GitHub PR sync without manual invocation
+
+See [agent feedback delivery](../../docs/agent-feedback.md) for persistent waits, host wake behavior, review scope, and the publication lifecycle.

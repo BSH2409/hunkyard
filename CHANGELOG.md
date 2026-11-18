@@ -1,5 +1,21 @@
 # Changelog
 
+## v1.0.6 — 2026-11-18
+
+### Review room
+
+- Invite Claude, Codex, or both to a review conversation. Use `@Claude` or `@Codex` to address one invited participant. The chat launcher shows unread agent replies, and code references in comments and replies jump to lines in reviewed files.
+- Participants answer from a read-only review snapshot and use the authentication profile configured for each installed CLI. Context filtering checks both sides of the diff for sensitive content before sending.
+
+### Review and feedback
+
+- **Refresh** reloads the current working tree, including staged and unstaged changes, without starting a new round. Commit ranges stay pinned until you select **Review working tree**.
+- Published feedback wakes the `hunkyard feedback await --follow` command in the session that owns the review. With the Claude wake hook installed, feedback can also wake an idle interactive Claude session.
+
+### Fixes
+
+- Comments added while an external review-file read is in progress survive the merge.
+
 ## v1.0.5 — 2026-11-10
 
 ### Installation

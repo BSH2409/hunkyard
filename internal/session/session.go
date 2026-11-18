@@ -1552,7 +1552,7 @@ func (s *Session) GetReviewComments() []Comment {
 		}
 		out = append(out, c)
 	}
-	return out
+	return cloneCommentsWithReplies(out)
 }
 
 // UpdateReviewComment updates a review-level comment by ID.
@@ -1616,6 +1616,7 @@ func (s *Session) FindReviewCommentByID(id string) (Comment, bool) {
 	defer s.mu.RUnlock()
 	for _, c := range s.reviewComments {
 		if c.ID == id {
+			c.Replies = append([]Reply(nil), c.Replies...)
 			return c, true
 		}
 	}
@@ -2623,27 +2624,6 @@ func (s *Session) markStale() {
 	s.stale = true
 	s.mu.Unlock()
 	s.notify(SSEEvent{Type: "review-stale"})
-}
-
-// RefreshWorkingTree brings changes made outside an agent round into the
-// review without starting a new round. In git mode it re-reads the working
-// tree against the current base, keeping comments, as an unchanged base
-// change would; files mode re-reads files as they change, so only the stale
-// mark clears.
-func (s *Session) RefreshWorkingTree() error {
-	s.mu.Lock()
-	mode, kind, base := s.Mode, s.Focus.Kind, s.BaseBranchName
-	if mode != "git" || kind != FocusWorkingTree {
-		s.stale = false
-		s.mu.Unlock()
-		return nil
-	}
-	s.mu.Unlock()
-	if base == "" {
-		return fmt.Errorf("no base branch to refresh against")
-	}
-	s.invalidateWorkingTreeSnapshot()
-	return s.ChangeBaseBranch(base)
 }
 
 // reportLoadHunkyardJSONLockViolation surfaces a post-SetSession loadHunkyardJSON

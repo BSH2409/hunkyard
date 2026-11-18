@@ -59,6 +59,7 @@ var AgentScriptFiles = []string{
 
 // Server handles HTTP requests for the hunkyard review UI.
 type Server struct {
+	discussionMu        sync.Mutex
 	localOnly           bool
 	owner               *feedback.Owner
 	ownerReviewID       string
@@ -205,6 +206,7 @@ func NewServer(session *Session, frontendFS embed.FS, author string, currentVers
 	mux.HandleFunc("/api/annotations", s.withReady(s.handleAnnotations))
 	mux.HandleFunc("/api/focus", s.withReady(s.handleFocus))
 	mux.HandleFunc("/api/picker", s.withReady(s.handlePicker))
+	mux.HandleFunc("/api/discussion", s.withReady(s.handleDiscussion))
 	mux.HandleFunc("/api/agent/request", s.withReady(s.handleAgentRequest))
 	mux.HandleFunc("/api/branches", s.withReady(s.handleBranches))
 	mux.HandleFunc("/api/base-branch", s.withReady(s.handleBaseBranch))

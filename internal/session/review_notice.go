@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 
 	"github.com/BSH2409/hunkyard/internal/daemon"
 	"github.com/BSH2409/hunkyard/internal/feedback"
@@ -58,39 +57,6 @@ func OwnedOpenReviews(stateRoot, hostKind, hostSessionID string) []OwnedReview {
 		reviews = append(reviews, review)
 	}
 	return reviews
-}
-
-// WaitForPublication blocks until the review has a pending batch that
-// accept approves, or until timeout or until active reports the waiter was
-// superseded.
-func WaitForPublication(stateRoot, reviewID string, timeout time.Duration, accept func(batchID string) bool, active func() bool) (batchID, disposition string, ok bool) {
-	return waitForPublication(stateRoot, reviewID, timeout, 2*time.Second, accept, active)
-}
-
-func waitForPublication(stateRoot, reviewID string, timeout, interval time.Duration, accept func(string) bool, active func() bool) (string, string, bool) {
-	dir := filepath.Join(stateRoot, "reviews", reviewID)
-	deadline := time.Now().Add(timeout)
-	for {
-		if !active() {
-			return "", "", false
-		}
-		if _, err := os.Stat(dir); err != nil {
-			return "", "", false
-		}
-		if store, err := feedback.Open(dir); err == nil {
-			if pending, err := store.Pending(); err == nil {
-				for _, batch := range pending {
-					if accept(batch.ID) {
-						return batch.ID, batch.Disposition, true
-					}
-				}
-			}
-		}
-		if !time.Now().Add(interval).Before(deadline) {
-			return "", "", false
-		}
-		time.Sleep(interval)
-	}
 }
 
 // TouchOwnedReviewActivity writes state ("turn" or "idle") into the activity

@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
-	"time"
 
 	"github.com/BSH2409/hunkyard/internal/feedback"
 )
@@ -75,23 +74,5 @@ func TestOwnedOpenReviewsIgnoresOrphanOwnerRecords(t *testing.T) {
 	}
 	if _, err := os.Stat(filepath.Join(root, "reviews", "cccccccccccc")); !os.IsNotExist(err) {
 		t.Fatal("lookup created a review folder for an orphan owner record")
-	}
-}
-
-func TestWaitForPublicationAcceptsOnlyUnclaimedBatches(t *testing.T) {
-	root := t.TempDir()
-	ownedReviewFixture(t, root, "aaaaaaaaaaaa", "claude:session-1", 1)
-	store, _ := feedback.Open(filepath.Join(root, "reviews", "aaaaaaaaaaaa"))
-	pending, _ := store.Pending()
-	existing := pending[0].ID
-	id, _, ok := waitForPublication(root, "aaaaaaaaaaaa", time.Second, 20*time.Millisecond, func(batch string) bool { return batch == existing }, func() bool { return true })
-	if !ok || id != existing {
-		t.Fatalf("pending unclaimed batch not delivered: %q %v", id, ok)
-	}
-	if _, _, ok := waitForPublication(root, "aaaaaaaaaaaa", 200*time.Millisecond, 20*time.Millisecond, func(string) bool { return false }, func() bool { return true }); ok {
-		t.Fatal("claimed batch delivered again")
-	}
-	if _, _, ok := waitForPublication(root, "aaaaaaaaaaaa", time.Second, 20*time.Millisecond, func(string) bool { return true }, func() bool { return false }); ok {
-		t.Fatal("superseded waiter delivered")
 	}
 }
