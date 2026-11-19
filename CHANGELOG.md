@@ -1,5 +1,12 @@
 # Changelog
 
+## v1.0.7 — 2026-11-19
+
+### Mobile reviews
+
+- Live and preview reviews keep the page and comments accessible on narrow screens. Browse, Comment, viewport selection, Settings, and Approve remain available, and new narrow-screen sessions start with the viewport fitted to the pane.
+- Settings tabs and selected font names fit on phones. The review submission buttons align within the dialog, and the live comments empty state no longer gives outdated instructions.
+
 ## v1.0.6 — 2026-11-18
 
 ### Review room

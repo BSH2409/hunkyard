@@ -7330,3 +7330,34 @@ body.hunkyard-story-active #reviewToolbar { display: none; }
   background: var(--hunkyard-bg-elevated);
 }
 .paused-command code { flex: 1; font-family: var(--hunkyard-font-mono); font-size: 12px; overflow-wrap: anywhere; }
+
+@media (max-width: 768px) {
+  .settings-tabs {
+    flex-wrap: wrap;
+    padding: 0 8px;
+  }
+  .settings-tab {
+    flex: 1 1 auto;
+    padding: 10px 8px;
+  }
+  .settings-tab.active { border-bottom-color: var(--hunkyard-brand); }
+  .settings-tab-underline { display: none; }
+  .settings-tab-close { margin-left: 0; }
+  .settings-display-row:has(.settings-select) {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .settings-display-row .settings-select { max-width: 100%; }
+}
+
+@media (max-width: 480px) {
+  .publish-review-footer .btn {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .shortcuts-table td:first-child { width: 76px; }
+}

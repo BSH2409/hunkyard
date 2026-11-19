@@ -339,3 +339,47 @@ test.describe('live-mode comments panel — M18 reply composer', () => {
     await expect(rowWrap.locator('.hunkyard-live-reply-composer')).toHaveCount(0);
   });
 });
+
+test('comments panel fits after resizing and leaves the page usable', async ({ page }) => {
+  await waitForAgentReady(page);
+  await page.evaluate(() => {
+    const shared = (window as unknown as {
+      hunkyard: { shared: { setSetting: (key: string, value: number) => void } };
+    }).hunkyard.shared;
+    shared.setSetting('live_commentsPanelWidth', 540);
+  });
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.reload();
+  await waitForAgentReady(page);
+  const panel = page.locator('#commentsPanel');
+  await expect(panel.locator('.comments-panel-close')).toBeInViewport();
+  await expect(page.locator('#hunkyardLiveIframe')).toBeVisible();
+  await expect.poll(async () => {
+    const frame = await page.locator('.hunkyard-live-iframe-pane').boundingBox();
+    const box = await panel.boundingBox();
+    return frame && box ? frame.y + frame.height <= box.y + 1 : false;
+  }).toBe(true);
+  await expect.poll(async () => (await panel.boundingBox())?.width).toBeLessThanOrEqual(375);
+  await panel.locator('.comments-panel-close').click();
+  await expect(panel).toBeHidden();
+  await expect(page.locator('#hunkyardLiveIframe')).toBeVisible();
+
+  await page.setViewportSize({ width: 850, height: 900 });
+  await page.locator('#commentCount').click();
+  await expect(panel).toBeVisible();
+  await panel.locator('.comments-panel-close').click();
+  await expect(panel).toBeHidden();
+  await expect(page.locator('#hunkyardLiveIframe')).toBeVisible();
+});
+
+test('live comment composer is usable in landscape', async ({ page, request }) => {
+  await clearAllLivePins(request);
+  await page.setViewportSize({ width: 812, height: 375 });
+  await openPinComposer(page);
+  await page.locator('.hunkyard-live-composer-body').fill('Landscape comment');
+  const save = page.locator('.hunkyard-live-composer-save');
+  await expect(page.locator('#commentsPanel')).toHaveCSS('overflow-y', 'auto');
+  await save.scrollIntoViewIfNeeded();
+  await save.click();
+  await expect(page.locator('#commentsPanelBody')).toContainText('Landscape comment');
+});

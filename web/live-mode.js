@@ -175,6 +175,13 @@
       var hh = headerEl.getBoundingClientRect().height;
       document.documentElement.style.setProperty('--header-height', hh + 'px');
       document.documentElement.style.setProperty('--hunkyard-header-height', hh + 'px');
+      if (typeof ResizeObserver !== 'undefined') {
+        new ResizeObserver(function () {
+          var height = headerEl.getBoundingClientRect().height;
+          document.documentElement.style.setProperty('--header-height', height + 'px');
+          document.documentElement.style.setProperty('--hunkyard-header-height', height + 'px');
+        }).observe(headerEl);
+      }
     }
 
     // --- Header-right: viewport toggle + mode toggle + round counter ---
@@ -464,7 +471,7 @@
       if (vp) applyViewport(vp);
     });
     // Hydrate persisted viewport (desktop default).
-    var savedKey = (shared && shared.getSetting) ? shared.getSetting('live_viewport', 'desktop') : 'desktop';
+    var savedKey = (shared && shared.getSetting) ? shared.getSetting('live_viewport', window.innerWidth <= 768 ? 'fit' : 'desktop') : (window.innerWidth <= 768 ? 'fit' : 'desktop');
     var initial = VIEWPORTS.find(function (v) { return v.key === savedKey; })
       || VIEWPORTS.find(function (v) { return v.key === 'desktop'; });
     applyViewport(initial);

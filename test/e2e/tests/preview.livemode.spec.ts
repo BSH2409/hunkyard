@@ -88,3 +88,16 @@ test('a pin on an HTML preview saves a boxed screenshot', async ({ page }) => {
   }, { file: shot.file, x: r.x - 8, y: Math.round(r.y + r.height / 2) });
   expect(line[0] > 220 && line[1] < 40 && line[2] < 40, `outline pixel ${line}`).toBe(true);
 });
+
+test('mobile preview keeps review and viewport controls reachable', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  await page.goto(url + '/preview');
+  await expect(page.locator('#liveModeToggle [data-mode="navigate"]')).toBeVisible();
+  await expect(page.locator('#liveViewportToggle [data-viewport="fit"]')).toBeVisible();
+  await expect(page.locator('#settingsToggle')).toBeInViewport();
+  await expect(page.locator('#finishBtn')).toBeInViewport();
+  await page.locator('#liveViewportToggle [data-viewport="fit"]').click();
+  await expect(page.locator('#liveViewportToggle [data-viewport="fit"]')).toHaveAttribute('aria-pressed', 'true');
+  await page.locator('#liveModeToggle [data-mode="navigate"]').click();
+  await expect(page.locator('#liveModeToggle [data-mode="navigate"]')).toHaveAttribute('aria-pressed', 'true');
+});
