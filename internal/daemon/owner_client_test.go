@@ -68,4 +68,14 @@ func TestOwnerRequestVerifiesServerBeforeCredential(t *testing.T) {
 	if _, err := OwnerRequest(context.Background(), entry, "012345abcdef", http.MethodPost, "/test", nil); err == nil {
 		t.Fatal("other owner accepted")
 	}
+
+	forged.Store(false)
+	response, err := OwnerRequestForIdentity(context.Background(), entry, "012345abcdef", http.MethodPost, "/test", nil, feedback.IdentityForSeed("codex:synthetic"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	response.Body.Close()
+	if _, err := OwnerRequestForIdentity(context.Background(), entry, "012345abcdef", http.MethodPost, "/test", nil, feedback.IdentityForSeed("claude:other")); err == nil {
+		t.Fatal("explicit wrong owner accepted")
+	}
 }

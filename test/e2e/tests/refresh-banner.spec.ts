@@ -49,3 +49,28 @@ test('changes outside a round show a Refresh banner instead of redrawing', async
     await request.post('/api/refresh');
   }
 });
+
+test('a failed refresh keeps the action available for retry', async ({ page, request }) => {
+  const dir = await sessionCwd(request);
+  const name = 'refresh-retry-probe.txt';
+  try {
+    await loadPage(page);
+    fs.writeFileSync(path.join(dir, name), 'retry refresh\n');
+    execFileSync('git', ['add', name], { cwd: dir });
+    const banner = page.locator('#reviewUpdatesBanner');
+    const button = page.locator('#reviewUpdatesRefresh');
+    await expect(banner).toBeVisible({ timeout: 10_000 });
+    await page.route('**/api/refresh', route => route.fulfill({ status: 409, body: 'Refresh unavailable' }), { times: 1 });
+    await button.click();
+    await expect(page.getByText('Could not refresh the review: Refresh unavailable')).toBeVisible();
+    await expect(banner).toBeVisible();
+    await expect(button).toBeEnabled();
+    await button.click();
+    await expect(page.locator(`.tree-file[data-tree-path="${name}"]`)).toHaveCount(1);
+    await expect(banner).toBeHidden();
+  } finally {
+    execFileSync('git', ['rm', '--cached', '-f', name], { cwd: dir });
+    fs.rmSync(path.join(dir, name), { force: true });
+    await request.post('/api/refresh');
+  }
+});

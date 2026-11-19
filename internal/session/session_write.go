@@ -664,6 +664,10 @@ func (s *Session) mergeExternalHunkyardJSON() bool {
 	}
 
 	s.mu.Lock()
+	if s.pendingWrite {
+		s.mu.Unlock()
+		return false
+	}
 	s.lastHunkyardJSONMtime = info.ModTime()
 	s.lastWritten = newWrittenState(cj)
 	// Disk is authoritative for external edits — clear deleted tracking

@@ -122,24 +122,20 @@
       _emptyEl = null;
     }
 
-    function showEmptyState(msg, withHint) {
+    function showEmptyState(msg) {
       if (!els.panelBody) return;
       // Tear down any populated tree before mounting the empty placeholder.
       while (els.panelBody.firstChild) els.panelBody.removeChild(els.panelBody.firstChild);
       clearPanelBookkeeping();
       var empty = document.createElement('div');
       empty.className = 'comments-panel-empty';
-      if (withHint) {
-        empty.innerHTML = msg + '<br>Switch to Pin mode and click an element to leave a comment.';
-      } else {
-        empty.textContent = msg;
-      }
+      empty.textContent = msg;
       els.panelBody.appendChild(empty);
       _emptyEl = empty;
     }
 
     function renderEmptyPanel() {
-      showEmptyState('No pins yet.', true);
+      showEmptyState('No pins yet.');
     }
 
     // Stable signature of every comment field that affects rendering. Two
@@ -279,7 +275,7 @@
       if (desiredRoutes.length === 0) {
         var msg = filter === 'open' ? 'No open pins.' :
                   filter === 'resolved' ? 'No resolved pins.' : 'No pins yet.';
-        showEmptyState(msg, false);
+        showEmptyState(msg);
         return;
       }
 

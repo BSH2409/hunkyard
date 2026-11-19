@@ -3722,7 +3722,7 @@ body.file-tree-anim #fileTreeResizer { transition: flex-basis 0.22s ease; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 12px 16px 0;
+  padding: 14px 16px 10px;
 }
 .comments-panel-header-left {
   display: flex;
@@ -3834,7 +3834,10 @@ body.file-tree-anim #fileTreeResizer { transition: flex-basis 0.22s ease; }
 /* Panel body */
 .comments-panel-body {
   flex: 1;
+  min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--hunkyard-editor-scrollbar-thumb) transparent;
 }
 
 .comments-panel-empty {
@@ -5700,129 +5703,252 @@ html[data-theme="light"] .toggle-btn.active {
 @media (prefers-reduced-motion: reduce) {
   .decision-panel, .decision-dock[data-state="closed"] .decision-panel, .decision-option { transition: none; }
 }
-.review-conversation {
-  max-width: var(--content-width);
-  margin: 20px 24px 24px;
+.review-chat-dock {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 240;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 14px;
+  max-width: calc(100vw - 32px);
+}
+.review-chat-dock[hidden] { display: none; }
+.review-chat-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  width: min(640px, calc(100vw - 32px));
+  height: min(720px, calc(100dvh - 150px));
+  min-height: 280px;
+  max-width: calc(100vw - 32px);
+  max-height: calc(100dvh - 150px);
+  background: var(--hunkyard-bg-card);
+  box-shadow: var(--hunkyard-dock-shadow);
+  border-radius: 16px;
+}
+.review-chat-panel[hidden] { display: none; }
+.review-chat-launcher {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
   padding: 0;
-  background: transparent;
   border: 0;
-  border-radius: 0;
+  border-radius: 50%;
+  background: var(--hunkyard-brand);
+  color: var(--hunkyard-editor-bg);
+  box-shadow: var(--hunkyard-shadow);
+  cursor: pointer;
 }
-.review-conversation[data-doc-layout="centered"] {
+.review-chat-launcher > svg { width: 26px; height: 26px; }
+.review-chat-launcher:hover { background: var(--hunkyard-brand-hover); }
+.review-chat-unread {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--hunkyard-red);
+  color: var(--hunkyard-editor-bg);
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+.review-chat-unread[hidden] { display: none; }
+.review-chat-resize {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 28px;
+  height: 28px;
+  padding: 6px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--hunkyard-border);
+  border-radius: 50%;
+  color: var(--hunkyard-editor-fg-muted);
+  background: var(--hunkyard-bg-card);
+  cursor: nwse-resize;
+  touch-action: none;
+  z-index: 2;
+}
+.review-chat-resize svg { width: 14px; height: 14px; }
+.review-chat-resize:hover, .review-chat-resize.dragging { color: var(--hunkyard-brand); border-color: var(--hunkyard-brand); }
+.review-conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  max-width: min(var(--content-width), calc(100% - 32px));
-  margin: 20px auto 24px;
+  margin: 0;
+  overflow: hidden;
+  border-radius: inherit;
 }
-/* The review list already pads the files; line the conversation up with them. */
-body.pierre-review .review-conversation:not([data-doc-layout="centered"]) { margin-inline: 0; }
-.review-conversation.collapsed .review-conversation-body { display: none; }
-
 .review-conversation-header {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  user-select: none;
+  gap: 12px;
+  flex-shrink: 0;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--hunkyard-border);
 }
-.review-conversation.collapsed .review-conversation-header { margin-bottom: 0; }
-.review-conversation-toggle {
-  background: none;
-  border: none;
+.review-chat-heading { flex: 1; min-width: 0; display: grid; gap: 3px; }
+.review-chat-heading > strong { font-size: 15px; font-weight: 650; color: var(--hunkyard-editor-fg); }
+.review-chat-heading > span { font-size: 12px; color: var(--hunkyard-editor-fg-muted); }
+.review-chat-close {
+  display: grid;
+  place-items: center;
+  width: 32px;
+  height: 32px;
   color: var(--hunkyard-editor-fg-muted);
-  cursor: pointer;
-  padding: 0;
-  width: 18px;
-  height: 18px;
-  margin-left: -2px;
+  background: transparent;
+  border: 0;
   border-radius: var(--hunkyard-r-sm);
+  padding: 8px;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.review-chat-close svg { width: 16px; height: 16px; }
+.review-chat-close:hover { background: var(--hunkyard-editor-bg-hover); color: var(--hunkyard-editor-fg); }
+.review-chat-options, .review-chat-participant {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  transition: transform var(--hunkyard-dur-fast) var(--hunkyard-ease),
-              color var(--hunkyard-dur-fast) var(--hunkyard-ease);
-}
-.review-conversation-toggle svg { width: 12px; height: 12px; }
-.review-conversation-toggle:hover { color: var(--hunkyard-editor-fg); }
-.review-conversation.collapsed .review-conversation-toggle { transform: rotate(-90deg); }
-.review-conversation-header .icon {
-  display: inline-flex;
-  color: var(--hunkyard-editor-fg-muted);
-}
-.review-conversation-header .icon svg {
-  width: 13px;
-  height: 13px;
-}
-.review-conversation-header .label {
-  color: var(--hunkyard-editor-fg);
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: -0.005em;
-}
-.review-conversation-header .count {
-  display: inline-flex;
-  align-items: center;
-  font-family: var(--hunkyard-font-mono);
-  font-variant-numeric: tabular-nums;
-  font-size: 12px;
-  font-weight: 500;
-  color: var(--hunkyard-editor-fg-muted);
-  background: none;
-  padding: 0;
-  min-width: 0;
-  height: auto;
-  border-radius: 0;
-}
-
-/* Linear's "calm invitation": ghost button with a dashed plus chip that
-   becomes solid on hover. No solid border around the whole button. */
-.review-conversation-add-more {
-  margin-top: 12px;
-  font-size: 13px;
-  color: var(--hunkyard-editor-fg-muted);
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: var(--hunkyard-r-md);
-  padding: 7px 10px;
-  cursor: pointer;
-  width: 100%;
-  text-align: left;
-  font-family: inherit;
-  display: inline-flex;
-  align-items: center;
   gap: 8px;
-  transition: background var(--hunkyard-dur-fast) var(--hunkyard-ease),
-              color var(--hunkyard-dur-fast) var(--hunkyard-ease),
-              border-color var(--hunkyard-dur-fast) var(--hunkyard-ease);
-}
-.review-conversation-add-more::before {
-  content: "";
-  display: inline-block;
-  width: 16px;
-  height: 16px;
+  min-height: 36px;
+  padding: 7px 12px;
+  border: 1px solid var(--hunkyard-border);
   border-radius: var(--hunkyard-r-sm);
-  border: 1px dashed var(--hunkyard-border-strong);
-  background:
-    linear-gradient(currentColor, currentColor) center / 1.5px 6px no-repeat,
-    linear-gradient(currentColor, currentColor) center / 6px 1.5px no-repeat;
-  transition: border-color var(--hunkyard-dur-fast) var(--hunkyard-ease),
-              border-style var(--hunkyard-dur-fast) var(--hunkyard-ease);
+  background: var(--hunkyard-editor-bg);
+  color: var(--hunkyard-editor-fg);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 550;
+  cursor: pointer;
 }
-.review-conversation-add-more:hover::before {
-  color: var(--hunkyard-brand);
-  border-style: solid;
-  border-color: var(--hunkyard-brand);
+.review-chat-options:hover, .review-chat-participant:hover { background: var(--hunkyard-editor-bg-hover); border-color: var(--hunkyard-editor-fg-muted); }
+.review-chat-participants { display: flex; align-items: center; gap: 8px; padding: 12px 20px; flex-shrink: 0; }
+.review-chat-participants > span { color: var(--hunkyard-editor-fg-muted); font-size: 13px; margin-right: 4px; }
+.review-chat-participant[aria-pressed="true"] { color: var(--hunkyard-brand); border-color: var(--hunkyard-brand); background: color-mix(in srgb, var(--hunkyard-brand) 10%, var(--hunkyard-bg-card)); }
+.review-chat-participant:disabled { opacity: .6; cursor: progress; }
+.review-chat-participant-check { display: flex; width: 14px; height: 14px; visibility: hidden; }
+.review-chat-participant[aria-pressed="true"] .review-chat-participant-check { visibility: visible; }
+.review-chat-participant-check svg { width: 100%; height: 100%; }
+.review-chat-usage { margin: -4px 20px 10px; color: var(--hunkyard-editor-fg-muted); font-size: 12px; line-height: 1.5; flex-shrink: 0; }
+.review-conversation-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 24px 20px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-color: var(--hunkyard-editor-scrollbar-thumb) transparent;
 }
-.review-conversation-add-more:hover {
+.review-chat-empty { margin: auto; max-width: 280px; text-align: center; color: var(--hunkyard-editor-fg-muted); }
+.review-chat-empty > svg { width: 36px; height: 36px; margin-bottom: 14px; }
+.review-chat-empty > strong { display: block; color: var(--hunkyard-editor-fg); font-size: 16px; }
+.review-chat-empty > p { margin: 8px 0; font-size: 13px; line-height: 1.6; }
+.review-chat-row { display: flex; width: 100%; }
+.review-chat-row--sent { justify-content: flex-end; }
+.review-chat-row--received { justify-content: flex-start; }
+.review-chat-message.comment-card, .review-chat-message.comment-reply {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 88%;
+  margin: 0;
+  padding: 12px 16px 8px;
+  border: 0;
+  border-radius: 14px;
   background: var(--hunkyard-editor-bg-hover);
   color: var(--hunkyard-editor-fg);
-  border-color: var(--hunkyard-border);
+  box-shadow: none;
+  overflow: visible;
 }
-
-/* Threads + form inside the section reuse the same renderers — strip the
-   line-anchored 56px gutter so they span the full section width. */
-.review-conversation .comment-block { padding: 0; margin: 0; }
-.review-conversation .comment-block + .comment-block { margin-top: 10px; }
-.review-conversation .comment-form-wrapper { padding-left: 0; }
+.review-chat-row--sent .review-chat-message { background: var(--hunkyard-brand-subtle); border-bottom-right-radius: 4px; }
+.review-chat-row--received .review-chat-message { border-bottom-left-radius: 4px; }
+.review-chat-message-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; font-size: 12px; }
+.review-chat-message-meta > strong { font-weight: 650; }
+.review-chat-message-meta > time { margin-left: auto; color: var(--hunkyard-editor-fg-muted); font-size: 11px; white-space: nowrap; }
+.review-chat-agent-badge { color: var(--hunkyard-brand); background: var(--hunkyard-brand-subtle); border-radius: 4px; padding: 1px 5px; font-size: 11px; font-weight: 650; }
+.review-chat-message .comment-body, .review-chat-message .reply-body { padding: 0; margin: 0; color: inherit; font-size: 14px; line-height: 1.65; overflow-wrap: anywhere; }
+.review-chat-message pre { max-width: 100%; overflow-x: auto; }
+.review-chat-message-actions { display: flex; gap: 12px; margin-top: 8px; }
+.review-chat-message-actions > button, .review-chat-participant-status > button, .review-chat-reply-context > button {
+  padding: 2px 0;
+  color: var(--hunkyard-editor-fg-muted);
+  font: inherit;
+  font-size: 11px;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+.review-chat-message-actions > button:hover, .review-chat-participant-status > button:hover { color: var(--hunkyard-brand); }
+.review-chat-participant-status { color: var(--hunkyard-editor-fg-muted); font-size: 13px; line-height: 1.6; }
+.review-chat-participant-status > button { margin-left: 10px; color: var(--hunkyard-brand); }
+.review-chat-composer {
+  flex-shrink: 0;
+  padding: 12px;
+  margin: 0 16px 16px;
+  border: 1px solid var(--hunkyard-border-strong);
+  border-radius: 12px;
+  background: var(--hunkyard-bg-card);
+}
+.review-chat-composer:focus-within { border-color: var(--hunkyard-brand); }
+.review-chat-composer textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 68px;
+  max-height: 160px;
+  margin: 0;
+  padding: 4px;
+  border: 0;
+  border-radius: 0;
+  outline: none;
+  resize: none;
+  background: transparent;
+  color: var(--hunkyard-editor-fg);
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.review-chat-dock .review-chat-composer textarea:focus-visible { outline: none; box-shadow: none; }
+.review-chat-composer-actions { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 8px; }
+.review-chat-composer-actions > span { color: var(--hunkyard-editor-fg-muted); font-size: 12px; }
+.review-chat-submit { display: grid; place-items: center; width: 34px; height: 34px; padding: 7px; border: 0; border-radius: 50%; cursor: pointer; }
+.review-chat-submit > svg { width: 20px; height: 20px; }
+.review-chat-submit:disabled { opacity: .4; cursor: default; }
+.review-chat-reply-context { display: flex; justify-content: space-between; gap: 12px; padding-bottom: 8px; color: var(--hunkyard-editor-fg-muted); font-size: 12px; }
+.review-chat-dock :focus-visible { outline: 2px solid var(--hunkyard-focus-ring); outline-offset: 2px; }
+body:has(.decision-dock:not([hidden])) .review-chat-dock { bottom: 84px; }
+.code-reference { color: var(--hunkyard-brand); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.code-reference:hover { color: var(--hunkyard-editor-fg); }
+#reviewUpdatesRefresh { color: var(--hunkyard-editor-fg); border-color: var(--hunkyard-orange); background: color-mix(in srgb, var(--hunkyard-orange) 12%, var(--hunkyard-bg-card)); }
+#reviewUpdatesRefresh:hover { background: color-mix(in srgb, var(--hunkyard-orange) 20%, var(--hunkyard-bg-card)); }
+#reviewUpdatesRefresh:disabled { cursor: progress; opacity: .7; }
+@media (max-width: 600px) {
+  .review-chat-dock { right: 12px; bottom: 12px; }
+  .review-chat-panel { width: calc(100vw - 24px); max-width: calc(100vw - 24px); }
+  .review-chat-resize { display: none; }
+  .review-conversation-header { gap: 6px; padding: 14px; }
+  .review-chat-options { font-size: 12px; padding-inline: 10px; }
+  .review-chat-participants { padding: 12px; }
+  .review-chat-usage { margin-inline: 12px; }
+  .review-conversation-body { padding: 18px 12px; }
+  .review-chat-message.comment-card, .review-chat-message.comment-reply { max-width: 92%; padding-inline: 12px; }
+  .review-chat-composer { margin: 0 12px 12px; }
+}
 
 /* ===== Tree section: review-conversation row sits in its own section
    above FILES, separated by the file-tree-header's bottom border. ===== */
@@ -7204,3 +7330,34 @@ body.hunkyard-story-active #reviewToolbar { display: none; }
   background: var(--hunkyard-bg-elevated);
 }
 .paused-command code { flex: 1; font-family: var(--hunkyard-font-mono); font-size: 12px; overflow-wrap: anywhere; }
+
+@media (max-width: 768px) {
+  .settings-tabs {
+    flex-wrap: wrap;
+    padding: 0 8px;
+  }
+  .settings-tab {
+    flex: 1 1 auto;
+    padding: 10px 8px;
+  }
+  .settings-tab.active { border-bottom-color: var(--hunkyard-brand); }
+  .settings-tab-underline { display: none; }
+  .settings-tab-close { margin-left: 0; }
+  .settings-display-row:has(.settings-select) {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .settings-display-row .settings-select { max-width: 100%; }
+}
+
+@media (max-width: 480px) {
+  .publish-review-footer .btn {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .shortcuts-table td:first-child { width: 76px; }
+}

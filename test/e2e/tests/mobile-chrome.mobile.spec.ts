@@ -71,3 +71,13 @@ test.describe('Mobile chrome layout (F1)', () => {
     await expect(fileHeader(page, targetPath)).toBeInViewport();
   });
 });
+
+test('settings tabs and close control remain accessible on mobile', async ({ page, request }) => {
+  await clearAllComments(request);
+  await loadPage(page);
+  await page.locator('#settingsToggle').click();
+  await page.locator('#tab-about').click();
+  await expect(page.locator('#aboutPane')).toBeVisible();
+  await page.locator('#settingsClose').click();
+  await expect(page.locator('#settingsOverlay')).toBeHidden();
+});

@@ -23,28 +23,6 @@
   // literally. Keep typographer (smart quotes) and disable only replacements.
   commentMd.disable('replacements');
 
-  // ===== File Reference Inline Rule =====
-  commentMd.inline.ruler.push('file_ref', function(state, silent) {
-    const start = state.pos;
-    const max = state.posMax;
-    if (state.src.charCodeAt(start) !== 0x40 /* @ */) return false;
-    if (start > 0 && !/\s/.test(state.src[start - 1])) return false;
-    let end = start + 1;
-    while (end < max && /[a-zA-Z0-9._\-\/]/.test(state.src[end])) end++;
-    const path = state.src.substring(start + 1, end);
-    if (path.length === 0 || (path.indexOf('.') === -1 && path.indexOf('/') === -1)) return false;
-    if (!silent) {
-      const token = state.push('file_ref', '', 0);
-      token.content = path;
-    }
-    state.pos = end;
-    return true;
-  });
-  commentMd.renderer.rules.file_ref = function(tokens, idx) {
-    const path = tokens[idx].content;
-    return '<span class="file-ref">' + escapeHtml(path) + '</span>';
-  };
-
   // Override code_inline so backtick-wrapped comment IDs render as the same chip.
   const defaultCodeInline = commentMd.renderer.rules.code_inline || function(tokens, idx, options, _env, self) {
     return self.renderToken(tokens, idx, options);
@@ -58,6 +36,7 @@
   };
 
   function linkifyCommentRefsInDom(el) {
+    window.hunkyard.codeReferences.linkify(el, (files || []).map(function(file) { return file.path; }));
     const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT, null, false);
     const textNodes = [];
     let node;
@@ -133,6 +112,24 @@
     e.preventDefault();
     scrollToCommentRef(ref.dataset.refId);
   });
+
+  async function openCodeReference(event) {
+    if (event.type === 'keydown' && event.key !== 'Enter' && event.key !== ' ') return;
+    const reference = event.target.closest && event.target.closest('.code-reference');
+    if (!reference) return;
+    event.preventDefault();
+    const path = reference.dataset.path;
+    const line = Number(reference.dataset.line);
+    if (storyActive()) {
+      storyHidden = true;
+      applyStoryPresence();
+      renderAllFiles();
+    }
+    await scrollToFile(path);
+    if (line > 0 && pierreView) await pierreView.scrollToLine(path, line, '', 'center');
+  }
+  document.addEventListener('click', openCodeReference);
+  document.addEventListener('keydown', openCodeReference);
 
   // ===== Attachment Image Src Rewrite =====
   // Markdown stored in review.json uses canonical relative paths
@@ -1081,6 +1078,9 @@
     autoViewedPatterns = Array.isArray(configRes.auto_viewed_patterns) ? configRes.auto_viewed_patterns : [];
     riskPatterns = Array.isArray(configRes.risk_patterns) ? configRes.risk_patterns : [];
     defaultMarkdownView = configRes.default_markdown_view === 'document' ? 'document' : '';
+    reviewChatStorageKey = 'hunkyard-chat-read:' + (configRes.review_path || session.cwd);
+    try { reviewChatRead = new Set(JSON.parse(sessionStorage.getItem(reviewChatStorageKey) || '[]')); } catch {}
+    loadDiscussion();
     configAuthor = configRes.author || '';
     agentEnabled = configRes.agent_cmd_enabled || false;
     agentName = configRes.agent_name || 'agent';
@@ -2250,7 +2250,6 @@
         if (kind === 'loading') return buildPierreLoading();
         return buildPierreThread(filePath, id);
       },
-      buildListHeader: function() { return document.getElementById('reviewConversation'); },
       onPostRender: onPierrePostRender,
       unsafeCSS: PIERRE_UNSAFE_CSS,
       onGutterUtilityClick: function(filePath, range) {
@@ -2965,10 +2964,7 @@
       return;
     }
     treePin = null;
-    // Above the first file sits the review conversation (the list header).
-    const conversation = document.getElementById('reviewConversation');
-    let best = conversation && !conversation.hidden && top + 60 < viewer.getTopForItem(paths[0])
-      ? REVIEW_CONVERSATION_PATH : paths[0];
+    let best = paths[0];
     for (let i = 0; i < paths.length; i++) {
       if (viewer.getTopForItem(paths[i]) <= top + 60) best = paths[i];
     }
@@ -2978,13 +2974,6 @@
   function disposePierreView() {
     pierreLoader.invalidate();
     if (pierreUnsubscribeTree) { pierreUnsubscribeTree(); pierreUnsubscribeTree = null; }
-    // The review conversation is CodeView's list header while the view is
-    // up; put it back in front of the list before the view goes away.
-    const conversation = document.getElementById('reviewConversation');
-    const container = document.getElementById('filesContainer');
-    if (conversation && container && container.contains(conversation)) {
-      container.parentNode.insertBefore(conversation, container);
-    }
     if (pierreView) { pierreView.destroy(); pierreView = null; }
     document.body.classList.remove('pierre-review');
   }
@@ -6072,7 +6061,7 @@
     // Clear the just-submitted textarea so renderReviewConversation's draft
     // snapshot (line ~5670) doesn't mistake it for in-progress typing and
     // re-open the form pre-populated with the submitted text.
-    const submittedTa = document.querySelector('#reviewConversation .comment-form[data-form-key="review:new"] textarea');
+    const submittedTa = document.querySelector('#reviewConversation .review-chat-composer textarea');
     if (submittedTa) submittedTa.value = '';
     updateCommentCount();
     renderReviewConversation();
@@ -6125,8 +6114,6 @@
   }
 
   function openReviewCommentForm() {
-    // No-op if form is already open
-    if (reviewCommentFormActive && !reviewCommentEditingId) return;
     closeEmptyForms(null);
     reviewCommentFormActive = true;
     reviewCommentEditingId = null;
@@ -6159,16 +6146,44 @@
   }
 
   function createReviewCommentFormUI() {
-    const formObj = { scope: 'review', filePath: '', startLine: 0, endLine: 0, formKey: 'review:new' };
-    return createCommentFormUI({
-      formObj: formObj,
-      headerText: 'Comment',
-      submitText: 'Comment',
-      initialBody: '',
-      autoFocus: false,
-      onSubmit: function(body) { addReviewComment(body); },
-      onCancel: function() { cancelReviewCommentForm(); },
+    const form = document.createElement('form');
+    form.className = 'review-chat-composer'; form.dataset.formKey = 'review:new';
+    if (reviewChatReplyTo) {
+      const target = reviewComments.find(function(comment) { return comment.id === reviewChatReplyTo; });
+      const context = document.createElement('div'); context.className = 'review-chat-reply-context';
+      context.textContent = 'Replying to ' + (target ? target.body.slice(0, 70) : 'message');
+      const cancel = document.createElement('button'); cancel.type = 'button'; cancel.textContent = 'Cancel reply';
+      cancel.addEventListener('click', function() { reviewChatReplyTo = null; renderReviewConversation(); });
+      context.appendChild(cancel); form.appendChild(context);
+    }
+    const textarea = document.createElement('textarea'); textarea.rows = 3; textarea.value = reviewChatDraft;
+    textarea.placeholder = 'Message the room…'; textarea.setAttribute('aria-label', 'Message the review room'); textarea.dataset.formKey = 'review:new';
+    textarea.disabled = reviewChatSubmitting;
+    textarea.addEventListener('input', function() {
+      reviewChatDraft = textarea.value; updateDestination();
+      textarea.style.height = 'auto'; textarea.style.height = Math.min(160, Math.max(68, textarea.scrollHeight)) + 'px';
     });
+    attachFilePicker(textarea); attachImageUploads(textarea); form.appendChild(textarea);
+    const actions = document.createElement('div'); actions.className = 'review-chat-composer-actions';
+    const destination = document.createElement('span');
+    actions.appendChild(destination);
+    const send = document.createElement('button'); send.type = 'submit'; send.className = 'btn-primary review-chat-submit'; send.setAttribute('aria-label', 'Send message'); send.title = 'Send message';
+    function updateDestination() {
+      const recipients = window.hunkyard.reviewChat.recipients(textarea.value, discussionState.participants);
+      const missing = recipients.filter(function(agent) { return !discussionState.participants.includes(agent); });
+      const names = recipients.map(function(agent) { return agent === 'claude' ? 'Claude' : 'Codex'; }).join(' + ');
+      destination.textContent = missing.length ? 'Select ' + names + ' above before sending' : recipients.length ? 'Send to ' + names : 'Send to the terminal session that opened this review';
+      send.disabled = reviewChatSubmitting || !textarea.value.trim() || missing.length > 0;
+      send.title = destination.textContent;
+    }
+    updateDestination();
+    send.innerHTML = '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 16V4m-5 5 5-5 5 5"/></svg>';
+    actions.appendChild(send); form.appendChild(actions);
+    form.addEventListener('submit', function(event) { event.preventDefault(); submitReviewChatMessage(textarea.value); });
+    textarea.addEventListener('keydown', function(event) {
+      if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) { event.preventDefault(); submitReviewChatMessage(textarea.value); }
+    });
+    return form;
   }
 
   function createReviewCommentEditor(comment) {
@@ -6200,262 +6215,350 @@
     updateCommentCount();
   }
 
-  // ===== Inline Review Conversation Section (top of document) =====
-
   const REVIEW_CONVERSATION_PATH = '__review_conversation__';
   const ICON_REVIEW_CONVERSATION =
     '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
     '<path d="M2 3.5A1.5 1.5 0 0 1 3.5 2h9A1.5 1.5 0 0 1 14 3.5v6A1.5 1.5 0 0 1 12.5 11H8.5l-3 2.75V11H3.5A1.5 1.5 0 0 1 2 9.5Z"/>' +
     '</svg>';
 
-  function createReviewConversationCard(comment) {
-    const isResolved = comment.resolved;
-    const cardClassExtra = [
-      isResolved ? 'resolved-card' : '',
-      comment.carried_forward ? 'carried-forward' : '',
-    ].filter(Boolean).join(' ');
+  let discussionState = { participants: [], requests: [], available: {} };
+  let discussionParticipantsSaving = false;
+  let reviewChatDraft = '';
+  let reviewChatReplyTo = null;
+  let reviewChatSubmitting = false;
+  let reviewChatRead = new Set();
+  let reviewChatStorageKey = '';
+  let reviewChatTranscript = [];
+  const reviewChatDelivery = new Map();
 
-    const parts = buildCommentCard(comment, '', {
-      wrapperClass: 'comment-block',
-      cardClassExtra: cardClassExtra,
-      collapseDefault: isResolved,
-      showLineRef: false,
-      showReplyInput: true,
+  const loadDiscussion = window.hunkyard.sse.coalesced(async function() {
+    try {
+      const response = await fetch('/api/discussion');
+      if (!response.ok) throw new Error(await response.text());
+      discussionState = await response.json();
+      renderReviewConversation();
+    } catch (error) { console.error('Discussion unavailable:', error); }
+  });
+
+  function updateReviewChatUnread(read) {
+    const incoming = reviewChatTranscript.filter(function(entry) { return window.hunkyard.reviewChat.isAgent(entry.message); });
+    window.hunkyard.reviewChat.latestResponses(discussionState.requests).forEach(function(entry) {
+      if (entry.response.status !== 'thinking' && entry.response.status !== 'replied') incoming.push({ key: entry.request.id + '/' + entry.response.agent + '/' + entry.response.status });
     });
-
-    if (isResolved) {
-      const unresolveBtn = document.createElement('button');
-      unresolveBtn.className = 'resolve-btn resolve-btn--active';
-      unresolveBtn.title = 'Unresolve';
-      unresolveBtn.setAttribute('aria-label', 'Unresolve thread');
-      unresolveBtn.innerHTML = ICON_UNRESOLVE + '<span>Unresolve</span>';
-      unresolveBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        if (unresolveBtn.disabled) return;
-        unresolveBtn.disabled = true;
-        toggleResolveStatus(comment.id, 'review', 'unresolve', null)
-          .finally(function() { unresolveBtn.disabled = false; });
-      });
-      parts.actions.appendChild(unresolveBtn);
-    } else {
-      const resolveBtn = document.createElement('button');
-      resolveBtn.className = 'resolve-btn';
-      resolveBtn.title = 'Resolve';
-      resolveBtn.setAttribute('aria-label', 'Resolve thread');
-      resolveBtn.innerHTML = ICON_RESOLVE + '<span>Resolve</span>';
-      resolveBtn.addEventListener('click', function(e) {
-        e.stopPropagation();
-        if (resolveBtn.disabled) return;
-        resolveBtn.disabled = true;
-        toggleResolveStatus(comment.id, 'review', 'resolve', null)
-          .finally(function() { resolveBtn.disabled = false; });
-      });
-      parts.actions.appendChild(resolveBtn);
+    if (read && document.visibilityState === 'visible') {
+      incoming.forEach(function(entry) { reviewChatRead.add(entry.key); });
+      try { sessionStorage.setItem(reviewChatStorageKey, JSON.stringify(Array.from(reviewChatRead))); } catch {}
     }
+    const count = incoming.filter(function(entry) { return !reviewChatRead.has(entry.key); }).length;
+    const badge = document.getElementById('reviewChatUnread');
+    badge.hidden = count === 0;
+    badge.textContent = count > 99 ? '99+' : String(count);
+    const open = !document.getElementById('reviewChatPanel').hidden;
+    document.getElementById('reviewChatToggle').setAttribute('aria-label', (open ? 'Close' : 'Open') + ' review conversation' + (count ? ', ' + count + ' unread agent messages' : ''));
+  }
 
-    const editBtn = document.createElement('button');
-    editBtn.title = 'Edit';
-    editBtn.innerHTML = ICON_EDIT;
-    editBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      openReviewCommentEditForm(comment);
+  function createReviewChatMessage(entry) {
+    const message = entry.message;
+    const agent = window.hunkyard.reviewChat.isAgent(message);
+    const row = document.createElement('div');
+    row.className = 'review-chat-row ' + (agent ? 'review-chat-row--received' : 'review-chat-row--sent');
+    const card = document.createElement('article');
+    card.className = 'review-chat-message ' + (entry.reply ? 'comment-reply' : 'comment-card');
+    if (entry.reply) card.dataset.replyId = message.id;
+    else card.dataset.commentId = message.id;
+    card.dataset.authorKind = agent ? 'agent' : 'human';
+    const meta = document.createElement('div');
+    meta.className = 'review-chat-message-meta';
+    const author = document.createElement('strong');
+    author.textContent = agent ? (message.author || 'Agent') : (message.author || 'You');
+    meta.appendChild(author);
+    if (agent) {
+      const badge = document.createElement('span');
+      badge.className = 'review-chat-agent-badge';
+      badge.textContent = 'Agent';
+      meta.appendChild(badge);
+    }
+    const time = document.createElement('time');
+    time.dateTime = message.created_at || '';
+    time.textContent = formatTime(message.created_at);
+    meta.appendChild(time);
+    card.appendChild(meta);
+    const content = document.createElement('div');
+    content.className = entry.reply ? 'reply-body' : 'comment-body';
+    content.dataset.rawBody = message.body;
+    content.innerHTML = commentMd.render(message.body);
+    linkifyCommentRefsInDom(content);
+    card.appendChild(content);
+    const actions = document.createElement('div');
+    actions.className = 'review-chat-message-actions';
+    const reply = document.createElement('button');
+    reply.type = 'button'; reply.textContent = 'Reply'; reply.title = 'Reply to message';
+    reply.addEventListener('click', function() {
+      reviewChatReplyTo = entry.thread.id;
+      renderReviewConversation();
+      document.querySelector('#reviewConversation .review-chat-composer textarea').focus();
     });
-    const deleteBtn = document.createElement('button');
-    deleteBtn.className = 'delete-btn';
-    deleteBtn.title = 'Delete';
-    deleteBtn.innerHTML = ICON_DELETE;
-    deleteBtn.addEventListener('click', function(e) {
-      e.stopPropagation();
-      deleteReviewComment(comment.id);
-    });
-    parts.actions.appendChild(editBtn);
-    parts.actions.appendChild(deleteBtn);
-
-    return parts.wrapper;
+    actions.appendChild(reply);
+    if (!agent) {
+      const edit = document.createElement('button');
+      edit.type = 'button'; edit.textContent = 'Edit'; edit.title = 'Edit';
+      edit.addEventListener('click', function() { entry.reply ? editReply(entry.thread.id, message.id, '') : openReviewCommentEditForm(entry.thread); });
+      const remove = document.createElement('button');
+      remove.type = 'button'; remove.textContent = 'Delete'; remove.title = 'Delete'; remove.className = 'delete-btn';
+      remove.addEventListener('click', function() { entry.reply ? deleteReply(entry.thread.id, message.id, '') : deleteReviewComment(message.id); });
+      actions.append(edit, remove);
+    }
+    card.appendChild(actions);
+    row.appendChild(card);
+    return row;
   }
-
-  // Collapse state — host preference, persisted via cookie like other view prefs.
-  function isReviewConversationCollapsed() {
-    return getSetting('reviewConvCollapsed', false);
-  }
-  function setReviewConversationCollapsed(collapsed) {
-    setSetting('reviewConvCollapsed', !!collapsed);
-  }
-
-  const ICON_CHEVRON_DOWN =
-    '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">' +
-    '<path d="M4 6l4 4 4-4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
   function renderReviewConversation() {
     const section = document.getElementById('reviewConversation');
-    if (!section) return;
-
-    // Hide entirely until session is loaded
-    if (!session || !Array.isArray(files)) {
-      section.hidden = true;
-      return;
-    }
-
-    // Snapshot any in-progress NEW review-comment draft text before we wipe
-    // the DOM. Empty drafts intentionally fall through to the discard
-    // behavior — only protect non-empty text so refreshAfterReplyChange and
-    // sibling state changes don't blow away the user's typing.
-    let pendingNewDraft = '';
-    const existingNewTa = section.querySelector('.comment-form[data-form-key="review:new"] textarea');
-    if (existingNewTa && existingNewTa.value && existingNewTa.value.trim()) {
-      pendingNewDraft = existingNewTa.value;
-    }
-
-    section.hidden = session.mode === 'git' && reviewComments.length === 0 && !reviewCommentFormActive && !pendingNewDraft;
-    section.innerHTML = '';
-    if (section.hidden) return;
-
-    // File and plan reviews (and live/preview, which use files mode) render a
-    // centered document, so center the section with it. Git mode renders
-    // file-sections full-width, so left-anchor.
-    if (session.mode !== 'git') {
-      section.dataset.docLayout = 'centered';
-    } else {
-      delete section.dataset.docLayout;
-    }
-
-    const collapsed = isReviewConversationCollapsed() && !reviewCommentFormActive;
-    section.classList.toggle('collapsed', collapsed);
-
-    // Header — chevron on the left, matching `.tree-folder` and `.comment-card`
-    // collapse conventions elsewhere in the UI.
+    if (!section || !session) return;
+    const previousBody = section.querySelector('.review-conversation-body');
+    const scrollTop = previousBody ? previousBody.scrollTop : 0;
+    const followLatest = !previousBody || previousBody.scrollHeight - previousBody.clientHeight - scrollTop < 32;
+    const draft = section.querySelector('.review-chat-composer textarea');
+    const keepFocus = draft && document.activeElement === draft;
+    const selection = keepFocus ? [draft.selectionStart, draft.selectionEnd] : null;
+    if (draft) reviewChatDraft = draft.value;
+    section.hidden = false;
+    section.replaceChildren();
     const header = document.createElement('div');
     header.className = 'review-conversation-header';
-    const toggle = document.createElement('button');
-    toggle.type = 'button';
-    toggle.className = 'review-conversation-toggle';
-    toggle.title = collapsed ? 'Expand review conversation' : 'Collapse review conversation';
-    toggle.setAttribute('aria-expanded', collapsed ? 'false' : 'true');
-    toggle.setAttribute('aria-label', toggle.title);
-    toggle.innerHTML = ICON_CHEVRON_DOWN;
-    toggle.addEventListener('click', function() {
-      setReviewConversationCollapsed(!isReviewConversationCollapsed());
-      renderReviewConversation();
+    const title = document.createElement('div');
+    title.className = 'review-chat-heading';
+    reviewChatTranscript = window.hunkyard.reviewChat.transcript(reviewComments);
+    const names = new Set(discussionState.participants.map(function(agent) { return agent === 'claude' ? 'Claude' : 'Codex'; }));
+    reviewChatTranscript.forEach(function(entry) { if (window.hunkyard.reviewChat.isAgent(entry.message)) names.add(entry.message.author || 'Agent'); });
+    const heading = document.createElement('strong'); heading.textContent = 'Review room';
+    const members = document.createElement('span'); members.textContent = ['You'].concat(Array.from(names)).join(' · ');
+    title.append(heading, members);
+    header.appendChild(title);
+    const options = document.createElement('button');
+    options.type = 'button'; options.id = 'reviewChatSend'; options.className = 'review-chat-options';
+    options.textContent = 'Review changes';
+    window.hunkyard.shared.lockFinishBtnIfStopped(options);
+    options.addEventListener('click', function() {
+      if (uiState === 'waiting') setUIState('reviewing');
+      beginReviewSubmission();
     });
-    header.appendChild(toggle);
-
-    const headerLabel = document.createElement('span');
-    headerLabel.className = 'icon';
-    headerLabel.innerHTML = ICON_REVIEW_CONVERSATION;
-    header.appendChild(headerLabel);
-
-    const labelText = document.createElement('span');
-    labelText.className = 'label';
-    labelText.textContent = 'Review conversation';
-    header.appendChild(labelText);
-
-    // Match the file-tree badge convention: count unresolved (the "needs attention" signal),
-    // not total. Resolved threads are visible but de-emphasised.
-    const unresolvedCount = reviewComments.filter(function(c) { return !c.resolved; }).length;
-    if (unresolvedCount > 0) {
-      const count = document.createElement('span');
-      count.className = 'count';
-      count.textContent = String(unresolvedCount);
-      header.appendChild(count);
+    header.appendChild(options);
+    const close = document.createElement('button');
+    close.type = 'button'; close.className = 'review-chat-close'; close.title = 'Close'; close.setAttribute('aria-label', 'Close');
+    close.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="m4 4 8 8m0-8-8 8"/></svg>';
+    close.addEventListener('click', function() { setReviewChatOpen(false); });
+    header.appendChild(close); section.appendChild(header);
+    const participants = document.createElement('div');
+    participants.className = 'review-chat-participants';
+    participants.setAttribute('role', 'group'); participants.setAttribute('aria-label', 'Chat participants');
+    const participantLabel = document.createElement('span'); participantLabel.textContent = 'Ask';
+    participants.appendChild(participantLabel);
+    ['claude', 'codex'].forEach(function(agent) {
+      const name = agent === 'claude' ? 'Claude' : 'Codex';
+      const selected = discussionState.participants.includes(agent);
+      const button = document.createElement('button'); button.type = 'button';
+      button.className = 'review-chat-participant';
+      button.setAttribute('aria-label', 'Ask ' + name); button.setAttribute('aria-pressed', String(selected));
+      button.disabled = discussionParticipantsSaving;
+      button.title = selected ? 'Remove ' + name + ' from this chat' : 'Add ' + name + ' to this chat';
+      const asset = agent === 'claude' ? 'claude-code' : 'codex';
+      button.innerHTML = '<span class="updates-agent-icon" aria-hidden="true"><img class="updates-agent-icon-dark" src="images/integrations/' + asset + '-dark.svg" alt=""><img class="updates-agent-icon-light" src="images/integrations/' + asset + '-light.svg" alt=""></span>';
+      const label = document.createElement('span'); label.textContent = name; button.appendChild(label);
+      const check = document.createElement('span'); check.className = 'review-chat-participant-check'; check.setAttribute('aria-hidden', 'true');
+      check.innerHTML = '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="m3 8 3 3 7-7"/></svg>';
+      button.appendChild(check);
+      button.addEventListener('click', async function() {
+        if (discussionParticipantsSaving) return;
+        discussionParticipantsSaving = true;
+        participants.querySelectorAll('button').forEach(function(control) { control.disabled = true; });
+        const chosen = selected ? discussionState.participants.filter(function(id) { return id !== agent; }) : discussionState.participants.concat(agent);
+        try {
+          const response = await fetch('/api/discussion', { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ participants: chosen }) });
+          if (!response.ok) throw new Error(await response.text());
+          discussionState = await response.json();
+        } catch (error) { showMiniToast('Could not update chat participants: ' + error.message); }
+        finally { discussionParticipantsSaving = false; renderReviewConversation(); }
+      });
+      participants.appendChild(button);
+    });
+    section.appendChild(participants);
+    if (discussionState.participants.length) {
+      const usage = document.createElement('p'); usage.className = 'review-chat-usage';
+      usage.textContent = 'Read-only replies using your CLI accounts. Code is shared; provider usage applies.';
+      section.appendChild(usage);
     }
-    section.appendChild(header);
-
-    if (collapsed) return;
 
     const body = document.createElement('div');
-    body.className = 'review-conversation-body';
+    body.className = 'review-conversation-body'; body.setAttribute('role', 'log'); body.setAttribute('aria-label', 'Review messages');
     section.appendChild(body);
-
-    // Threads (existing comments first; the editor renders inline at the matching position)
-    for (const comment of reviewComments) {
-      if (reviewCommentEditingId === comment.id) {
-        body.appendChild(createReviewCommentEditor(comment));
-      } else {
-        body.appendChild(createReviewConversationCard(comment));
-      }
+    reviewChatTranscript = window.hunkyard.reviewChat.transcript(reviewComments);
+    if (!reviewChatTranscript.length) {
+      const empty = document.createElement('div');
+      empty.className = 'review-chat-empty';
+      empty.innerHTML = ICON_REVIEW_CONVERSATION + '<strong>Talk through the review</strong><p>Select Claude or Codex above to ask them about this review. Link code with path:line.</p>';
+      body.appendChild(empty);
     }
-
-    // Footer: new-comment form (when active) | "Add comment" ghost button.
-    // The same button is used for both empty and populated states.
-    // If a non-empty draft existed before the re-render, keep the form open
-    // even if the active flag was somehow cleared — the user is typing.
-    const showNewForm = (reviewCommentFormActive || !!pendingNewDraft) && !reviewCommentEditingId;
-    if (showNewForm) {
-      const formEl = createReviewCommentFormUI();
-      body.appendChild(formEl);
-      if (pendingNewDraft) {
-        const ta = formEl.querySelector('textarea');
-        if (ta) {
-          ta.value = pendingNewDraft;
-          // Match the "expanded" state the user was in (createCommentFormUI
-          // builds the textarea directly, so just place caret at the end).
-          // Restore focus too — the user was actively typing when the
-          // re-render fired (refreshAfterReplyChange, SSE), so dropping
-          // focus would force them to click back into the textarea.
-          try {
-            ta.setSelectionRange(ta.value.length, ta.value.length);
-            ta.focus();
-          } catch {}
+    reviewChatTranscript.forEach(function(entry) {
+      if (!entry.reply && reviewCommentEditingId === entry.message.id) body.appendChild(createReviewCommentEditor(entry.thread));
+      else body.appendChild(createReviewChatMessage(entry));
+    });
+    window.hunkyard.reviewChat.latestResponses(discussionState.requests).forEach(function(entry) {
+        const request = entry.request;
+        const response = entry.response;
+        if (response.status === 'replied') return;
+        const status = document.createElement('div');
+        status.className = 'review-chat-participant-status'; status.dataset.agent = response.agent; status.dataset.status = response.status;
+        const name = response.agent === 'claude' ? 'Claude' : 'Codex';
+        status.textContent = response.status === 'thinking' ? name + ' is thinking…' : name + ': ' + response.detail;
+        if (response.status !== 'thinking') {
+          const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = 'Retry';
+          retry.addEventListener('click', function() { askDiscussion(request.comment_id, [response.agent], null, request.message_id).catch(function(error) { showMiniToast(error.message); }); });
+          status.appendChild(retry);
         }
+        body.appendChild(status);
+    });
+    reviewChatDelivery.forEach(function(delivery, commentID) {
+      if (!delivery.error) return;
+      const error = document.createElement('div'); error.className = 'review-chat-participant-status'; error.textContent = delivery.error;
+      const retry = document.createElement('button'); retry.type = 'button'; retry.textContent = 'Retry delivery';
+      retry.addEventListener('click', function() { deliverReviewChatMessage(commentID, delivery.recipients, delivery.requestID, delivery.messageID); });
+      error.appendChild(retry); body.appendChild(error);
+    });
+    section.appendChild(createReviewCommentFormUI());
+    if (keepFocus && !reviewChatSubmitting) {
+      const textarea = section.querySelector('.review-chat-composer textarea');
+      textarea.focus({ preventScroll: true }); textarea.setSelectionRange(selection[0], selection[1]);
+    }
+    body.scrollTop = followLatest ? body.scrollHeight : scrollTop;
+    const open = !document.getElementById('reviewChatPanel').hidden;
+    updateReviewChatUnread(open && followLatest);
+    body.addEventListener('scroll', function() {
+      if (body.scrollHeight - body.clientHeight - body.scrollTop < 32) updateReviewChatUnread(open);
+    });
+  }
+
+  async function askDiscussion(commentID, recipients, requestID, messageID) {
+    const response = await fetch('/api/discussion', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ request_id: requestID || window.hunkyardReview.newRequestID(), comment_id: commentID, message_id: messageID || undefined, recipients: recipients }),
+    });
+    if (!response.ok) throw new Error(await response.text());
+    await loadDiscussion();
+  }
+
+  async function deliverReviewChatMessage(commentID, recipients, requestID, messageID) {
+    reviewChatDelivery.set(commentID, { recipients: recipients, requestID: requestID, messageID: messageID });
+    try {
+      if (recipients.length) await askDiscussion(commentID, recipients, requestID, messageID);
+      else {
+        const response = await fetch('/api/finish', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request_id: requestID, disposition: 'comment', summary: '', skill_ids: [] }) });
+        if (!response.ok) throw new Error(await response.text());
+        markPublished();
       }
-    } else {
-      const addMore = document.createElement('button');
-      // .review-conversation-empty doubles as an E2E selector for the
-      // empty-state composer and is intentionally only added when the
-      // conversation has no comments.
-      const isEmpty = reviewComments.length === 0;
-      addMore.className = 'review-conversation-add-more' + (isEmpty ? ' review-conversation-empty' : '');
-      addMore.type = 'button';
-      addMore.textContent = 'Add comment';
-      addMore.addEventListener('click', function() { openReviewCommentForm(); });
-      body.appendChild(addMore);
+    } catch (error) {
+      reviewChatDelivery.set(commentID, { recipients: recipients, requestID: requestID, messageID: messageID, error: 'Message saved. Delivery failed: ' + error.message });
+    }
+    renderReviewConversation();
+  }
+
+  async function submitReviewChatMessage(text) {
+    if (reviewChatSubmitting || !text.trim()) return;
+    if (window.hunkyard.shared.hasPendingUpload(text)) { showMiniToast('Wait for the image to finish uploading.'); return; }
+    if (!discussionState.participants.length && !await window.hunkyard.shared.ensureProjectPromptTrust(promptTrustConfig)) return;
+    const recipients = window.hunkyard.reviewChat.recipients(text, discussionState.participants);
+    if (recipients.some(function(agent) { return !discussionState.participants.includes(agent); })) { showMiniToast('Select the mentioned agent above before sending.'); return; }
+    reviewChatSubmitting = true;
+    let messageID;
+    let commentID = reviewChatReplyTo;
+    try {
+      if (commentID) {
+        const response = await fetch('/api/review-comment/' + enc(commentID) + '/replies', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ body: text, author: configAuthor }) });
+        if (!response.ok) throw new Error(await response.text());
+        messageID = (await response.json()).id;
+        reviewChatDraft = ''; reviewChatReplyTo = null;
+        const textarea = document.querySelector('#reviewConversation .review-chat-composer textarea');
+        if (textarea) textarea.value = '';
+        await refreshReviewComments();
+        userActedThisRound = true;
+      } else {
+        const comment = await addReviewComment(text);
+        if (!comment) return;
+        commentID = comment.id;
+      }
+      reviewChatDraft = '';
+      await deliverReviewChatMessage(commentID, recipients, window.hunkyardReview.newRequestID(), messageID);
+    } catch (error) { showMiniToast('Could not send message: ' + error.message); }
+    finally {
+      reviewChatSubmitting = false; renderReviewConversation();
+      if (!document.getElementById('reviewChatPanel').hidden) document.querySelector('#reviewConversation .review-chat-composer textarea').focus({ preventScroll: true });
     }
   }
+
+  function setReviewChatOpen(open) {
+    document.getElementById('reviewChatPanel').hidden = !open;
+    document.getElementById('reviewChatToggle').setAttribute('aria-expanded', String(open));
+    if (open) {
+      renderReviewConversation();
+      const body = document.querySelector('#reviewConversation .review-conversation-body');
+      if (body) body.scrollTop = body.scrollHeight;
+      updateReviewChatUnread(true);
+      const textarea = document.querySelector('#reviewConversation .review-chat-composer textarea');
+      if (textarea) textarea.focus({ preventScroll: true });
+    } else document.getElementById('reviewChatToggle').focus();
+  }
+
+  document.getElementById('reviewChatDock').hidden = false;
+  document.getElementById('reviewChatToggle').addEventListener('click', function() {
+    setReviewChatOpen(document.getElementById('reviewChatPanel').hidden);
+  });
+  document.getElementById('reviewChatDock').addEventListener('keydown', function(event) {
+    if (event.key === 'Escape' && !event.defaultPrevented && !document.getElementById('reviewChatPanel').hidden) {
+      event.stopPropagation(); setReviewChatOpen(false);
+    }
+  });
+  document.addEventListener('visibilitychange', function() {
+    const body = document.querySelector('#reviewConversation .review-conversation-body');
+    if (body && !document.getElementById('reviewChatPanel').hidden && body.scrollHeight - body.clientHeight - body.scrollTop < 32) updateReviewChatUnread(true);
+  });
+
+  const reviewChatPanel = document.getElementById('reviewChatPanel');
+  const reviewChatResize = document.getElementById('reviewChatResize');
+  window.hunkyard.shared.installSidebarResize(reviewChatResize, reviewChatPanel, { edge: 'left', min: 360, settingKey: 'reviewChatWidth' });
+  let chatResizeStart = null;
+  const chatHeight = getSetting('reviewChatHeight', null);
+  if (typeof chatHeight === 'number') reviewChatPanel.style.height = chatHeight + 'px';
+  reviewChatResize.addEventListener('pointerdown', function(event) {
+    if (event.button === 0) chatResizeStart = { pointer: event.pointerId, y: event.clientY, height: reviewChatPanel.getBoundingClientRect().height };
+  });
+  reviewChatResize.addEventListener('pointermove', function(event) {
+    if (!chatResizeStart || chatResizeStart.pointer !== event.pointerId) return;
+    reviewChatPanel.style.height = Math.max(280, chatResizeStart.height + chatResizeStart.y - event.clientY) + 'px';
+  });
+  ['pointerup', 'pointercancel'].forEach(function(type) {
+    reviewChatResize.addEventListener(type, function() {
+      if (chatResizeStart) setSetting('reviewChatHeight', Math.round(reviewChatPanel.getBoundingClientRect().height));
+      chatResizeStart = null;
+    });
+  });
+  reviewChatResize.addEventListener('keydown', function(event) {
+    if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') return;
+    event.preventDefault();
+    const height = Math.max(280, reviewChatPanel.getBoundingClientRect().height + (event.key === 'ArrowUp' ? 16 : -16));
+    reviewChatPanel.style.height = height + 'px'; setSetting('reviewChatHeight', height);
+  });
 
   function scrollToReviewConversation() {
-    if (session.mode === 'git' && !reviewComments.length && !reviewCommentFormActive) {
-      openReviewCommentForm();
-      return;
-    }
-    // If the user collapsed it, expand on navigate so the target is visible.
-    if (isReviewConversationCollapsed()) {
-      setReviewConversationCollapsed(false);
-      renderReviewConversation();
-    }
-    const section = document.getElementById('reviewConversation');
-    if (!section) return;
-    ignoreTreeObserverUntil = Date.now() + 200;
-    // Only scroll if the section isn't already comfortably in view —
-    // otherwise clicking the in-view "Add comment" button feels jarring.
-    const rect = section.getBoundingClientRect();
-    const headerOffset = (document.querySelector('.app-header') || {}).offsetHeight || 0;
-    if (rect.top < headerOffset || rect.top > window.innerHeight) {
-      section.scrollIntoView({ block: 'start', behavior: 'instant' });
-    }
-    updateTreeActive(REVIEW_CONVERSATION_PATH);
+    setReviewChatOpen(true); updateTreeActive(REVIEW_CONVERSATION_PATH);
   }
 
-  // Scroll to and flash a specific review-level comment card. Mirrors scrollToComment.
   function scrollToReviewComment(commentId) {
-    if (isReviewConversationCollapsed()) {
-      setReviewConversationCollapsed(false);
-      renderReviewConversation();
-    }
-    const section = document.getElementById('reviewConversation');
-    if (!section) return;
-    const card = section.querySelector('.comment-card[data-comment-id="' + CSS.escape(commentId) + '"]');
-    if (!card) {
-      scrollToReviewConversation();
-      return;
-    }
-    ignoreTreeObserverUntil = Date.now() + 200;
+    setReviewChatOpen(true);
+    const card = document.querySelector('#reviewConversation .comment-card[data-comment-id="' + CSS.escape(commentId) + '"]');
+    if (!card) return;
     card.scrollIntoView({ behavior: 'smooth', block: 'center' });
-    card.classList.remove('comment-card-highlight');
-    void card.offsetWidth;
-    card.classList.add('comment-card-highlight');
-    card.addEventListener('animationend', function() {
-      card.classList.remove('comment-card-highlight');
-    }, { once: true });
+    card.classList.remove('comment-card-highlight'); void card.offsetWidth; card.classList.add('comment-card-highlight');
     updateTreeActive(REVIEW_CONVERSATION_PATH);
   }
 
@@ -6478,7 +6581,7 @@
   }
 
   async function editReply(commentId, replyId, filePath) {
-    const replyEl = document.querySelector('[data-reply-id="' + replyId + '"]');
+    const replyEl = (!filePath && document.querySelector('#reviewConversation [data-reply-id="' + CSS.escape(replyId) + '"]')) || document.querySelector('[data-reply-id="' + CSS.escape(replyId) + '"]');
     if (!replyEl) return;
     const bodyEl = replyEl.querySelector('.reply-body');
     if (!bodyEl) return;
@@ -7369,10 +7472,10 @@
   // and uiState transition (live-mode wires its own state machine).
   function canSubmitReview() {
     const draft = activeForms.find(function (form) { const textarea = formTextarea(form.formKey); return (textarea ? textarea.value : form.draftBody || '').trim(); });
-    const reviewDraft = document.querySelector('#reviewConversation .comment-form textarea');
+    const reviewDraft = document.querySelector('#reviewConversation .comment-form textarea, #reviewConversation .review-chat-composer textarea');
     const replyDraft = Array.from(activeReplyForms.values()).some(function (form) { return (form.text || '').trim(); });
     if (!draft && !replyDraft && !(reviewDraft && reviewDraft.value.trim())) return true;
-    showMiniToast('Save or cancel your draft comment before submitting the review.');
+    showMiniToast(reviewDraft && reviewDraft.closest('.review-chat-composer') && reviewDraft.value.trim() ? 'Send or clear your chat message before reviewing changes.' : 'Save or cancel your draft comment before submitting the review.');
     const textarea = draft ? formTextarea(draft.formKey) : reviewDraft || document.querySelector('.comment-form textarea');
     if (textarea) textarea.focus();
     return false;
@@ -7464,8 +7567,8 @@
     hideNoChangesConfirm();
   });
 
-  document.getElementById('finishBtn').addEventListener('click', async function() {
-    if (uiState !== 'reviewing') return;
+  async function beginReviewSubmission() {
+    if (uiState !== 'reviewing' || window.hunkyard.shared.lockFinishBtnIfStopped(document.getElementById('finishBtn'))) return;
     if (!canSubmitReview()) return;
 
     // Check if user took no action but there are unresolved comments.
@@ -7492,7 +7595,9 @@
     }
 
     await doFinishReview();
-  });
+  }
+
+  document.getElementById('finishBtn').addEventListener('click', beginReviewSubmission);
 
   document.getElementById('backToEditing').addEventListener('click', function() {
     setUIState('reviewing');
@@ -7549,7 +7654,7 @@
         let focusedSelEnd = 0;
         const activeEl = document.activeElement;
         if (activeEl && activeEl.tagName === 'TEXTAREA') {
-          const formEl = activeEl.closest('.comment-form');
+          const formEl = activeEl.closest('.comment-form, .review-chat-composer');
           // A reply draft lives in .reply-form, outside any .comment-form, so it is keyed by its comment card.
           const replyCard = activeEl.classList.contains('reply-textarea') ? activeEl.closest('.comment-card') : null;
           if (formEl) {
@@ -7574,7 +7679,7 @@
           if (inStory) renderStoryFileByPath(files[i].path);
           else renderFileByPath(files[i].path);
         }
-        if (!inStory && JSON.stringify(reviewComments || []) !== previousReviewSignature) {
+        if (JSON.stringify(reviewComments || []) !== previousReviewSignature) {
           renderReviewConversation();
         }
         updateCommentCount();
@@ -7584,7 +7689,7 @@
         // single-key shortcuts (d deletes a comment, Shift+F finishes the review).
         let focusTarget = null;
         if (focusedFormKey) {
-          focusTarget = document.querySelector('.comment-form[data-form-key="' + focusedFormKey + '"] textarea');
+          focusTarget = document.querySelector('.comment-form[data-form-key="' + focusedFormKey + '"] textarea, .review-chat-composer[data-form-key="' + focusedFormKey + '"] textarea');
         } else if (focusedReplyCommentId) {
           focusTarget = document.querySelector('.comment-card[data-comment-id="' + focusedReplyCommentId + '"] .reply-textarea');
         }
@@ -7721,6 +7826,7 @@
       } catch {}
       },
       'comments-changed': refreshCommentsOnce,
+      'discussion-changed': loadDiscussion,
       'annotations-changed': loadToolMarks,
       'decisions-changed': loadDecisions,
       'base-changed': function() {
@@ -8835,21 +8941,53 @@
   // changes made outside an agent round, hidden once the review reloads.
   function setUpdatesBanner(show) {
     const banner = document.getElementById('reviewUpdatesBanner');
-    if (banner) banner.hidden = !show;
+    const rangePinned = session && session.focus && session.focus.kind === 'range';
+    const pinned = rangePinned || (diffCommit && !virtualCommitSelected);
+    banner.hidden = !show && !pinned;
+    document.getElementById('reviewUpdatesMessage').textContent = pinned
+      ? 'Pinned to commits. Staged and unstaged edits are outside this comparison.'
+      : 'This review has updates';
+    document.getElementById('reviewUpdatesRefresh').textContent = pinned ? 'Review working tree' : 'Refresh';
   }
 
   document.getElementById('reviewUpdatesRefresh').addEventListener('click', async function() {
-    setUpdatesBanner(false);
+    const button = this;
+    if (button.disabled) return;
+    button.disabled = true;
+    button.textContent = 'Refreshing…';
+    let refreshed = false;
     try {
+      if (session.focus && session.focus.kind === 'range') {
+        const focusRes = await fetch('/api/focus', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ kind: 'working_tree' }),
+        });
+        if (!focusRes.ok) throw new Error(await focusRes.text());
+      }
       const res = await fetch('/api/refresh', { method: 'POST' });
       if (!res.ok) throw new Error(await res.text());
+      clearCommitPins();
+      diffScope = 'all';
+      sinceReview = false;
+      setSetting('diffScope', diffScope);
+      document.querySelectorAll('#scopeToggle .toggle-btn').forEach(function(btn) {
+        btn.classList.toggle('active', btn.dataset.scope === 'all');
+      });
+      document.querySelectorAll('#sinceToggle .toggle-btn').forEach(function(btn) {
+        const active = btn.dataset.since !== 'published';
+        btn.classList.toggle('active', active);
+        btn.setAttribute('aria-pressed', String(active));
+      });
+      updateCompareAndCommitChrome();
+      await reloadForScope();
+      refreshed = true;
     } catch (err) {
-      console.error('Refresh failed:', err);
       window.hunkyard.shared.showToast('Could not refresh the review: ' + (err.message || err));
       setUpdatesBanner(true);
-      return;
+    } finally {
+      button.disabled = false;
+      setUpdatesBanner(!refreshed || !!session.stale);
     }
-    await reloadForScope();
   });
 
   function reloadForScope() {

@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -194,14 +195,23 @@ func (s *Server) handleFeedbackAwait(w http.ResponseWriter, r *http.Request) {
 	}
 	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-	ticker := time.NewTicker(200 * time.Millisecond)
-	defer ticker.Stop()
+	sess := s.session.Load()
+	events := sess.Subscribe()
+	defer sess.Unsubscribe(events)
+	excluded := strings.Split(r.URL.Query().Get("exclude"), ",")
 	for {
 		batches, err := store.Pending()
 		if err != nil {
 			http.Error(w, "cannot read feedback queue", 500)
 			return
 		}
+		visible := batches[:0]
+		for _, batch := range batches {
+			if !slices.Contains(excluded, batch.ID) {
+				visible = append(visible, batch)
+			}
+		}
+		batches = visible
 		if len(batches) > 0 {
 			catalog, err := store.Skills()
 			if err != nil {
@@ -228,7 +238,7 @@ func (s *Server) handleFeedbackAwait(w http.ResponseWriter, r *http.Request) {
 		case <-timer.C:
 			writeJSON(w, map[string]any{"status": "pending", "session_id": s.ownerReviewID, "batches": []feedback.Batch{}})
 			return
-		case <-ticker.C:
+		case <-events:
 		}
 	}
 }

@@ -21,13 +21,21 @@ import (
 
 // OwnerRequest verifies the daemon before delivering a private owner credential.
 func OwnerRequest(ctx context.Context, entry SessionEntry, key, method, path string, body io.Reader) (*http.Response, error) {
+	return OwnerRequestForIdentity(ctx, entry, key, method, path, body, feedback.CurrentIdentity())
+}
+
+func OwnerRequestForIdentity(ctx context.Context, entry SessionEntry, key, method, path string, body io.Reader, identity feedback.Identity) (*http.Response, error) {
 	if !strings.HasPrefix(path, "/") || strings.HasPrefix(path, "//") {
 		return nil, fmt.Errorf("invalid local request path")
 	}
 	if err := localonly.CheckURL(entry.ConnURL()); err != nil {
 		return nil, err
 	}
-	owner, err := LoadSessionOwner(key)
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, err
+	}
+	owner, err := feedback.LoadOwner(filepath.Join(home, ".hunkyard"), key, identity)
 	if err != nil {
 		return nil, err
 	}

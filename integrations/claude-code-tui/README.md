@@ -119,3 +119,5 @@ claude plugin test integrations/claude-code-tui
   does not follow its text if earlier lines of the conversation change.
 - Reopening a resolved hunkyard thread is left to the hunkyard browser UI.
 - The diff is `git diff HEAD` plus up to 20 untracked files.
+
+See [agent feedback delivery](../../docs/agent-feedback.md) for persistent waits, host wake behavior, review scope, and the publication lifecycle.

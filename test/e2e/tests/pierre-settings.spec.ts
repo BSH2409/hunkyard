@@ -195,17 +195,13 @@ test.describe('Pierre settings', () => {
     await form.getByRole('button', { name: 'Cancel', exact: true }).click();
   });
 
-  test('review conversation lines up with the file list', async ({ page, request }) => {
-    // Git reviews show the conversation once it has a review-level comment.
-    const conversation = page.locator('#filesContainer .review-conversation');
-    await expect(conversation).toBeHidden();
+  test('review conversation floats outside the virtualized file list', async ({ page, request }) => {
     await expect(await request.post('/api/comments', { data: { body: 'Overall: looks good' } })).toBeOK();
     await loadPage(page);
-    await expect(conversation).toBeVisible();
-    const header = page.locator('.hunkyard-review-file-header').first();
-    await expect(header).toBeVisible();
-    const [a, b] = [await conversation.boundingBox(), await header.boundingBox()];
-    expect(Math.abs(a!.x - b!.x)).toBeLessThan(2);
+    await page.locator('#reviewChatToggle').click();
+    await expect(page.locator('#reviewChatPanel .review-conversation')).toBeVisible();
+    await expect(page.locator('#filesContainer .review-conversation')).toHaveCount(0);
+    await expect(page.locator('.hunkyard-review-file-header').first()).toBeVisible();
   });
 
   test('line comment forms in wide unified diffs stay at reading width', async ({ page }) => {

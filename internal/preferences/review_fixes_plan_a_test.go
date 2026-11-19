@@ -15,7 +15,7 @@ func TestOverlappingWakeWaitersDeliverOnce(t *testing.T) {
 	s := testStore(t)
 	s.hostKind = "claude"
 	withReviews(t, []ReviewNotice{{ReviewID: "aaaaaaaaaaaa"}})
-	reviewWaiter = func(reviewID string, timeout time.Duration, accept func(string) bool, active func() bool) (string, string, bool) {
+	reviewWaiter = func(reviewID, ownerID string, timeout time.Duration, accept func(string) bool, active func() bool) (string, string, bool) {
 		if accept("batch_1") && active() {
 			return "batch_1", "comment", true
 		}
@@ -47,7 +47,7 @@ func TestReviewWakeHonoursStopHookActive(t *testing.T) {
 	s.hostKind = "claude"
 	withReviews(t, []ReviewNotice{{ReviewID: "aaaaaaaaaaaa"}})
 	called := false
-	reviewWaiter = func(string, time.Duration, func(string) bool, func() bool) (string, string, bool) {
+	reviewWaiter = func(string, string, time.Duration, func(string) bool, func() bool) (string, string, bool) {
 		called = true
 		return "", "", false
 	}

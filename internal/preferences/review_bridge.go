@@ -22,7 +22,7 @@ type ReviewNotice struct {
 // means no review integration (tests, library use).
 var (
 	reviewNotices func(hostKind, hostSessionID string) []ReviewNotice
-	reviewWaiter  func(reviewID string, timeout time.Duration, accept func(batchID string) bool, active func() bool) (batchID, disposition string, ok bool)
+	reviewWaiter  func(reviewID, ownerID string, timeout time.Duration, accept func(batchID string) bool, active func() bool) (batchID, disposition string, ok bool)
 )
 
 // reviewActivity reports the owning agent's turns to its reviews: "turn"
@@ -44,7 +44,7 @@ func (s *Store) reportTurn(sessionID, state string) {
 }
 
 // SetReviewIntegration wires review lookups into the preference hooks.
-func SetReviewIntegration(notices func(hostKind, hostSessionID string) []ReviewNotice, waiter func(reviewID string, timeout time.Duration, accept func(string) bool, active func() bool) (string, string, bool)) {
+func SetReviewIntegration(notices func(hostKind, hostSessionID string) []ReviewNotice, waiter func(reviewID, ownerID string, timeout time.Duration, accept func(string) bool, active func() bool) (string, string, bool)) {
 	reviewNotices, reviewWaiter = notices, waiter
 }
 
@@ -60,15 +60,15 @@ const reviewWakeTimeout = 3600
 // claimBatch records that the agent was told about batchID and reports
 // whether this caller was first, so the Stop block and any number of wake
 // waiters deliver each publication once.
-func (s *Store) claimBatch(session, batchID string) bool {
+func (s *Store) claimBatch(session, batchID, wakeToken string) bool {
 	claimed := false
-	_ = s.updateSession(session, func(state *sessionState) {
-		if !slices.Contains(state.NotifiedBatchIDs, batchID) {
+	err := s.updateSession(session, func(state *sessionState) {
+		if (wakeToken == "" || state.WakeToken == wakeToken) && !slices.Contains(state.NotifiedBatchIDs, batchID) {
 			state.NotifiedBatchIDs = append(state.NotifiedBatchIDs, batchID)
 			claimed = true
 		}
 	})
-	return claimed
+	return err == nil && claimed
 }
 
 // reviewWakeHook runs in the background after Claude stops. It waits for the
@@ -91,10 +91,10 @@ func (s *Store) reviewWakeHook(input io.Reader, errorOutput io.Writer) int {
 	accept := func(batchID string) bool { return !slices.Contains(s.loadSession(session).NotifiedBatchIDs, batchID) }
 	active := func() bool { return s.loadSession(session).WakeToken == token }
 	review := notices[0].ReviewID
-	batchID, disposition, ok := reviewWaiter(review, (reviewWakeTimeout-30)*time.Second, accept, active)
-	if !ok || !s.claimBatch(session, batchID) {
+	batchID, disposition, ok := reviewWaiter(review, s.hostKind+":"+session, (reviewWakeTimeout-30)*time.Second, accept, active)
+	if !ok || !s.claimBatch(session, batchID, token) {
 		return 0
 	}
-	fmt.Fprintf(errorOutput, "The reviewer published Hunkyard review %s (%s). Run: hunkyard feedback await --session %s --json\n", review, disposition, review)
+	fmt.Fprintf(errorOutput, "The reviewer published Hunkyard review %s (%s). Run: hunkyard feedback await --session %s --follow --json\n", review, disposition, review)
 	return 2
 }

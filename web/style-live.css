@@ -657,3 +657,43 @@ body.hide-resolved .hunkyard-live-comment-row-wrap:has(.resolved-card) {
   outline-offset: 2px;
   border-radius: 4px;
 }
+
+@media (max-width: 900px) {
+  .hunkyard-mode-live .hunkyard-live-iframe-pane { min-height: 0; }
+  .hunkyard-mode-live .comments-panel {
+    position: relative;
+    top: auto;
+    width: 100% !important;
+    height: 45%;
+    flex-shrink: 0;
+    overflow-y: auto;
+  }
+  .hunkyard-mode-live .comments-panel-hidden { display: none !important; }
+  .hunkyard-mode-live #commentsPanelResizer { display: none !important; }
+}
+
+@media (max-width: 900px) {
+  .hunkyard-mode-live .header {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .hunkyard-mode-live .header-left {
+    flex: 1 1 100%;
+    min-width: 0;
+  }
+  .hunkyard-mode-live #liveRouteChip {
+    max-width: 65%;
+    overflow: hidden;
+  }
+  .hunkyard-mode-live #liveRouteName {
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .hunkyard-mode-live .header-right {
+    flex: 1 1 100%;
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+  .hunkyard-mode-live #liveViewportToggle,
+  .hunkyard-mode-live #liveModeToggle { display: inline-flex !important; }
+}

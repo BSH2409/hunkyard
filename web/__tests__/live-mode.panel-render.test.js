@@ -171,6 +171,7 @@ test('renderCommentsPanel: empty comments -> "No pins yet" placeholder', () => {
     ctl.renderCommentsPanel();
     assert.equal(panelBody.childNodes.length, 1);
     assert.ok(panelBody.firstChild.classList.contains('comments-panel-empty'));
+    assert.equal(panelBody.firstChild.textContent, 'No pins yet.');
   } finally {
     teardownDom(prev);
   }

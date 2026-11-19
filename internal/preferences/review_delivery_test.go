@@ -87,8 +87,8 @@ func TestReviewWakeExitsTwoOnPublication(t *testing.T) {
 	s := testStore(t)
 	s.hostKind = "claude"
 	withReviews(t, []ReviewNotice{{ReviewID: "aaaaaaaaaaaa"}})
-	reviewWaiter = func(reviewID string, timeout time.Duration, accept func(string) bool, active func() bool) (string, string, bool) {
-		return "batch_9", "request_changes", reviewID == "aaaaaaaaaaaa" && timeout > time.Minute && accept("batch_9") && active()
+	reviewWaiter = func(reviewID, ownerID string, timeout time.Duration, accept func(string) bool, active func() bool) (string, string, bool) {
+		return "batch_9", "request_changes", reviewID == "aaaaaaaaaaaa" && ownerID == "claude:s1" && timeout > time.Minute && accept("batch_9") && active()
 	}
 	code, message := reviewWake(t, s)
 	if code != 2 || !strings.Contains(message, "feedback await --session aaaaaaaaaaaa") {
@@ -104,7 +104,7 @@ func TestReviewWakeWithoutReviewExitsZero(t *testing.T) {
 	s.hostKind = "claude"
 	withReviews(t, nil)
 	called := false
-	reviewWaiter = func(string, time.Duration, func(string) bool, func() bool) (string, string, bool) {
+	reviewWaiter = func(string, string, time.Duration, func(string) bool, func() bool) (string, string, bool) {
 		called = true
 		return "", "", false
 	}
@@ -152,4 +152,22 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return data
+}
+
+func TestReviewWakeSupersededBeforeClaimDoesNotNotify(t *testing.T) {
+	s := testStore(t)
+	s.hostKind = "claude"
+	withReviews(t, []ReviewNotice{{ReviewID: "aaaaaaaaaaaa"}})
+	reviewWaiter = func(reviewID, ownerID string, timeout time.Duration, accept func(string) bool, active func() bool) (string, string, bool) {
+		if err := s.updateSession("s1", func(state *sessionState) { state.WakeToken = "newer-waiter" }); err != nil {
+			t.Fatal(err)
+		}
+		return "batch_9", "comment", true
+	}
+	if code, message := reviewWake(t, s); code != 0 || message != "" {
+		t.Fatalf("superseded wake delivered: %d %s", code, message)
+	}
+	if len(s.loadSession("s1").NotifiedBatchIDs) != 0 {
+		t.Fatal("superseded waiter claimed publication")
+	}
 }
