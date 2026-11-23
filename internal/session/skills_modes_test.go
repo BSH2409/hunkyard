@@ -85,12 +85,24 @@ func TestSkillCatalogOnReviewModes(t *testing.T) {
 					cmd := exec.Command(binary, args...)
 					cmd.Dir = repo
 					cmd.Env = env
+					logPath := filepath.Join(t.TempDir(), "client.log")
+					logFile, err := os.Create(logPath)
+					if err != nil {
+						t.Fatal(err)
+					}
+					cmd.Stdout = logFile
+					cmd.Stderr = logFile
 					if err := cmd.Start(); err != nil {
 						t.Fatal(err)
 					}
 					t.Cleanup(func() {
 						_ = cmd.Process.Kill()
 						_ = cmd.Wait()
+						_ = logFile.Close()
+						if t.Failed() {
+							output, _ := os.ReadFile(logPath)
+							t.Logf("client output: %s", output)
+						}
 					})
 					return cmd
 				}

@@ -356,7 +356,7 @@
     var s = root._decisionState;
     s.list = list || [];
     var openIDs = pages(s.list).map(function (d) { return d.id; });
-    if (openIDs.length) s.sent = [];
+    if (openIDs.some(function (id) { return s.sent.indexOf(id) < 0; })) s.sent = [];
     Object.keys(s.drafts).forEach(function (id) { if (openIDs.indexOf(id) < 0) delete s.drafts[id]; });
     var editing = root.contains(document.activeElement) && document.activeElement.hasAttribute('data-decision-other');
     var next = dockState(s.list, s.seen, root.dataset.state);
