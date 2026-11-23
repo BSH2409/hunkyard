@@ -360,14 +360,15 @@ test('file-level annotations keep their order when Pierre appends a new one afte
   ];
   makeView(fake, {
     annotations: () => annotations,
-    buildAnnotation: (kind, _path, id) => {
+    buildAnnotation: (kind, path, id) => {
+      assert.equal(path, 'a.md');
       const key = kind + ':' + id;
       built[key] = wrap(key, 'annotation-0');
       return built[key].inner;
     },
   }).setFiles([file('a.md')]);
   const ctx = { item: { id: 'a.md' } };
-  annotations.forEach(a => fake.options().renderAnnotation(a, ctx));
+  annotations.forEach(a => fake.options().renderAnnotation(a, { name: 'a.md' }, ctx));
   // Pierre's DOM order: the document first, then the thread and the form appended after it.
   host.appendChild(built['document:a.md'].wrapper);
   host.appendChild(built['thread:t1'].wrapper);

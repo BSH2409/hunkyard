@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/BSH2409/hunkyard/internal/diff"
 	"github.com/BSH2409/hunkyard/internal/feedback"
 	"github.com/BSH2409/hunkyard/internal/session"
+	"github.com/BSH2409/hunkyard/internal/testutil"
 )
 
 func publishForTest(t *testing.T, s *Server) {
@@ -68,6 +71,71 @@ func TestSincePublishedWithoutPublicationFallsBack(t *testing.T) {
 	}
 	if _, ok := out["hunks"]; !ok {
 		t.Fatalf("fallback lost the normal diff: %v", out)
+	}
+}
+
+func TestSincePublishedUnsupportedSelectionKeepsGitComparison(t *testing.T) {
+	dir := testutil.InitTestRepo(t)
+	t.Chdir(dir)
+	testutil.SetHome(t, t.TempDir())
+	file := filepath.Join(dir, "README.md")
+	testutil.WriteFile(t, file, "# Test\ncommitted\n")
+	testutil.Git(t, dir, "commit", "-am", "committed change")
+	commit := testutil.Git(t, dir, "rev-parse", "HEAD")
+	base := testutil.Git(t, dir, "rev-parse", "HEAD^")
+	testutil.WriteFile(t, file, "# Test\ncommitted\nstaged\n")
+	testutil.Git(t, dir, "add", "README.md")
+	testutil.WriteFile(t, file, "# Test\ncommitted\nstaged\nunstaged\n")
+	sess, err := session.NewSessionFromGit(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(sess.QuiesceForTest)
+	s, err := NewServer(sess, frontendFS, "", "test", 0, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	publishForTest(t, s)
+
+	for _, test := range []struct {
+		name, query, want string
+		rangeFocus        bool
+	}{
+		{"staged scope", "&scope=staged", "staged", false},
+		{"selected commit", "&commit=" + commit, "committed", false},
+		{"range focus", "", "committed", true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if test.rangeFocus {
+				if err := sess.SetFocus(session.Focus{Kind: session.FocusRange, BaseSHA: base, HeadSHA: commit}); err != nil {
+					t.Fatal(err)
+				}
+			}
+			rec := httptest.NewRecorder()
+			s.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/file/diff?path=README.md&since=published"+test.query, nil))
+			if rec.Code != http.StatusOK {
+				t.Fatalf("since diff: %d %s", rec.Code, rec.Body)
+			}
+			var response struct {
+				Hunks                  []diff.DiffHunk
+				SinceUnavailable       bool   `json:"since_unavailable"`
+				SinceUnavailableReason string `json:"since_unavailable_reason"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+				t.Fatal(err)
+			}
+			var changes []string
+			for _, hunk := range response.Hunks {
+				for _, line := range hunk.Lines {
+					if line.Type == "add" && line.Content != "# Test" {
+						changes = append(changes, line.Content)
+					}
+				}
+			}
+			if !response.SinceUnavailable || response.SinceUnavailableReason != "unsupported_comparison" || len(changes) != 1 || changes[0] != test.want {
+				t.Fatalf("want unsupported comparison with only %q added, got %s", test.want, rec.Body)
+			}
+		})
 	}
 }
 

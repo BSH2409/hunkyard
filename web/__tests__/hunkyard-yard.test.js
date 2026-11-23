@@ -208,9 +208,11 @@ test('Run maintenance lives in the Pipeline toolbar, on the right, and explains 
   assert.match(ready, /class="yard-tools-end"[\s\S]*data-yard-action="maintenance"/);
   assert.match(ready, /Consolidate 2 captured · 3 candidates/);
   assert.doesNotMatch(ready, /disabled/);
+  assert.match(ready, /btn-primary/);
   const idle = yard.pipelineToolbarHTML({ captured: [], candidate: 0 });
   assert.match(idle, /data-yard-action="maintenance"[^>]*disabled/);
   assert.match(idle, /Nothing waiting for maintenance/);
+  assert.doesNotMatch(idle, /btn-primary/);
   assert.doesNotMatch(yard.pipelineHTML({ captured: [{ id: 'o1', excerpt: 'x' }], candidate: 1, active: 0, retired: 0 }, []), /data-yard-action="maintenance"/, 'the board itself no longer carries the button');
 });
 
@@ -275,6 +277,21 @@ test('insights view explains an empty window', () => {
 
 test('insights toolbar marks the chosen window', () => {
   const html = yard.insightsToolbarHTML(90);
+  assert.match(html, /class="[^"]*scope-toggle/);
   assert.match(html, /data-yard-days="90"[^>]*aria-pressed="true"/);
   assert.equal((html.match(/data-yard-days=/g) || []).length, 4);
+});
+
+
+test('health rows provide expandable check-specific steps and escape diagnostics', () => {
+  const checks = ['store', 'legacy_store', 'claude_hooks', 'codex_hooks', 'codex_trust', 'maintenance', 'cron'];
+  const html = yard.healthHTML({ checks: checks.map(name => ({ name, status: 'warn', detail: '<unsafe>' })), guards: [{ kind: 'staged_paths', status: 'fail', failure: 'example failed' }] });
+  assert.equal((html.match(/<details class="yard-health-item"/g) || []).length, 8);
+  assert.match(html, /hunkyard preferences install-hook --host codex --json/);
+  assert.match(html, /hunkyard preferences install-hook --host claude --json/);
+  assert.match(html, /hunkyard preferences install-cron --json/);
+  assert.match(html, /hunkyard preferences guard test --json/);
+  assert.match(html, /data-yard-copy[^>]*aria-label="Copy command"/);
+  assert.match(html, /&lt;unsafe&gt;/);
+  assert.doesNotMatch(html, /<unsafe>/);
 });

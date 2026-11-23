@@ -95,14 +95,17 @@ test.describe.serial('Rendered Diff — Git Mode', () => {
     await expect(split.locator('.line-block.diff-removed').filter({ hasText: 'API key authentication' })).toHaveCount(1);
     await expect(split.locator('.line-block.diff-added').filter({ hasText: 'token authentication' })).toHaveCount(1);
 
-    await page.locator('#diffModeToggle .toggle-btn[data-mode="unified"]').click();
+    const layout = page.getByRole('group', { name: 'Diff layout' });
+    await expect(layout.getByRole('button', { name: 'Split', pressed: true, exact: true })).toBeVisible();
+    await layout.getByRole('button', { name: 'Unified', pressed: false }).click();
+    await expect(layout.getByRole('button', { name: 'Unified', pressed: true })).toBeVisible();
     const unified = section.locator('.diff-view-unified');
     await expect(unified).toBeVisible();
     await expect(section.locator('.diff-view')).toHaveCount(0);
     await expect(unified.locator('.line-block.diff-removed').filter({ hasText: 'API key authentication' })).toHaveCount(1);
     await expect(unified.locator('.line-block.diff-added').filter({ hasText: 'token authentication' })).toHaveCount(1);
 
-    await page.locator('#diffModeToggle .toggle-btn[data-mode="split"]').click();
+    await layout.getByRole('button', { name: 'Split', pressed: false, exact: true }).click();
     await expect(section.locator('.diff-view')).toBeVisible();
 
     // An After block takes comments.

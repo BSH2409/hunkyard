@@ -62,7 +62,7 @@
     var html = '';
     html += '<div class="shortcuts-toolbar">';
     html += '<span>Click a shortcut, then press its new keys. Backspace disables it.</span>';
-    html += '<button type="button" class="shortcut-reset-all">Reset all</button>';
+    html += '<button type="button" class="btn btn-sm shortcut-reset-all">Reset all</button>';
     html += '</div>';
 
     var shownSections = {};

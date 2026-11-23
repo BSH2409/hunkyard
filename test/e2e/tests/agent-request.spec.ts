@@ -32,7 +32,7 @@ test.describe('Return feedback to the launching CLI', () => {
     await textarea.fill('Describe the problem and how we fix it');
     await expect(page.locator('#reviewConversation .btn-agent')).toHaveCount(0);
     const publication = page.waitForResponse(r => r.url().includes('/api/finish') && r.request().method() === 'POST');
-    await page.locator('#reviewConversation .btn-primary').click();
+    await page.getByRole('button', { name: 'Send message', exact: true }).click();
     await expect(page.locator('#reviewConversation .comment-card')).toContainText('Describe the problem and how we fix it');
     const result = await (await publication).json();
     expect(result.batch.comments.some((c: {body: string; scope: string}) => c.scope === 'review' && c.body === 'Describe the problem and how we fix it')).toBe(true);

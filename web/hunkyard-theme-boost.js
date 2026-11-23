@@ -161,10 +161,13 @@
       var hex = parse(value, backgrounds[0]);
       return hex ? lighten(hex, backgrounds, TOKEN_CONTRAST, up) : value;
     };
-    (copy.settings || copy.tokenColors || []).forEach(function(rule) {
+    var tokens = copy.textmate || copy;
+    if (copy.textmate) tokens.name = name;
+    (tokens.settings || tokens.tokenColors || []).forEach(function(rule) {
       if (rule.settings && rule.settings.foreground) rule.settings.foreground = fix(rule.settings.foreground);
     });
-    if (copy.fg) copy.fg = fix(copy.fg);
+    if (tokens.fg) tokens.fg = fix(tokens.fg);
+    if (copy.fg && tokens !== copy) copy.fg = fix(copy.fg);
     if (copy.colors && copy.colors['editor.foreground']) copy.colors['editor.foreground'] = fix(copy.colors['editor.foreground']);
     return copy;
   }

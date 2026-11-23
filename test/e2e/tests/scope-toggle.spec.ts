@@ -40,8 +40,8 @@ test.beforeEach(async ({ request }) => {
 test.describe('Scope Toggle', () => {
   test('scope toggle is visible in git mode with All active and Branch offered on a feature branch', async ({ page }) => {
     await loadPage(page);
-    await expect(page.locator('#scopeToggle')).toBeVisible();
-    await expect(scopeBtn(page, 'all')).toHaveClass(/active/);
+    const scope = page.getByRole('group', { name: 'Change scope' });
+    await expect(scope.getByRole('button', { name: 'All', pressed: true, exact: true })).toBeVisible();
     await expect(scopeBtn(page, 'branch')).toBeVisible();
   });
 
@@ -62,8 +62,8 @@ test.describe('Scope Toggle', () => {
   test('staged scope shows only staged files in pane and tree, survives a reload, and All restores the full list', async ({ page }) => {
     await loadPage(page);
     await switchScope(page, 'staged');
-    // Only the clicked button is active.
-    await expect(scopeBtn(page, 'all')).not.toHaveClass(/active/);
+    await expect(scopeBtn(page, 'all')).toHaveAttribute('aria-pressed', 'false');
+    await expect(scopeBtn(page, 'staged')).toHaveAttribute('aria-pressed', 'true');
     // Staged: utils.go, login.feature
     await expect(paneFiles(page)).toHaveCount(2);
     await expect(fileHeader(page, 'utils.go')).toBeVisible();
@@ -74,7 +74,7 @@ test.describe('Scope Toggle', () => {
     // Scope persists across reload.
     await page.reload();
     await expect(page.locator('.loading')).toBeHidden();
-    await expect(scopeBtn(page, 'staged')).toHaveClass(/active/);
+    await expect(scopeBtn(page, 'staged')).toHaveAttribute('aria-pressed', 'true');
     await expect(paneFiles(page)).toHaveCount(2);
     await expect(fileHeader(page, 'utils.go')).toBeVisible();
 
@@ -91,6 +91,33 @@ test.describe('Scope Toggle', () => {
     // Unstaged: config.yaml only
     await expect(paneFiles(page)).toHaveCount(1);
     await expect(fileHeader(page, 'config.yaml')).toBeVisible();
+  });
+
+  test('Since last review requires All, including when a restricted scope is restored', async ({ page }) => {
+    await loadPage(page);
+    const comparison = page.getByRole('group', { name: 'Diff comparison' });
+    const since = comparison.getByRole('button', { name: 'Since last review' });
+    const full = comparison.getByRole('button', { name: 'Full diff' });
+    await since.click();
+    await expect(since).toHaveAttribute('aria-pressed', 'true');
+
+    await page.keyboard.press('Shift+Digit3');
+    await expect(since).toBeDisabled();
+    await expect(since).toHaveAccessibleDescription('Choose All.');
+    await expect(full).toHaveAttribute('aria-pressed', 'true');
+
+    await page.reload();
+    await expect(scopeBtn(page, 'staged')).toHaveAttribute('aria-pressed', 'true');
+    await expect(since).toBeDisabled();
+    await page.keyboard.press('Shift+Digit2');
+    await expect(scopeBtn(page, 'branch')).toHaveAttribute('aria-pressed', 'true');
+    await expect(since).toBeDisabled();
+    await page.keyboard.press('Shift+Digit4');
+    await expect(scopeBtn(page, 'unstaged')).toHaveAttribute('aria-pressed', 'true');
+    await expect(since).toBeDisabled();
+    await page.keyboard.press('Shift+Digit1');
+    await expect(since).toBeEnabled();
+    await expect(full).toHaveAttribute('aria-pressed', 'true');
   });
 
   test('unavailable scopes are disabled, not hidden, and clicking one does nothing', async ({ page }) => {

@@ -597,3 +597,10 @@ func TestPlanReviewHooks_SendPlanHookName(t *testing.T) {
 		})
 	}
 }
+
+func TestResolvePlanConfigSkillsFile(t *testing.T) {
+	pc := resolvePlanConfig([]string{"plan.md", "--skills-file", "/tmp/skills.json"})
+	if pc.filePath != "plan.md" || pc.skillsFile != "/tmp/skills.json" {
+		t.Fatalf("plan config = %+v", pc)
+	}
+}

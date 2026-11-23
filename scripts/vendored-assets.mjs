@@ -19,31 +19,31 @@ export function hashAsset(path) {
 export const vendoredAssets = [
   {
     path: "web/dompurify.min.js",
-    sources: ["dompurify@3.4.16"],
+    sources: ["dompurify@3.5.0"],
     packagePath: "dist/purify.min.js",
     kind: "copy",
   },
   {
     path: "web/markdown-it.min.js",
-    sources: ["markdown-it@15.0.2"],
+    sources: ["markdown-it@15.0.3"],
     packagePath: "dist/browser/markdown-it.umd.min.js",
     kind: "copy",
   },
   {
     path: "web/snapdom.min.js",
-    sources: ["@zumer/snapdom@3.3.5"],
+    sources: ["@zumer/snapdom@3.7.6"],
     packagePath: "dist/snapdom.js",
     kind: "copy",
   },
   {
     path: "web/mermaid.min.js",
-    sources: ["mermaid@12.1.0"],
+    sources: ["mermaid@12.3.0"],
     packagePath: "dist/mermaid.min.js",
     kind: "copy",
   },
   {
     path: "web/katex",
-    sources: ["katex@0.19.0"],
+    sources: ["katex@0.19.1"],
     packagePath: "-",
     kind: "generated",
   },
@@ -61,7 +61,7 @@ export const vendoredAssets = [
   },
   {
     path: "web/pierre",
-    sources: ["@pierre/diffs@1.5.2", "shiki@4.5.0", "@shikijs/themes@4.5.0", "esbuild@0.28.2"],
+    sources: ["@pierre/diffs@1.6.4", "shiki@4.6.0", "@shikijs/themes@4.6.0", "esbuild@0.28.2"],
     packagePath: "-",
     kind: "generated",
   },
