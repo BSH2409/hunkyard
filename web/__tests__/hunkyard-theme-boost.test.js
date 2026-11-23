@@ -88,3 +88,11 @@ test('parseColor reads hex, rgb() and rgba() flattened onto the background', () 
   assert.equal(boost.parseColor('rgba(255, 255, 255, 0.5)', '#000000'), '#808080');
   assert.equal(boost.parseColor('color-mix(in srgb, red, blue)', '#000000'), null);
 });
+
+test('boosts token colors in a resolved TextMate theme', () => {
+  const theme = { name: 'light', type: 'light', bg: '#ffffff', textmate: { name: 'light', settings: [{ settings: { foreground: '#c2c3c5' } }] } };
+  const result = boost.boostTheme(theme, 'light--boost');
+  assert.notEqual(result.textmate.settings[0].settings.foreground, '#c2c3c5');
+  assert.equal(result.textmate.name, 'light--boost');
+  assert.equal(theme.textmate.settings[0].settings.foreground, '#c2c3c5');
+});
