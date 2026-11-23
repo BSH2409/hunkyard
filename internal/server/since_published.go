@@ -9,21 +9,22 @@ import (
 	"github.com/BSH2409/hunkyard/internal/session"
 )
 
+// Published snapshots contain whole file contents, which only match the unpinned All comparison.
+func sincePublishedComparisonSupported(sess *Session, scope, commit string) bool {
+	sess.RLock()
+	defer sess.RUnlock()
+	return (scope == "" || scope == "all") && commit == "" && sess.Focus.Kind != FocusRange
+}
+
 // serveSinceDiff answers /api/file/diff?since=published: the file's changes
-// since the reviewer last published, instead of since the base ref. Before
-// the first publication it returns the normal diff with since_unavailable.
-func (s *Server) serveSinceDiff(w http.ResponseWriter, r *http.Request, path string) {
-	sess := s.session.Load()
-	normal, ok := sess.GetFileDiffSnapshotScoped(path, "", "", r.URL.Query().Get("w") == "1")
-	if !ok {
-		http.Error(w, "File not found", http.StatusNotFound)
-		return
-	}
+// since the reviewer last published. Before the first publication it returns
+// the requested comparison with since_unavailable.
+func (s *Server) serveSinceDiff(w http.ResponseWriter, sess *Session, path string, fullDiff map[string]any) {
 	snapshot, ok := s.latestPublishedSnapshot()
 	current, found := sess.GetFileSnapshot(path)
 	if !ok || !found {
-		normal["since_unavailable"] = true
-		writeJSON(w, normal)
+		fullDiff["since_unavailable"] = true
+		writeJSON(w, fullDiff)
 		return
 	}
 	content, _ := current["content"].(string)

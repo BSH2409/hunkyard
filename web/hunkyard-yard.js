@@ -153,7 +153,7 @@
       ? 'Consolidate ' + captured + ' captured · ' + candidates + ' candidate' + (candidates === 1 ? '' : 's')
       : 'Nothing waiting for maintenance';
     return '<span class="yard-tools-status" data-yard-tools-status role="status"></span>' +
-      '<div class="yard-tools-end"><button type="button" class="btn btn-sm btn-primary yard-maintenance" data-yard-action="maintenance"' +
+      '<div class="yard-tools-end"><button type="button" class="btn btn-sm' + (ready ? ' btn-primary' : '') + ' yard-maintenance" data-yard-action="maintenance"' +
       (ready ? '' : ' disabled title="Nothing is captured or waiting as a candidate"') + '>' + esc(label) + '</button></div>';
   }
 
@@ -242,7 +242,7 @@
   }
 
   function insightsToolbarHTML(days) {
-    return '<div class="yard-filter" role="group" aria-label="Window">' + INSIGHT_WINDOWS.map(function (w) {
+    return '<div class="scope-toggle" role="group" aria-label="Window">' + INSIGHT_WINDOWS.map(function (w) {
       var on = w[0] === days;
       return '<button type="button" class="toggle-btn' + (on ? ' active' : '') + '" data-yard-days="' + w[0] + '" aria-pressed="' + on + '">' + w[1] + '</button>';
     }).join('') + '</div>';
@@ -298,6 +298,53 @@
 
   var CHECK_ORDER = { fail: 0, warn: 1 };
 
+  var HEALTH_STEPS = {
+    store: [
+      ['Inspect the store audit and resolve the reported errors.', 'hunkyard preferences audit --json'],
+      ['Check the setup again.', 'hunkyard preferences doctor --json'],
+    ],
+    legacy_store: [
+      ['Inspect the old and current store paths shown above. Stop older Hunkyard processes and preserve any data you need before removing the old store.'],
+      ['Check the setup again.', 'hunkyard preferences doctor --json'],
+    ],
+    claude_hooks: [
+      ['Install the Claude hooks. Existing unrelated settings are preserved.', 'hunkyard preferences install-hook --host claude --json'],
+      ['Verify the hook events.', 'hunkyard preferences doctor --json'],
+    ],
+    codex_hooks: [
+      ['Install the Codex hooks. Existing unrelated settings are preserved.', 'hunkyard preferences install-hook --host codex --json'],
+      ['Inspect and trust the installed commands in Codex’s /hooks view.'],
+      ['Verify the hook events.', 'hunkyard preferences doctor --json'],
+    ],
+    codex_trust: [
+      ['Open /hooks in Codex, inspect the Hunkyard commands, and trust them there. Trust cannot be set from this page.'],
+      ['Review the installed hook status.', 'hunkyard preferences doctor --json'],
+    ],
+    maintenance: [
+      ['Inspect the last maintenance status and the error shown above.', 'hunkyard preferences status --json'],
+      ['To enable automatic maintenance, add preferences_maintenance.host with value "codex" or "claude" to the existing global ~/.hunkyard.config.json. Preserve its other settings.'],
+      ['Inspect the pending work without applying it.', 'hunkyard preferences maintain --dry-run --json'],
+      ['Check the setup again.', 'hunkyard preferences doctor --json'],
+    ],
+    cron: [
+      ['Install the hourly maintenance check in your crontab.', 'hunkyard preferences install-cron --json'],
+      ['Check the setup again.', 'hunkyard preferences doctor --json'],
+    ],
+    guard: [
+      ['Inspect guard examples and failures.', 'hunkyard preferences guard test --json'],
+      ['Update the affected guard and its matching and non-matching examples for the intended behavior, then run the test again.'],
+    ],
+  };
+
+  function healthRow(title, dot, detail, steps) {
+    var icons = typeof window !== 'undefined' && window.hunkyard && window.hunkyard.icons;
+    return '<li><details class="yard-health-item"><summary class="yard-row">' + dot +
+      '<span class="yard-row-main"><span class="yard-row-title">' + esc(title) + '</span><span class="yard-row-meta">' + esc(detail) + '</span></span>' +
+      '<span class="yard-health-chevron" aria-hidden="true">›</span></summary><ol class="yard-health-steps">' + steps.map(function (step) {
+        return '<li>' + esc(step[0]) + (step[1] ? '<div class="yard-health-command"><pre><code>' + esc(step[1]) + '</code></pre><button type="button" class="config-card-copy updates-command-copy" data-yard-copy aria-label="Copy command" title="Copy command">' + (icons ? icons.ICON_COPY_PATH : '') + '</button></div>' : '') + '</li>';
+      }).join('') + '</ol></details></li>';
+  }
+
   function healthHTML(health) {
     health = health || {};
     var attention = attentionCount(health);
@@ -306,7 +353,11 @@
     });
     var html = '<p class="yard-health-summary' + (attention ? ' needs-attention' : '') + '">' + (attention ? attention + ' need attention' : 'Everything is healthy') + '</p>';
     html += '<ul class="yard-list">' + checks.map(function (c) {
-      return '<li class="yard-row">' + statusDot(c.status, CHECK_LABELS[c.status] || c.status) + '<div class="yard-row-main"><div class="yard-row-title">' + esc(String(c.name).replace(/_/g, ' ')) + '</div><div class="yard-row-meta">' + esc(c.detail) + '</div></div></li>';
+      var steps = HEALTH_STEPS[c.name] || [['Inspect the current diagnostics.', 'hunkyard preferences doctor --json']];
+      if (c.name === 'store' && String(c.detail).includes('no_current_generation')) {
+        steps = [['No preference generation exists yet. Add your first real rule in This review, or capture a preference through your normal agent workflow.'], ['Verify the store after creating a rule.', 'hunkyard preferences audit --json']];
+      }
+      return healthRow(String(c.name).replace(/_/g, ' '), statusDot(c.status, CHECK_LABELS[c.status] || c.status), c.detail, steps);
     }).join('') + '</ul>';
     var guards = health.guards || [];
     if (guards.length) {
@@ -323,7 +374,7 @@
           dot = statusDot('ok', 'Passing');
           detail = g.examples + ' example' + (g.examples === 1 ? '' : 's') + ' pass';
         }
-        return '<li class="yard-row">' + dot + '<div class="yard-row-main"><div class="yard-row-title">' + esc(g.kind) + '</div><div class="yard-row-meta">' + esc(detail) + '</div></div></li>';
+        return healthRow(g.kind, dot, detail, HEALTH_STEPS.guard);
       }).join('') + '</ul>';
     }
     return html;
@@ -559,8 +610,20 @@
     }
 
     root.addEventListener('click', function (event) {
-      var target = event.target.closest('[data-yard-view],[data-yard-action],[data-persona-file],[data-yard-days]');
+      var target = event.target.closest('[data-yard-view],[data-yard-action],[data-persona-file],[data-yard-days],[data-yard-copy]');
       if (!target) return;
+      if (target.hasAttribute('data-yard-copy')) {
+        var command = target.parentElement.querySelector('code').textContent;
+        if (!navigator.clipboard || !navigator.clipboard.writeText) { announce('Could not copy command'); return; }
+        navigator.clipboard.writeText(command).then(function () {
+          var originalIcon = target.innerHTML;
+          target.innerHTML = window.hunkyard.icons.ICON_COPY_PATH_CHECK;
+          target.setAttribute('aria-label', 'Copied');
+          announce('Command copied');
+          setTimeout(function () { target.innerHTML = originalIcon; target.setAttribute('aria-label', 'Copy command'); }, 1500);
+        }).catch(function () { announce('Could not copy command'); });
+        return;
+      }
       if (target.hasAttribute('data-yard-days')) { state.insightsDays = Number(target.getAttribute('data-yard-days')); show('insights'); return; }
       if (target.hasAttribute('data-yard-view')) { show(target.getAttribute('data-yard-view')); return; }
       if (target.hasAttribute('data-persona-file')) { showPersonaFile(target); return; }

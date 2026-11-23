@@ -2,14 +2,14 @@
   "name": "hunkyard",
   "private": true,
   "dependencies": {
-    "@pierre/diffs": "1.5.2",
+    "@pierre/diffs": "1.6.4",
     "@sanity/diff-match-patch": "3.2.1",
-    "@zumer/snapdom": "3.3.5",
-    "dompurify": "3.4.16",
+    "@zumer/snapdom": "3.7.6",
+    "dompurify": "3.5.0",
     "gemoji": "8.1.0",
-    "katex": "0.19.0",
-    "markdown-it": "15.0.2",
-    "mermaid": "12.1.0"
+    "katex": "0.19.1",
+    "markdown-it": "15.0.3",
+    "mermaid": "12.3.0"
   },
   "scripts": {
     "update-deps": "node copy-deps.js",
@@ -22,8 +22,8 @@
   },
   "devDependencies": {
     "esbuild": "0.28.2",
-    "eslint": "10.12.0",
-    "shiki": "4.5.0",
-    "stylelint": "17.16.0"
+    "eslint": "10.15.0",
+    "shiki": "4.6.0",
+    "stylelint": "18.0.0"
   }
 }

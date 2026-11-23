@@ -3,8 +3,8 @@
   "files": [
     {
       "path": "web/snapdom.min.js",
-      "gzipBytes": 100000,
-      "note": "SnapDOM 3.3.5 for pin screenshots; injected only into live/preview frames"
+      "gzipBytes": 125000,
+      "note": "SnapDOM 3.7.6 for pin screenshots; injected only into live/preview frames"
     },
     {
       "path": "web/mermaid.min.js",
@@ -18,7 +18,7 @@
     },
     {
       "path": "web/pierre/pierre-worker.js.gz",
-      "gzipBytes": 128000,
+      "gzipBytes": 600000,
       "note": "Pierre/Shiki highlight worker (stored precompressed)"
     },
     {
@@ -67,5 +67,5 @@
   ],
   "totalJsGzipBytes": 2300000,
   "binaryBytes": 25165824,
-  "pierreDirBytes": 1650000
+  "pierreDirBytes": 3050000
 }

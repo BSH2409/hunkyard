@@ -756,7 +756,9 @@
       fetch(diffUrl, { signal }).then(function(r) { return r.ok ? r.json() : { hunks: [] }; }).catch(function() { return { hunks: [] }; }),
     ]);
     if (signal && signal.aborted) return null;
-    if (sinceReview && diffRes.since_unavailable) sinceUnavailable = true;
+    if (sinceReview && diffRes.since_unavailable && sinceFallbackReason !== 'unsupported_comparison') {
+      sinceFallbackReason = diffRes.since_unavailable_reason || 'no_publication';
+    }
     const content = Object.prototype.hasOwnProperty.call(diffRes, 'content')
       ? diffRes.content
       : (fileRes.content || '');
@@ -1186,9 +1188,7 @@
     // In file mode, it gets shown later via updateDiffModeToggle() once diffs exist
     if (session.mode === 'git') {
       document.getElementById('diffModeToggle').style.display = '';
-      document.querySelectorAll('#diffModeToggle .toggle-btn').forEach(function(b) {
-        b.classList.toggle('active', b.dataset.mode === diffMode);
-      });
+      setReviewToggleSelection('diffModeToggle', 'mode', diffMode);
       document.getElementById('tocToggle').style.display = 'none';
 
       // Show scope toggle and hide unavailable scopes
@@ -1227,11 +1227,10 @@
         session = corrected;
         reviewComments = corrected.review_comments || [];
       }
-      scopeToggle.querySelectorAll('.toggle-btn').forEach(function(b) {
-        b.classList.toggle('active', b.dataset.scope === diffScope);
-      });
+      setReviewToggleSelection('scopeToggle', 'scope', diffScope);
 
       updateCompareAndCommitChrome();
+      updateSinceReviewAvailability();
     }
 
     setUpdatesBanner(!!session.stale);
@@ -1264,14 +1263,20 @@
     updateDiffModeToggle();
   }
 
+  function setReviewToggleSelection(id, optionKey, activeOption) {
+    document.querySelectorAll('#' + id + ' .toggle-btn').forEach(function(button) {
+      const selected = button.dataset[optionKey] === activeOption;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+  }
+
   // Show/hide the Toggle Diff button and Split/Unified toggle in file mode
   function updateDiffModeToggle() {
     if (storyActive()) {
       document.querySelector('.header-right').insertBefore(document.getElementById('diffModeToggle'), document.getElementById('settingsToggle'));
       document.getElementById('diffModeToggle').style.display = '';
-      document.querySelectorAll('#diffModeToggle .toggle-btn').forEach(function(b) {
-        b.classList.toggle('active', b.dataset.mode === diffMode);
-      });
+      setReviewToggleSelection('diffModeToggle', 'mode', diffMode);
       return;
     }
     document.getElementById('reviewToolbar').appendChild(document.getElementById('diffModeToggle'));
@@ -1288,9 +1293,7 @@
     document.getElementById('diffModeToggle').style.display = (hasDiffs && diffActive) ? '' : 'none';
     document.getElementById('reviewToolbar').hidden = files.length === 1 && !(hasDiffs && diffActive);
     if (hasDiffs && diffActive) {
-      document.querySelectorAll('#diffModeToggle .toggle-btn').forEach(function(b) {
-        b.classList.toggle('active', b.dataset.mode === diffMode);
-      });
+      setReviewToggleSelection('diffModeToggle', 'mode', diffMode);
     }
   }
 
@@ -6337,7 +6340,7 @@
     title.append(heading, members);
     header.appendChild(title);
     const options = document.createElement('button');
-    options.type = 'button'; options.id = 'reviewChatSend'; options.className = 'review-chat-options';
+    options.type = 'button'; options.id = 'reviewChatSend'; options.className = 'btn btn-primary review-chat-options';
     options.textContent = 'Review changes';
     window.hunkyard.shared.lockFinishBtnIfStopped(options);
     options.addEventListener('click', function() {
@@ -7264,7 +7267,7 @@
       if (!target) return;
       const real = (list || []).filter(function(c) { return !c.virtual; });
       target.innerHTML = real.length ? real.map(function(c) {
-        return '<li><code>' + escapeHtml(c.short_sha) + '</code> ' + escapeHtml(c.message) + ' <span class="overview-muted">' + escapeHtml(c.author || '') + '</span></li>';
+        return '<li class="overview-commit"><code>' + escapeHtml(c.short_sha) + '</code><div class="overview-commit-details"><span>' + escapeHtml(c.message) + '</span>' + (c.author ? '<span class="overview-muted">' + escapeHtml(c.author) + '</span>' : '') + '</div></li>';
       }).join('') : '<li class="overview-muted">No commits beyond the base; only working changes.</li>';
     }).catch(function() {
       const target = body.querySelector('.overview-commit-list');
@@ -7475,9 +7478,14 @@
     const reviewDraft = document.querySelector('#reviewConversation .comment-form textarea, #reviewConversation .review-chat-composer textarea');
     const replyDraft = Array.from(activeReplyForms.values()).some(function (form) { return (form.text || '').trim(); });
     if (!draft && !replyDraft && !(reviewDraft && reviewDraft.value.trim())) return true;
-    showMiniToast(reviewDraft && reviewDraft.closest('.review-chat-composer') && reviewDraft.value.trim() ? 'Send or clear your chat message before reviewing changes.' : 'Save or cancel your draft comment before submitting the review.');
-    const textarea = draft ? formTextarea(draft.formKey) : reviewDraft || document.querySelector('.comment-form textarea');
-    if (textarea) textarea.focus();
+    if (reviewDraft && reviewDraft.closest('.review-chat-composer') && reviewDraft.value.trim()) {
+      showMiniToast('Send or clear your chat message before reviewing changes.');
+      setReviewChatOpen(true);
+    } else {
+      showMiniToast('Save or cancel your draft comment before submitting the review.');
+      const textarea = draft ? formTextarea(draft.formKey) : reviewDraft || document.querySelector('.comment-form textarea');
+      if (textarea) textarea.focus();
+    }
     return false;
   }
 
@@ -7734,6 +7742,7 @@
         let sessionRes = await hydrateStoryIfMissing(await fetchWhenReady('/api/session?scope=' + enc(fetchScope())));
         sessionRes = await hydrateFullSessionForStoryIfNeeded(sessionRes);
         session = sessionRes;
+        updateSinceReviewAvailability();
         reviewComments = sessionRes.review_comments || [];
 
         // Reload all files
@@ -8230,9 +8239,7 @@
       if (mode === diffMode) return;
       diffMode = mode;
       setSetting('diffMode', mode);
-      document.querySelectorAll('#diffModeToggle .toggle-btn').forEach(function(b) {
-        b.classList.toggle('active', b.dataset.mode === mode);
-      });
+      setReviewToggleSelection('diffModeToggle', 'mode', mode);
       if (storyActive()) renderStory(); else renderAllFiles();
     });
   });
@@ -8291,12 +8298,7 @@
     } else if (scopes.indexOf(diffScope) === -1) {
       diffScope = 'all';
     }
-    const scopeToggle = document.getElementById('scopeToggle');
-    if (scopeToggle) {
-      scopeToggle.querySelectorAll('.toggle-btn').forEach(function(b) {
-        b.classList.toggle('active', b.dataset.scope === diffScope);
-      });
-    }
+    setReviewToggleSelection('scopeToggle', 'scope', diffScope);
   }
 
   function compareTargetChromeVisible() {
@@ -8894,21 +8896,50 @@
     if (ref) selectCompareTarget(ref);
   });
 
-  // ===== Since Toggle (All changes / Since last review) =====
-  let sinceUnavailable = false;
-  document.getElementById('sinceToggle').addEventListener('click', async function(e) {
+  // ===== Since Toggle (Full diff / Since last review) =====
+  const sinceToggle = document.getElementById('sinceToggle');
+  const sinceReviewButton = sinceToggle.querySelector('[data-since="published"]');
+  const sinceReviewHint = document.getElementById('sinceReviewHint');
+  let sinceFallbackReason = '';
+
+  function updateSinceReviewAvailability() {
+    if (session.mode !== 'git') return;
+    let hint = '';
+    if (sessionInRangeFocus()) {
+      hint = 'Switch to the working tree.';
+    } else if (diffScope !== 'all') {
+      hint = 'Choose All.';
+    } else if (diffCommit) {
+      hint = 'Choose All commits.';
+    }
+    if (hint && document.activeElement === sinceReviewButton) {
+      sinceToggle.querySelector('[data-since="all"]').focus();
+    }
+    sinceReviewButton.disabled = !!hint;
+    sinceReviewHint.hidden = !hint;
+    sinceReviewHint.textContent = hint;
+    if (hint && sinceReview) {
+      sinceReview = false;
+      setReviewToggleSelection('sinceToggle', 'since', 'all');
+      window.hunkyard.shared.showToast('Showing the full diff. ' + hint);
+    }
+  }
+
+  sinceToggle.addEventListener('click', async function(e) {
     const btn = e.target.closest('.toggle-btn');
-    if (!btn || btn.classList.contains('active')) return;
+    if (!btn || btn.disabled || btn.classList.contains('active')) return;
     sinceReview = btn.dataset.since === 'published';
-    sinceUnavailable = false;
+    sinceFallbackReason = '';
     navCommentId = null;
-    document.querySelectorAll('#sinceToggle .toggle-btn').forEach(function(b) {
-      b.classList.toggle('active', b === btn);
-      b.setAttribute('aria-pressed', String(b === btn));
-    });
+    setReviewToggleSelection('sinceToggle', 'since', btn.dataset.since);
     await reloadForScope();
-    if (sinceReview && sinceUnavailable) {
-      window.hunkyard.shared.showToast('No review published yet, so all changes are shown.');
+    if (!sinceReview || !sinceFallbackReason) return;
+    if (sinceFallbackReason === 'unsupported_comparison') {
+      sinceReview = false;
+      setReviewToggleSelection('sinceToggle', 'since', 'all');
+      window.hunkyard.shared.showToast('Showing the full diff. For Since last review, switch to the working tree, choose All, and clear any commit selection.');
+    } else {
+      window.hunkyard.shared.showToast('No review published yet. Showing the full diff.');
     }
   });
 
@@ -8923,9 +8954,7 @@
     if (scope !== 'all' && scope !== 'branch') {
       clearCommitPins();
     }
-    document.querySelectorAll('#scopeToggle .toggle-btn').forEach(function(b) {
-      b.classList.toggle('active', b.dataset.scope === scope);
-    });
+    setReviewToggleSelection('scopeToggle', 'scope', scope);
     updateCompareAndCommitChrome();
     await reloadForScope();
   });
@@ -8970,14 +8999,8 @@
       diffScope = 'all';
       sinceReview = false;
       setSetting('diffScope', diffScope);
-      document.querySelectorAll('#scopeToggle .toggle-btn').forEach(function(btn) {
-        btn.classList.toggle('active', btn.dataset.scope === 'all');
-      });
-      document.querySelectorAll('#sinceToggle .toggle-btn').forEach(function(btn) {
-        const active = btn.dataset.since !== 'published';
-        btn.classList.toggle('active', active);
-        btn.setAttribute('aria-pressed', String(active));
-      });
+      setReviewToggleSelection('scopeToggle', 'scope', diffScope);
+      setReviewToggleSelection('sinceToggle', 'since', 'all');
       updateCompareAndCommitChrome();
       await reloadForScope();
       refreshed = true;
@@ -8991,6 +9014,7 @@
   });
 
   function reloadForScope() {
+    updateSinceReviewAvailability();
     const diffFetchMode = ignoreWhitespace && !storyNeedsRawDiff() ? 'filtered' : 'raw';
     const key = fetchScope() + '\0' + fetchScope() + '\0' + diffCommit + '\0' + diffFetchMode + '\0' + sinceReview;
     return scopeReloader.start(key);
@@ -9019,6 +9043,7 @@
       // hash, so invalidate them before loading the new scoped file data.
       storyExpandedFileCache.clear();
       session = sessionRes;
+      updateSinceReviewAvailability();
       reviewComments = sessionRes.review_comments || [];
       setUpdatesBanner(!!session.stale);
 
@@ -9754,7 +9779,7 @@
         break;
       }
       case 'scope_all': case 'scope_branch': case 'scope_staged': case 'scope_unstaged': {
-        if (session.mode !== 'git') break;
+        if (session.mode !== 'git' || sessionInRangeFocus()) break;
         const scopeMap = { scope_all: 'all', scope_branch: 'branch', scope_staged: 'staged', scope_unstaged: 'unstaged' };
         const scope = scopeMap[shortcutAction];
         const btn = document.querySelector('#scopeToggle .toggle-btn[data-scope="' + scope + '"]');

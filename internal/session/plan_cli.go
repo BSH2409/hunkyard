@@ -19,6 +19,7 @@ import (
 type planConfig struct {
 	name                        string
 	filePath                    string
+	skillsFile                  string
 	stdinExpected               bool
 	port                        int
 	host                        string
@@ -32,6 +33,7 @@ type planConfig struct {
 func resolvePlanConfig(args []string) planConfig {
 	fs := flag.NewFlagSet("plan", flag.ExitOnError)
 	name := fs.String("name", "", "Plan name/slug for session identification")
+	skillsFile := fs.String("skills-file", "", "Host-supplied local skill manifest")
 	port := fs.Int("port", 0, "Port to listen on")
 	fs.IntVar(port, "p", 0, "Port (shorthand)")
 	host := fs.String("host", "", "Host to listen on")
@@ -53,6 +55,7 @@ func resolvePlanConfig(args []string) planConfig {
 
 	pc := planConfig{
 		name:                        *name,
+		skillsFile:                  *skillsFile,
 		port:                        *port,
 		host:                        *host,
 		publicURL:                   *publicURL,
@@ -155,6 +158,10 @@ func RunPlan(args []string) error {
 		Quiet:                       quiet,
 	})
 
+	if pc.skillsFile != "" {
+		daemonArgs = append(daemonArgs, "--skills-file", pc.skillsFile)
+	}
+
 	entry, weStartedDaemon, err := connectOrStartDaemon(key, daemonArgs, noOpenResolved, cfg.OpenCmd, quiet)
 	if err != nil {
 		return err
@@ -162,6 +169,10 @@ func RunPlan(args []string) error {
 
 	if weStartedDaemon {
 		installDaemonSignalHandler(entry.PID)
+	} else if pc.skillsFile != "" {
+		if err := daemon.RegisterSkills(entry, key, pc.skillsFile); err != nil {
+			return err
+		}
 	}
 
 	approved := daemon.RunReviewClient(entry, key, quiet)

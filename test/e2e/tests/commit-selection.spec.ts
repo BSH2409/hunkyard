@@ -45,6 +45,9 @@ test.describe('Commit Selection', () => {
 
   test('from and through pins filter the review and "All commits" clears them', async ({ page }) => {
     await loadPage(page);
+    const since = page.getByRole('button', { name: 'Since last review' });
+    await since.click();
+    await expect(since).toHaveAttribute('aria-pressed', 'true');
     await openCommitPicker(page);
     const commits = realCommitItems(page);
     await expect(commits).toHaveCount(2);
@@ -55,6 +58,9 @@ test.describe('Commit Selection', () => {
     await expect(label(page)).toContainText('only');
     await expect(commits.first()).toHaveClass(/is-from/);
     await expect(allItem(page)).not.toHaveClass(/active/);
+    await expect(since).toBeDisabled();
+    await expect(since).toHaveAccessibleDescription('Choose All commits.');
+    await expect(page.getByRole('button', { name: 'Full diff' })).toHaveAttribute('aria-pressed', 'true');
     // Auth commit touches six files (skill.md included, branch fixture);
     // handler.js (other commit) and the uncommitted files drop out.
     await expect(page.locator('.tree-file')).toHaveCount(6);
@@ -67,6 +73,8 @@ test.describe('Commit Selection', () => {
     // "All commits" restores the full view.
     await pick(page, allItem(page));
     await expect(label(page)).toHaveText('All commits');
+    await expect(since).toBeEnabled();
+    await expect(since).toHaveAttribute('aria-pressed', 'false');
 
     // List is newest-first: older commit as from, Alt+click the newer as
     // through — a range request, and the dropdown stays open across both.
@@ -156,4 +164,23 @@ test.describe('Commit Selection', () => {
     await expect(fileHeader(page, 'deleted.txt')).toBeVisible();
     await expect(page.locator('#finishBtn')).toHaveText('Review changes');
   });
+});
+
+test('pinned comparison banner aligns with diff cards at different widths', async ({ page, request }) => {
+  await clearAllComments(request);
+  await loadPage(page);
+  await openCommitPicker(page);
+  await pick(page, realCommitItems(page).first());
+  await page.keyboard.press('Escape');
+  const banner = page.locator('#reviewUpdatesBanner');
+  await expect(banner).toBeVisible();
+  const card = page.locator('diffs-container[data-hunkyard-path="legacy.go"]');
+  await expect(card.locator('.pierre-file-header')).toBeVisible();
+  for (const width of [1440, 1000]) {
+    await page.setViewportSize({ width, height: 900 });
+    await expect.poll(async () => {
+      const [bannerBox, cardBox] = await Promise.all([banner.boundingBox(), card.boundingBox()]);
+      return [Math.round(bannerBox!.x - cardBox!.x), Math.round(bannerBox!.x + bannerBox!.width - cardBox!.x - cardBox!.width)];
+    }).toEqual([0, 0]);
+  }
 });

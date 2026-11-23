@@ -41,10 +41,16 @@ func LooksLikePreviewArgs(args []string) bool {
 	return !info.IsDir()
 }
 
-func connectToPreviewDaemon(key string, noOpen bool, openCmd string, quiet bool) bool {
+func connectToPreviewDaemon(key string, noOpen bool, openCmd string, quiet bool, skillsFile string) bool {
 	entry, alive := daemon.FindAliveSession(key)
 	if !alive {
 		return false
+	}
+	if skillsFile != "" {
+		if err := daemon.RegisterSkills(entry, key, skillsFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Error registering host skills: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	if !quiet {
 		fmt.Fprintf(os.Stderr, "[hunkyard] connected to preview daemon at %s\n", entry.BaseURL())
@@ -66,6 +72,7 @@ func RunPreview(args []string) {
 	host := fs.String("host", "", "Host to listen on")
 	publicURL := fs.String("public-url", "", "Advertised base URL (overrides HUNKYARD_PUBLIC_URL)")
 	allowUnauthNet := fs.Bool(config.AllowUnauthenticatedNetworkFlag, false, "Allow non-loopback listen or public_url without authentication")
+	skillsFile := fs.String("skills-file", "", "Host-supplied local skill manifest")
 	quiet := fs.Bool("quiet", false, "On success, suppress connect/start status, tips, and session summary")
 	fs.BoolVar(quiet, "q", false, "On success, suppress status (shorthand)")
 	// Keep in sync with the fs.Bool/fs.BoolVar registrations above.
@@ -112,11 +119,14 @@ func RunPreview(args []string) {
 	}
 
 	key := PreviewSessionKey(cwd, absPath)
-	if connectToPreviewDaemon(key, noOpenResolved, cfg.OpenCmd, quietResolved) {
+	if connectToPreviewDaemon(key, noOpenResolved, cfg.OpenCmd, quietResolved, *skillsFile) {
 		return
 	}
 
 	daemonArgs := buildPreviewStartArgs(absPath, *port, *host, *publicURL, *allowUnauthNet || config.EnvAllowsUnauthenticatedNetwork(), noOpenResolved, quietResolved, cfg)
+	if *skillsFile != "" {
+		daemonArgs = append(daemonArgs, "--skills-file", *skillsFile)
+	}
 	entry, err := daemon.StartDaemon(key, daemonArgs)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: could not start preview daemon: %v\n", err)

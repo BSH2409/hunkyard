@@ -99,7 +99,7 @@ test.describe('Review interface cleanup', () => {
     await page.locator('#finishBtn').click();
     const dialog = page.getByRole('dialog', { name: 'Submit review', exact: true });
     await expect(dialog.getByRole('group', { name: 'Skills to apply' })).toBeVisible();
-    await expect(dialog.getByRole('checkbox')).toHaveCount(5);
+    await expect(dialog.getByRole('checkbox')).toHaveCount(8);
     await expect(dialog.getByRole('button', { name: 'Submit review', exact: true })).toBeVisible();
     await expect.poll(() => dialog.evaluate(el => {
       const box = el.getBoundingClientRect();
@@ -118,4 +118,54 @@ test.describe('Review interface cleanup', () => {
     await expect(page.locator('#aboutPane').getByRole('link', { name: 'Project source' })).toHaveAttribute('href', 'https://github.com/BSH2409/hunkyard');
     await expect(page.locator('#aboutPane').getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', 'https://github.com/BSH2409/hunkyard#readme');
   });
+});
+
+test('recommended skills reflect the launching agent catalog', async ({ page, request }) => {
+  await clearAllComments(request);
+  await page.route('**/api/skills', route => route.fulfill({ json: { skills: [
+    { id: 'superpowers:brainstorming', name: 'superpowers:brainstorming' },
+    { id: 'naming', name: 'Naming Analyzer' },
+  ] } }));
+  await loadPage(page);
+  await page.locator('#finishBtn').click();
+  const dialog = page.getByRole('dialog', { name: 'Submit review', exact: true });
+  await expect(dialog.getByRole('checkbox', { name: 'superpowers:brainstorming' })).toBeEnabled();
+  await expect(dialog.getByRole('checkbox', { name: 'Naming Analyzer' })).toBeEnabled();
+  await expect(dialog.getByRole('checkbox', { name: /Hunkyard Preferences/ })).toBeDisabled();
+  await expect(dialog.getByRole('checkbox', { name: /Impeccable/ })).toBeDisabled();
+  await expect(dialog.getByLabel('Recommended', { exact: true })).toHaveCount(2);
+  await dialog.getByRole('checkbox', { name: 'Naming Analyzer' }).check();
+  await page.keyboard.press('Escape');
+  await page.locator('#finishBtn').click();
+  await expect(dialog.getByRole('checkbox', { name: 'Naming Analyzer' })).toBeChecked();
+});
+
+test('an empty catalog displays four disabled recommendations', async ({ page, request }) => {
+  await clearAllComments(request);
+  await page.route('**/api/skills', route => route.fulfill({ json: { skills: [] } }));
+  await loadPage(page);
+  await page.locator('#finishBtn').click();
+  const skills = page.getByRole('group', { name: 'Skills to apply' });
+  await expect(skills.getByRole('checkbox')).toHaveCount(4);
+  await expect(skills.getByRole('checkbox', { disabled: true })).toHaveCount(4);
+  await expect(skills.getByLabel('Recommended', { exact: true })).toHaveCount(4);
+});
+
+test('offered recommendations are selectable without duplicates', async ({ page, request }) => {
+  await clearAllComments(request);
+  await page.route('**/api/skills', route => route.fulfill({ json: { skills: [
+    { id: 'superpowers:brainstorming', name: 'superpowers:brainstorming' },
+    { id: 'naming-analyzer', name: 'Naming Analyzer' },
+    { id: 'hunkyard-preferences', name: 'Hunkyard Preferences' },
+    { id: 'impeccable:impeccable', name: 'impeccable:impeccable' },
+  ] } }));
+  await loadPage(page);
+  await page.locator('#finishBtn').click();
+  const skills = page.getByRole('group', { name: 'Skills to apply' });
+  await expect(skills.getByRole('checkbox')).toHaveCount(4);
+  await expect(skills.getByRole('checkbox', { disabled: true })).toHaveCount(0);
+  for (const checkbox of await skills.getByRole('checkbox').all()) await checkbox.check();
+  const selected = await page.locator('#publishSkills').evaluate(container =>
+    Array.from(container.querySelectorAll<HTMLInputElement>('input[name="review-skill"]:checked')).map(input => input.value));
+  expect(selected).toEqual(['superpowers:brainstorming', 'naming-analyzer', 'hunkyard-preferences', 'impeccable:impeccable']);
 });

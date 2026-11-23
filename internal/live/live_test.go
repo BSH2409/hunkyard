@@ -630,7 +630,7 @@ func TestConnectToLiveDaemon_LaunchesBrowserWhenNoneAttached(t *testing.T) {
 		return false
 	}
 
-	if !connectToLiveDaemon(key, false, "custom-open", false) {
+	if !connectToLiveDaemon(key, false, "custom-open", false, "") {
 		t.Fatal("connectToLiveDaemon returned false")
 	}
 	if !clientRan {
@@ -682,7 +682,7 @@ func TestConnectToLiveDaemon_RespectsNoOpen(t *testing.T) {
 	}
 	runLiveClient = func(daemon.SessionEntry, string, bool) bool { return false }
 
-	if !connectToLiveDaemon(key, true, "custom-open", false) {
+	if !connectToLiveDaemon(key, true, "custom-open", false, "") {
 		t.Fatal("connectToLiveDaemon returned false")
 	}
 	if browserOpenCalls != 0 {
@@ -1489,7 +1489,7 @@ func TestConnectToLiveDaemon_QuietSuppressesStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	os.Stderr = w
-	ok := connectToLiveDaemon(key, true, "", true)
+	ok := connectToLiveDaemon(key, true, "", true, "")
 	w.Close()
 	os.Stderr = old
 	var buf bytes.Buffer
@@ -1525,5 +1525,12 @@ func TestSmokeSlowServerWarnsInsteadOfFailing(t *testing.T) {
 	closed.Close()
 	if got := runSmokeTest(url, ""); !got.fatal || got.kind != smokeConnRefused {
 		t.Fatalf("refused connection = %+v, want fatal", got)
+	}
+}
+
+func TestParseLiveCLIFlagsSkillsFile(t *testing.T) {
+	flags := parseLiveCLIFlags([]string{"http://localhost:3000", "--skills-file", "/tmp/skills.json"})
+	if flags.origin != "http://localhost:3000" || flags.skillsFile != "/tmp/skills.json" {
+		t.Fatalf("live flags = %+v", flags)
 	}
 }

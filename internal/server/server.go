@@ -1046,14 +1046,10 @@ func (s *Server) handleFileDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if served := serveFileDiffAtRound(w, r, s.session.Load(), path); served {
+	sess := s.session.Load()
+	if served := serveFileDiffAtRound(w, r, sess, path); served {
 		return
 	}
-	if r.URL.Query().Get("since") == "published" {
-		s.serveSinceDiff(w, r, path)
-		return
-	}
-
 	scope := r.URL.Query().Get("scope")
 	commit := r.URL.Query().Get("commit")
 	if !session.ValidCommitSelection(commit) {
@@ -1061,12 +1057,20 @@ func (s *Server) handleFileDiff(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ignoreWS := r.URL.Query().Get("w") == "1"
-	snapshot, ok := s.session.Load().GetFileDiffSnapshotScoped(path, scope, commit, ignoreWS)
+	fullDiff, ok := sess.GetFileDiffSnapshotScoped(path, scope, commit, ignoreWS)
 	if !ok {
 		http.Error(w, "File not found", http.StatusNotFound)
 		return
 	}
-	writeJSON(w, snapshot)
+	if r.URL.Query().Get("since") == "published" {
+		if sincePublishedComparisonSupported(sess, scope, commit) {
+			s.serveSinceDiff(w, sess, path, fullDiff)
+			return
+		}
+		fullDiff["since_unavailable"] = true
+		fullDiff["since_unavailable_reason"] = "unsupported_comparison"
+	}
+	writeJSON(w, fullDiff)
 }
 
 // serveFileDiffAtRound writes a per-round diff response when the request

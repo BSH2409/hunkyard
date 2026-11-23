@@ -26,6 +26,20 @@ Safe to re-run. Existing files are skipped (use `--force` to overwrite).
 | Codex | `hunkyard install codex` | `.agents/skills/hunkyard{,-cli,-story}/SKILL.md` | `~/.agents/skills/hunkyard{,-cli,-story}/SKILL.md` |
 | Codex plugin | `hunkyard install codex-plugin` | loose skills + marketplace + `plugins/hunkyard/` (incl. hunkyard-story) | `~/.agents/` + `~/.codex/plugins/hunkyard/` |
 
+## Recommended skills
+
+These optional skills complement Hunkyard's review workflow. The **Skills to apply**
+box lists skills offered by the launching agent. Recommendations the agent has
+not offered appear disabled. Install a skill and start a new review with an agent
+that has it available to select it.
+
+- **[Superpowers](https://github.com/obra/superpowers)** provides workflows for planning, implementation, debugging, and code review.
+- **[Naming Analyzer](https://github.com/softaworks/agent-toolkit/tree/main/skills/naming-analyzer)** reviews identifiers for clear, consistent names. The version used in Hunkyard development has local customizations.
+- **[Hunkyard Preferences](./preferences/SKILL.md)** captures reusable guidance from review feedback and applies it in later sessions. Install it with `hunkyard install --global preferences`. See the [preferences guide](../docs/guide.md#go-backed-coding-preferences) for setup and supported platforms.
+- **[Impeccable](https://github.com/pbakaus/impeccable)** helps audit and refine frontend design, accessibility, and responsive behavior.
+
+Follow each external project's installation instructions for your agent.
+
 ## Plugin marketplace (Claude Code)
 
 For the full experience, install via the plugin marketplace. This gives you:

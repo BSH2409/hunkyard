@@ -37,6 +37,20 @@ test('conversation fits a narrow viewport and closes with Escape', async ({ page
   await expect(page.locator('#reviewChatToggle')).toBeFocused();
 });
 
+test('reviewing changes reveals and focuses a draft in the closed chat', async ({ page }) => {
+  await loadPage(page);
+  await page.locator('#reviewChatToggle').click();
+  const composer = page.locator('#reviewConversation .review-chat-composer textarea');
+  await composer.fill('Keep this draft');
+  await page.locator('.review-chat-close').click();
+  await expect(page.locator('#reviewChatPanel')).toBeHidden();
+  await page.locator('#finishBtn').click();
+  await expect(page.locator('#reviewChatPanel')).toBeVisible();
+  await expect(composer).toHaveValue('Keep this draft');
+  await expect(composer).toBeFocused();
+  await expect(page.locator('#publishReviewDialog')).toBeHidden();
+});
+
 test('conversation sends through the existing review publication flow', async ({ page, request }) => {
   await expect(await request.post('/api/comments', { data: { body: 'Please check the dependency' } })).toBeOK();
   await loadPage(page);

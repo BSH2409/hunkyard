@@ -154,20 +154,21 @@
       <div class="review-toolbar-title"><strong id="filesChangedTitle">Files changed</strong><span class="review-file-count" id="filesChangedCount"></span></div>
       <span class="viewed-count" id="viewedCount"></span>
       <button type="button" class="btn btn-sm" id="singleFileToggle" aria-pressed="false">Single file</button>
-    <div class="scope-toggle" id="scopeToggle" style="display:none">
-      <button class="toggle-btn active" data-scope="all" title="All changes">All</button>
-      <button class="toggle-btn" data-scope="branch" title="Committed changes">Branch</button>
-      <button class="toggle-btn" data-scope="staged" title="Staged changes">Staged</button>
-      <button class="toggle-btn" data-scope="unstaged" title="Unstaged changes">Unstaged</button>
-    </div>
-    <div class="scope-toggle" id="sinceToggle" style="display:none" role="group" aria-label="Compare against">
-      <button class="toggle-btn active" data-since="all" aria-pressed="true" title="Changes against the base branch">All changes</button>
-      <button class="toggle-btn" data-since="published" aria-pressed="false" title="Only what changed since you last published a review">Since last review</button>
-    </div>
-    <div class="diff-mode-toggle" id="diffModeToggle" style="display:none">
-      <button class="toggle-btn active" data-mode="split" title="Split diff">Split</button>
-      <button class="toggle-btn" data-mode="unified" title="Unified diff">Unified</button>
-    </div>
+      <div class="scope-toggle" id="scopeToggle" style="display:none" role="group" aria-label="Change scope">
+        <button class="toggle-btn active" data-scope="all" aria-pressed="true" title="All changes">All</button>
+        <button class="toggle-btn" data-scope="branch" aria-pressed="false" title="Committed changes">Branch</button>
+        <button class="toggle-btn" data-scope="staged" aria-pressed="false" title="Staged changes">Staged</button>
+        <button class="toggle-btn" data-scope="unstaged" aria-pressed="false" title="Unstaged changes">Unstaged</button>
+      </div>
+      <div class="scope-toggle" id="sinceToggle" style="display:none" role="group" aria-label="Diff comparison">
+        <button class="toggle-btn active" data-since="all" aria-pressed="true" title="Show the full diff for the current scope and comparison target">Full diff</button>
+        <button class="toggle-btn" data-since="published" aria-pressed="false" aria-describedby="sinceReviewHint" title="Only what changed since you last published a review">Since last review</button>
+      </div>
+      <div class="diff-mode-toggle" id="diffModeToggle" style="display:none" role="group" aria-label="Diff layout">
+        <button class="toggle-btn active" data-mode="split" aria-pressed="true" title="Split diff">Split</button>
+        <button class="toggle-btn" data-mode="unified" aria-pressed="false" title="Unified diff">Unified</button>
+      </div>
+      <span class="since-review-hint" id="sinceReviewHint" hidden></span>
     </div>
     <div class="review-updates-banner" id="reviewUpdatesBanner" role="status" hidden>
       <span id="reviewUpdatesMessage">This review has updates</span>

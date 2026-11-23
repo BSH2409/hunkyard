@@ -9,11 +9,11 @@
 # web/katex holds katex.min.js, the woff2 fonts and a stylesheet rewritten to point at them; web/gemoji.min.js is GitHub's shortcode table.
 #
 # sha256 path npm-sources path-in-package kind
-2c90a9b46d6463f26038a29b686e82bc91de01fdac9d5229e7cfe3b360134ea2 web/dompurify.min.js dompurify@3.4.16 dist/purify.min.js copy
-635972b985228e8af9f0143647c68616b7a3bb09f6946e7e4a52e43dcf5e7be5 web/markdown-it.min.js markdown-it@15.0.2 dist/browser/markdown-it.umd.min.js copy
-70ca3a3dfc9233de787ef1fc1ca982f717622904321677b75d968144c9b14a9f web/snapdom.min.js @zumer/snapdom@3.3.5 dist/snapdom.js copy
-6484afc32872a3aa16cac9a76ba1816a1ed4cc870a6593cc2e17757750f518b2 web/mermaid.min.js mermaid@12.1.0 dist/mermaid.min.js copy
-e8119d4ccd162c5cd5cc3c58b9229abcd962ddbdbc8e1fcc746ed7ccdd3d426f web/katex katex@0.19.0 - generated
+f69a46022ab1f53e969c8ebbca98172c8995785a9b3be72ea4a12d25b1a1bf67 web/dompurify.min.js dompurify@3.5.0 dist/purify.min.js copy
+391f2aa638e75e6c7859d0a5c5650ef0956722a45998f17e05b83bc655778e1e web/markdown-it.min.js markdown-it@15.0.3 dist/browser/markdown-it.umd.min.js copy
+290265863f3e4aa1e5ca5912f92f8a1e739c32ad42f76c28fee32f1bbe9daf8b web/snapdom.min.js @zumer/snapdom@3.7.6 dist/snapdom.js copy
+336df803d87a38b70a01e736e666c8f7601d2ce42f5e47c8fafe5d721074b9a3 web/mermaid.min.js mermaid@12.3.0 dist/mermaid.min.js copy
+1b0df3528a64775df2406f05899573d874a302886949d1c945940df92b325ece web/katex katex@0.19.1 - generated
 1377eba51803cd2455c3a048ea9ce8d8a3d38d42a8ac2d3074f752fa5ee510d8 web/gemoji.min.js gemoji@8.1.0 - generated
 85535fef664d09befcafe5d45eb2fcaa83d84eb91058c68aa8f5e2a58aefc662 web/diff-match-patch.min.js @sanity/diff-match-patch@3.2.1,esbuild@0.28.2 - generated
-60e065c88f6b5acf4319af7e42548b83c8d29366f05cf2072a00f7c8d94f4eba web/pierre @pierre/diffs@1.5.2,shiki@4.5.0,@shikijs/themes@4.5.0,esbuild@0.28.2 - generated
+a04d2130607d8662a1e11f9ee97058c259984bf2282d9260294776a3eb08786e web/pierre @pierre/diffs@1.6.4,shiki@4.6.0,@shikijs/themes@4.6.0,esbuild@0.28.2 - generated

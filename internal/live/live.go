@@ -161,10 +161,16 @@ func LooksLikeLiveArgs(args []string) bool {
 	return u.Scheme == "http" || u.Scheme == "https"
 }
 
-func connectToLiveDaemon(key string, noOpen bool, openCmd string, quiet bool) bool {
+func connectToLiveDaemon(key string, noOpen bool, openCmd string, quiet bool, skillsFile string) bool {
 	entry, alive := daemon.FindAliveSession(key)
 	if !alive {
 		return false
+	}
+	if skillsFile != "" {
+		if err := daemon.RegisterSkills(entry, key, skillsFile); err != nil {
+			fmt.Fprintf(os.Stderr, "Error registering host skills: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	if !quiet {
 		fmt.Fprintf(os.Stderr, "[hunkyard] connected to live daemon at %s (proxy :%d)\n",
@@ -189,6 +195,7 @@ type liveCLIFlags struct {
 	cookieFile                  string
 	cdpURL                      string
 	origin                      string
+	skillsFile                  string
 }
 
 func parseLiveCLIFlags(args []string) liveCLIFlags {
@@ -205,6 +212,7 @@ func parseLiveCLIFlags(args []string) liveCLIFlags {
 	fs.Var(&cookieFlags, "cookie", "Cookie header value for upstream requests (repeatable)")
 	cookieFile := fs.String("cookie-file", "", "File with upstream cookies (raw header or Netscape jar)")
 	cdpURL := fs.String("cdp-url", "", "Chrome DevTools URL (e.g. http://127.0.0.1:9222) to reuse browser cookies")
+	skillsFile := fs.String("skills-file", "", "Host-supplied local skill manifest")
 	// Keep in sync with the fs.Bool/fs.BoolVar registrations above.
 	args = clicmd.ReorderFlagsFirst(args, map[string]bool{
 		config.AllowUnauthenticatedNetworkFlag: true,
@@ -242,12 +250,16 @@ func parseLiveCLIFlags(args []string) liveCLIFlags {
 		cookieFlags:                 cookieFlags,
 		cookieFile:                  *cookieFile,
 		cdpURL:                      *cdpURL,
+		skillsFile:                  *skillsFile,
 		origin:                      strings.TrimSuffix(u.String(), "/"),
 	}
 }
 
 func buildLiveDaemonArgs(origin, liveCookies string, f liveCLIFlags, cfg config.Config, noOpenResolved bool) []string {
 	daemonArgs := []string{"--live-origin", origin}
+	if f.skillsFile != "" {
+		daemonArgs = append(daemonArgs, "--skills-file", f.skillsFile)
+	}
 	if liveCookies != "" {
 		daemonArgs = append(daemonArgs, "--live-cookie", liveCookies)
 	}
@@ -274,7 +286,7 @@ func RunLive(args []string) {
 	key := daemon.LiveSessionKey(cwd, f.origin)
 	noOpenResolved := f.noOpen || cfg.NoOpen
 	quiet := f.quiet || cfg.Quiet
-	if connectToLiveDaemon(key, noOpenResolved, cfg.OpenCmd, quiet) {
+	if connectToLiveDaemon(key, noOpenResolved, cfg.OpenCmd, quiet, f.skillsFile) {
 		return
 	}
 
@@ -286,7 +298,7 @@ func RunLive(args []string) {
 
 	checkLiveSmoke(f.origin, liveCookies)
 
-	if connectToLiveDaemon(key, noOpenResolved, cfg.OpenCmd, quiet) {
+	if connectToLiveDaemon(key, noOpenResolved, cfg.OpenCmd, quiet, f.skillsFile) {
 		return
 	}
 

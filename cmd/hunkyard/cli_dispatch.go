@@ -94,6 +94,7 @@ Options:
       --public-url <url>   Advertised base URL
       --allow-unauthenticated-network
                            Allow non-loopback --host or --public-url
+      --skills-file FILE   Trusted skill catalog supplied by the launching host
       --cookie <value>     Forward a Cookie header
       --cookie-file <path> Read cookies from a file
       --cdp-url <url>      Reuse cookies from Chrome DevTools
@@ -109,6 +110,7 @@ Options:
       --public-url <url>  Advertised base URL
       --allow-unauthenticated-network
                           Allow non-loopback --host or --public-url
+      --skills-file FILE  Trusted skill catalog supplied by the launching host
       --no-open           Do not open a browser
   -q, --quiet             On success, suppress connect/start status, tips, and session summary`},
 	{name: "plan", handler: runPlan, help: `Usage: hunkyard plan [--name <slug>] [options] <file>
@@ -127,6 +129,7 @@ Options:
       --allow-unauthenticated-network
                           Allow non-loopback --host or --public-url
   -p, --port <port>       Port to listen on
+      --skills-file FILE  Trusted skill catalog supplied by the launching host
       --no-open           Do not open a browser
       --no-wait           Save the version and exit; do not start a review
   -q, --quiet             On success, suppress connect/start status, tips, and session summary`},
