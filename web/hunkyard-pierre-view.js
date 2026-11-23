@@ -214,7 +214,7 @@
       return context && context.item ? context.item.id : null;
     }
 
-    function renderAnnotation(annotation, context) {
+    function renderAnnotation(annotation, file, context) {
       var m = annotation.metadata;
       var key = m.kind + ':' + m.id;
       var el = elements.get(key);
