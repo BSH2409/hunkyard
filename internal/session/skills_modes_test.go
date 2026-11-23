@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -71,7 +72,7 @@ func TestSkillCatalogOnReviewModes(t *testing.T) {
 					}
 					next.Close()
 				}
-				args := []string{mode, target, "--host", "127.0.0.1", "--port", fmt.Sprint(port), "--no-open"}
+				args := []string{mode, target, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--no-open"}
 				if mode == "live" {
 					args[1] = upstream.URL
 				}

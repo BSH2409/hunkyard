@@ -64,6 +64,8 @@ func connectToPreviewDaemon(key string, noOpen bool, openCmd string, quiet bool,
 }
 
 // RunPreview starts a preview-mode review of a local HTML file.
+//
+//nolint:gocyclo // Preview startup handles CLI validation and daemon reuse.
 func RunPreview(args []string) {
 	fs := flag.NewFlagSet("preview", flag.ExitOnError)
 	noOpen := fs.Bool("no-open", false, "Don't auto-open browser")
