@@ -75,6 +75,8 @@ func TestSkillCatalogOnReviewModes(t *testing.T) {
 				args := []string{mode, target, "--host", "127.0.0.1", "--port", strconv.Itoa(port), "--no-open"}
 				if mode == "live" {
 					args[1] = upstream.URL
+				} else if mode == "plan" {
+					args = append(args, "--name", "skills-test")
 				}
 				if !reconnect {
 					args = append(args, "--skills-file", manifest)
